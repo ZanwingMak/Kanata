@@ -1,0 +1,27 @@
+{
+  "name": "kanata-gateway",
+  "version": "0.1.0",
+  "description": "Kanata 弹幕网关：统一各平台弹幕获取，对外提供弹弹play v2 兼容接口与 Kanata 扩展接口",
+  "type": "module",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "health": "tsx scripts/health.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "license": "MIT"
+}

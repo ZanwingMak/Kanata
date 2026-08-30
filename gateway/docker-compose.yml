@@ -1,0 +1,16 @@
+services:
+  gateway:
+    build: .
+    image: kanata-gateway:0.1.0
+    container_name: kanata-gateway
+    restart: unless-stopped
+    ports:
+      - "9321:9321"
+    environment:
+      # 公网部署前必须修改
+      TOKEN: "87654321"
+      # 弹弹play 开放平台密钥，未配置时该源不可用
+      DANDANPLAY_APP_ID: ""
+      DANDANPLAY_APP_SECRET: ""
+      DANMAKU_CACHE_TTL_SEC: "43200"
+      LOG_LEVEL: "info"
