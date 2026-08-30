@@ -1,0 +1,383 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		143668390E7F4314EA2B50DA /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054C1F753EBC3CAF4CAB9C4 /* AppSettings.swift */; };
+		230F4EFC9749FD9CBA7B9A66 /* PlayerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54F8F7451DA189DC5B2969CB /* PlayerViewModel.swift */; };
+		8755E5218B5A5740FA3A87C6 /* KanataRender in Frameworks */ = {isa = PBXBuildFile; productRef = 2B1BA21A40301952737E6088 /* KanataRender */; };
+		94A4EB0FDAEC4E23571FDBA1 /* KanataCore in Frameworks */ = {isa = PBXBuildFile; productRef = D0F19C87A69C96ACBF02E301 /* KanataCore */; };
+		9F4DDDA0BF75D781CBE70B52 /* PlayerViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20B5DDBFFBFC71CD4E8BFF5 /* PlayerViews.swift */; };
+		A0DC7C89B456A362447704FB /* PlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D71423032201822DE1CEC33 /* PlayerScreen.swift */; };
+		B8DD7D6499400A064B2CDA19 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E24DE0179BDBA88E26F4FB /* LibraryView.swift */; };
+		C024A5EADFCE8F9980FDE6B4 /* KanataApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F54CA6B81DF75A8D593DBB /* KanataApp.swift */; };
+		CE9E35E870EB0641755C63C3 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BA5EDEB5BE98DBEE96E3EB /* SettingsView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		2054C1F753EBC3CAF4CAB9C4 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		42B14A0149AA61453CC026E8 /* KanataApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KanataApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		54F8F7451DA189DC5B2969CB /* PlayerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerViewModel.swift; sourceTree = "<group>"; };
+		89BA5EDEB5BE98DBEE96E3EB /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		8AC79591E41687EB97713726 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		9D71423032201822DE1CEC33 /* PlayerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerScreen.swift; sourceTree = "<group>"; };
+		AE0B608A17E4D899DDF4C3C0 /* KanataCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = KanataCore; path = ../KanataCore; sourceTree = SOURCE_ROOT; };
+		B20B5DDBFFBFC71CD4E8BFF5 /* PlayerViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerViews.swift; sourceTree = "<group>"; };
+		C7F54CA6B81DF75A8D593DBB /* KanataApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanataApp.swift; sourceTree = "<group>"; };
+		D4E24DE0179BDBA88E26F4FB /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		DB8BB661202EC97429766ACF /* KanataRender */ = {isa = PBXFileReference; lastKnownFileType = folder; name = KanataRender; path = ../KanataRender; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B195997C1485E5C1C45B08B8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				94A4EB0FDAEC4E23571FDBA1 /* KanataCore in Frameworks */,
+				8755E5218B5A5740FA3A87C6 /* KanataRender in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1B71FE72CAA2728400A2797A /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				AE0B608A17E4D899DDF4C3C0 /* KanataCore */,
+				DB8BB661202EC97429766ACF /* KanataRender */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		53810A8AACCFBB05FD1031EE /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				2054C1F753EBC3CAF4CAB9C4 /* AppSettings.swift */,
+				8AC79591E41687EB97713726 /* Info.plist */,
+				C7F54CA6B81DF75A8D593DBB /* KanataApp.swift */,
+				D4E24DE0179BDBA88E26F4FB /* LibraryView.swift */,
+				9D71423032201822DE1CEC33 /* PlayerScreen.swift */,
+				54F8F7451DA189DC5B2969CB /* PlayerViewModel.swift */,
+				B20B5DDBFFBFC71CD4E8BFF5 /* PlayerViews.swift */,
+				89BA5EDEB5BE98DBEE96E3EB /* SettingsView.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		874C40E0B64734BE8679F2A8 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				42B14A0149AA61453CC026E8 /* KanataApp.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B5B9437E1314CC20975540CD = {
+			isa = PBXGroup;
+			children = (
+				1B71FE72CAA2728400A2797A /* Packages */,
+				53810A8AACCFBB05FD1031EE /* Sources */,
+				874C40E0B64734BE8679F2A8 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		70E3A6CD8EC064F6F32FE06D /* KanataApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2B04CC5F69ED70BF653F001C /* Build configuration list for PBXNativeTarget "KanataApp" */;
+			buildPhases = (
+				7D3E7C1B9EEAC80E1C46293D /* Sources */,
+				B195997C1485E5C1C45B08B8 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = KanataApp;
+			packageProductDependencies = (
+				D0F19C87A69C96ACBF02E301 /* KanataCore */,
+				2B1BA21A40301952737E6088 /* KanataRender */,
+			);
+			productName = KanataApp;
+			productReference = 42B14A0149AA61453CC026E8 /* KanataApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1B0A5C168D23DE99F124C8A7 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 3F875C53978E467B37AF9562 /* Build configuration list for PBXProject "KanataApp" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B5B9437E1314CC20975540CD;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				702E29E2AC2D60B16BAAD7C7 /* XCLocalSwiftPackageReference "../KanataCore" */,
+				EFEAB4B1A77F247A1AAA907E /* XCLocalSwiftPackageReference "../KanataRender" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 874C40E0B64734BE8679F2A8 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				70E3A6CD8EC064F6F32FE06D /* KanataApp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7D3E7C1B9EEAC80E1C46293D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				143668390E7F4314EA2B50DA /* AppSettings.swift in Sources */,
+				C024A5EADFCE8F9980FDE6B4 /* KanataApp.swift in Sources */,
+				B8DD7D6499400A064B2CDA19 /* LibraryView.swift in Sources */,
+				A0DC7C89B456A362447704FB /* PlayerScreen.swift in Sources */,
+				230F4EFC9749FD9CBA7B9A66 /* PlayerViewModel.swift in Sources */,
+				9F4DDDA0BF75D781CBE70B52 /* PlayerViews.swift in Sources */,
+				CE9E35E870EB0641755C63C3 /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		32AF00C39BA51062B86A6E3A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		840138A6437D4B3CC429A6EC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Sources/Info.plist;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于连接局域网内的弹幕网关与 NAS 媒体源";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIBackgroundModes = audio;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanata.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C14B6706EBD0B8E591417121 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		DE95D8FF01B11E0BBF813F67 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Sources/Info.plist;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于连接局域网内的弹幕网关与 NAS 媒体源";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UIBackgroundModes = audio;
+				INFOPLIST_KEY_UIFileSharingEnabled = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanata.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2B04CC5F69ED70BF653F001C /* Build configuration list for PBXNativeTarget "KanataApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				840138A6437D4B3CC429A6EC /* Debug */,
+				DE95D8FF01B11E0BBF813F67 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3F875C53978E467B37AF9562 /* Build configuration list for PBXProject "KanataApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				32AF00C39BA51062B86A6E3A /* Debug */,
+				C14B6706EBD0B8E591417121 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		702E29E2AC2D60B16BAAD7C7 /* XCLocalSwiftPackageReference "../KanataCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../KanataCore;
+		};
+		EFEAB4B1A77F247A1AAA907E /* XCLocalSwiftPackageReference "../KanataRender" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../KanataRender;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		2B1BA21A40301952737E6088 /* KanataRender */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = KanataRender;
+		};
+		D0F19C87A69C96ACBF02E301 /* KanataCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = KanataCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1B0A5C168D23DE99F124C8A7 /* Project object */;
+}
