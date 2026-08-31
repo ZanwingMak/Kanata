@@ -44,6 +44,7 @@ private enum PlayerGestureMode {
 /// 播放页。视频、弹幕、控制三层叠加。
 struct PlayerScreen: View {
     let url: URL
+    var requestHeaders: [String: String] = [:]
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -67,6 +68,7 @@ struct PlayerScreen: View {
     #if os(iOS)
     @State private var gestureMode: PlayerGestureMode?
     @State private var gestureStartValue: Double = 0
+    @State private var isLandscapeFullscreen = false
     #endif
 
     var body: some View {
@@ -113,7 +115,7 @@ struct PlayerScreen: View {
         .kanataStatusBarHidden()
         .task {
             wireCallbacks()
-            await viewModel.open(url: url, settings: settings)
+            await viewModel.open(url: url, settings: settings, requestHeaders: requestHeaders)
             if case .ready = viewModel.state {
                 viewModel.play()
                 isPlaying = true
@@ -128,6 +130,11 @@ struct PlayerScreen: View {
             osdTask?.cancel()
             controlsTask?.cancel()
             viewModel.teardown()
+            #if os(iOS)
+            if isLandscapeFullscreen {
+                PlayerOrientationController.requestLandscape(false) { _ in }
+            }
+            #endif
         }
         .sheet(isPresented: $isShowingDanmakuPanel) {
             DanmakuSettingsPanel(
@@ -292,6 +299,20 @@ struct PlayerScreen: View {
                         .lineLimit(2)
                 }
                 Spacer()
+                #if os(iOS)
+                Button {
+                    toggleLandscapeFullscreen()
+                } label: {
+                    controlSymbol(
+                        isLandscapeFullscreen
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right",
+                        prominent: false
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isLandscapeFullscreen ? "退出横屏全屏" : "横屏全屏")
+                #endif
                 Button {
                     isShowingPlaybackPanel = true
                 } label: {
@@ -458,6 +479,19 @@ struct PlayerScreen: View {
         scheduleControlsHide()
     }
 
+    #if os(iOS)
+    /// 切换横屏全屏状态，并在系统拒绝时恢复按钮状态。
+    private func toggleLandscapeFullscreen() {
+        let target = !isLandscapeFullscreen
+        isLandscapeFullscreen = target
+        PlayerOrientationController.requestLandscape(target) { error in
+            isLandscapeFullscreen.toggle()
+            danmakuOperationError = "无法切换屏幕方向：\(error.localizedDescription)"
+        }
+        showOSD(target ? "横屏全屏" : "退出横屏")
+    }
+    #endif
+
     /// 显示一条 1.5 秒后自动淡出的操作反馈
     private func showOSD(_ text: String) {
         osdTask?.cancel()
@@ -550,7 +584,7 @@ struct CandidatePicker: View {
                             HStack(spacing: 8) {
                                 Text(binding.sourceInstanceName ?? binding.source.displayName)
                                 if let episodeTitle = binding.episodeTitle, !episodeTitle.isEmpty {
-                                    Text(episodeTitle)
+                                    Text(normalizedEpisodeTitle(episodeTitle))
                                 }
                             }
                             .font(.caption)
@@ -584,7 +618,7 @@ struct CandidatePicker: View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                            TextField("剧名、BV号或B站播放页链接", text: $keyword)
+                            TextField("剧名、集数或平台播放页链接", text: $keyword)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .onSubmit { Task { await viewModel.search(keyword: keyword) } }
@@ -619,7 +653,7 @@ struct CandidatePicker: View {
                                 HStack(spacing: 8) {
                                     Text(candidate.sourceInstanceName ?? candidate.source.displayName)
                                     if let episodeTitle = candidate.episodeTitle, !episodeTitle.isEmpty {
-                                        Text(episodeTitle)
+                                        Text(normalizedEpisodeTitle(episodeTitle))
                                     }
                                     Text("匹配度 \(Int(candidate.confidence * 100))%")
                                 }
@@ -650,6 +684,23 @@ struct CandidatePicker: View {
                 Text(operationError ?? "未知错误")
             }
         }
+    }
+
+    /// 规范化来源返回的分集标题，确保纯数字结果也明确显示“第几集”。
+    /// - Parameter value: 来源返回的原始分集标题。
+    /// - Returns: 保留已有集号，或为开头数字追加“第 N 集”。
+    private func normalizedEpisodeTitle(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.range(of: #"第\s*\d+\s*[集话]"#, options: .regularExpression) != nil
+            || trimmed.range(of: #"\b(?:EP|E)\s*\d+\b"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            return trimmed
+        }
+        guard let match = trimmed.range(of: #"^\d+(?:\.\d+)?"#, options: .regularExpression) else {
+            return trimmed
+        }
+        let number = String(trimmed[match])
+        let remainder = trimmed[match.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return remainder.isEmpty ? "第 \(number) 集" : "第 \(number) 集 · \(remainder)"
     }
 }
 

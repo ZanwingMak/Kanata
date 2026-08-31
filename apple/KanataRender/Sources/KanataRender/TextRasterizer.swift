@@ -29,24 +29,35 @@ final class TextRasterizer {
         strokeWidth: Double,
         fontName: String?
     ) -> UIImage {
-        let key = "\(text)|\(Int(fontSize))|\(color)|\(bold)|\(Int(strokeWidth))|\(fontName ?? "")" as NSString
+        let key = "\(text)|\(fontSize)|\(color)|\(bold)|\(strokeWidth)|\(fontName ?? "")" as NSString
         if let cached = cache.object(forKey: key) { return cached }
 
-        let font: UIFont
-        if let fontName, let custom = UIFont(name: fontName, size: fontSize) {
-            font = custom
+        let baseFont: UIFont
+        if fontName == "__kanata_system_rounded__",
+           let descriptor = UIFont.systemFont(ofSize: fontSize).fontDescriptor.withDesign(.rounded) {
+            baseFont = UIFont(descriptor: descriptor, size: fontSize)
+        } else if fontName == "__kanata_system_serif__",
+                  let descriptor = UIFont.systemFont(ofSize: fontSize).fontDescriptor.withDesign(.serif) {
+            baseFont = UIFont(descriptor: descriptor, size: fontSize)
+        } else if let fontName, let custom = UIFont(name: fontName, size: fontSize) {
+            baseFont = custom
         } else {
-            font = bold
-                ? UIFont.systemFont(ofSize: fontSize, weight: .bold)
-                : UIFont.systemFont(ofSize: fontSize)
+            baseFont = UIFont.systemFont(ofSize: fontSize, weight: bold ? .bold : .regular)
         }
+        let font = bold && fontName != nil
+            ? UIFont(
+                descriptor: baseFont.fontDescriptor.withSymbolicTraits(.traitBold) ?? baseFont.fontDescriptor,
+                size: fontSize
+            )
+            : baseFont
 
-        // 负的 strokeWidth 表示同时描边与填充
+        // NSAttributedString 的描边值是字号百分比，先把视觉点数换算为百分比。
+        let strokePercent = fontSize > 0 ? strokeWidth / fontSize * 100 : 0
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: Self.uiColor(from: color),
             .strokeColor: UIColor.black.withAlphaComponent(0.85),
-            .strokeWidth: -strokeWidth
+            .strokeWidth: -strokePercent
         ]
         let attributed = NSAttributedString(string: text, attributes: attributes)
         let size = attributed.size()

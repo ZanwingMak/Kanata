@@ -8,6 +8,8 @@ import type { DanmakuSourceId, SourceStatus } from '../types.js';
 import { BilibiliProvider } from './bilibili/index.js';
 import { CustomProvider } from './custom.js';
 import { DandanplayProvider } from './dandanplay.js';
+import { IqiyiProvider } from './iqiyi.js';
+import { QQProvider } from './qq.js';
 import type { DanmakuProvider } from './types.js';
 
 /** 单个源的运行时状态，由探活与实际请求结果更新 */
@@ -125,6 +127,8 @@ export function createRegistry(config: AppConfig): ProviderRegistry {
     }),
   );
   registry.register(new BilibiliProvider());
+  registry.register(new IqiyiProvider());
+  registry.register(new QQProvider());
   if (config.customProviders.instances.some((instance) => instance.enabled)) {
     registry.register(new CustomProvider(config.customProviders));
   }

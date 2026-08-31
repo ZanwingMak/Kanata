@@ -72,13 +72,13 @@ public struct DanmakuRenderConfig: Sendable, Equatable {
 
     public init() {}
 
-    /// 基准字号 25pt 是以 1920 宽为基准的，按实际视图宽度换算，
-    /// 保证 1080p 与 4K 下视觉大小一致（TC-DMK-104）
+    /// 基准字号按 UIKit 逻辑点计算；小屏不再机械缩小，避免手机上只有 12.5pt。
     /// - Parameters:
     ///   - itemFontSize: 弹幕自带的平台字号
     ///   - viewWidth: 渲染视图宽度（点）
     func resolvedFontSize(itemFontSize: Double, viewWidth: Double) -> Double {
-        let widthRatio = max(viewWidth / 1920.0, 0.5)
-        return itemFontSize * fontScale * widthRatio
+        let normalizedSize = min(max(itemFontSize, 18), 42)
+        let largeScreenRatio = max(viewWidth / 1920.0, 1.0)
+        return normalizedSize * fontScale * largeScreenRatio
     }
 }

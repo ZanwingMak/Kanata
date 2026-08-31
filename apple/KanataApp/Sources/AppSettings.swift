@@ -28,6 +28,11 @@ final class AppSettings {
         didSet { defaults.set(builtInBilibiliEnabled, forKey: Keys.builtInBilibiliEnabled) }
     }
 
+    /// 无需部署网关即可使用的爱奇艺与腾讯视频来源开关。
+    var builtInPublicSourcesEnabled: Bool {
+        didSet { defaults.set(builtInPublicSourcesEnabled, forKey: Keys.builtInPublicSourcesEnabled) }
+    }
+
     /// 弹幕渲染配置，播放页直接读写
     var danmakuConfig: DanmakuRenderConfig {
         didSet { persistDanmakuConfig() }
@@ -44,6 +49,7 @@ final class AppSettings {
         static let gatewayURL = "gateway.url"
         static let gatewayToken = "gateway.token"
         static let fontScale = "danmaku.fontScale"
+        static let fontName = "danmaku.fontName"
         static let opacity = "danmaku.opacity"
         static let displayArea = "danmaku.displayArea"
         static let scrollDuration = "danmaku.scrollDuration"
@@ -57,6 +63,7 @@ final class AppSettings {
         static let blockKeywords = "danmaku.blockKeywords"
         static let onlineDanmakuCacheLimitMB = "danmaku.onlineCacheLimitMB"
         static let builtInBilibiliEnabled = "source.bilibili.builtInEnabled"
+        static let builtInPublicSourcesEnabled = "source.public.builtInEnabled"
     }
 
     private enum KeychainAccounts {
@@ -85,6 +92,7 @@ final class AppSettings {
         self.bilibiliUserID = storedCredential?.userID ?? ""
         self.bilibiliBuvid3 = storedCredential?.buvid3 ?? ""
         self.builtInBilibiliEnabled = defaults.object(forKey: Keys.builtInBilibiliEnabled) as? Bool ?? true
+        self.builtInPublicSourcesEnabled = defaults.object(forKey: Keys.builtInPublicSourcesEnabled) as? Bool ?? true
         self.onlineDanmakuCacheLimitMB = max(
             defaults.object(forKey: Keys.onlineDanmakuCacheLimitMB) as? Int ?? 250,
             50
@@ -92,6 +100,7 @@ final class AppSettings {
 
         var config = DanmakuRenderConfig()
         if let scale = defaults.object(forKey: Keys.fontScale) as? Double { config.fontScale = scale }
+        config.fontName = defaults.string(forKey: Keys.fontName)
         if let opacity = defaults.object(forKey: Keys.opacity) as? Double { config.opacity = opacity }
         if let area = defaults.string(forKey: Keys.displayArea),
            let parsed = DanmakuDisplayArea(rawValue: area) { config.displayArea = parsed }
@@ -151,6 +160,13 @@ final class AppSettings {
         return BuiltInBilibiliClient(cookie: bilibiliCookieHeader)
     }
 
+    /// 创建无需网关的爱奇艺与腾讯视频弹幕客户端。
+    /// - Returns: 用户关闭内置公共来源时返回 nil。
+    func makeBuiltInPublicDanmakuClient() -> BuiltInPublicDanmakuClient? {
+        guard builtInPublicSourcesEnabled else { return nil }
+        return BuiltInPublicDanmakuClient()
+    }
+
     /// 组装供内置来源使用的 B 站 Cookie，请求日志不会输出该值。
     private var bilibiliCookieHeader: String {
         [
@@ -196,6 +212,11 @@ final class AppSettings {
     /// 把弹幕配置中需要跨会话保留的项写入存储
     private func persistDanmakuConfig() {
         defaults.set(danmakuConfig.fontScale, forKey: Keys.fontScale)
+        if let fontName = danmakuConfig.fontName {
+            defaults.set(fontName, forKey: Keys.fontName)
+        } else {
+            defaults.removeObject(forKey: Keys.fontName)
+        }
         defaults.set(danmakuConfig.opacity, forKey: Keys.opacity)
         defaults.set(danmakuConfig.displayArea.rawValue, forKey: Keys.displayArea)
         defaults.set(danmakuConfig.scrollDuration, forKey: Keys.scrollDuration)
@@ -227,7 +248,7 @@ final class AppSettings {
 }
 
 /// Apple 平台本地 Keychain 最小封装，凭证不可同步到 iCloud。
-private enum KeychainStore {
+enum KeychainStore {
     private static let service = "com.kanata.app.credentials"
 
     /// 读取指定账号的原始凭证数据。

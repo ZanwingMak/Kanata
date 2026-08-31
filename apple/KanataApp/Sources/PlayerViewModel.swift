@@ -62,6 +62,7 @@ final class PlayerViewModel {
 
     private var client: GatewayClient?
     private var builtInClient: BuiltInBilibiliClient?
+    private var builtInPublicClient: BuiltInPublicDanmakuClient?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var timeControlObservation: NSKeyValueObservation?
@@ -124,15 +125,17 @@ final class PlayerViewModel {
         securityScopedURL = nil
     }
 
-    /// 打开一个本地视频并尝试自动匹配弹幕
+    /// 打开一个本地或网络视频并尝试自动匹配弹幕。
     /// - Parameters:
     ///   - url: 视频文件地址，来自文件选择器
-    ///   - settings: 应用设置，提供网关配置
-    func open(url: URL, settings: AppSettings) async {
+    ///   - settings: 应用设置，提供网关配置。
+    ///   - requestHeaders: WebDAV 或媒体服务器播放所需的临时请求头。
+    func open(url: URL, settings: AppSettings, requestHeaders: [String: String] = [:]) async {
         resetDanmakuState()
         state = .preparing("正在读取视频…")
         client = settings.makeClient()
         builtInClient = settings.makeBuiltInBilibiliClient()
+        builtInPublicClient = settings.makeBuiltInPublicDanmakuClient()
         onlineCacheLimitBytes = Int64(settings.onlineDanmakuCacheLimitMB) * 1024 * 1024
         mediaKey = url.absoluteString
         mediaInfo.source = url.isFileURL ? "本地文件" : (url.host ?? "网络视频")
@@ -142,7 +145,10 @@ final class PlayerViewModel {
             securityScopedURL = url
         }
 
-        let asset = AVURLAsset(url: url)
+        let assetOptions: [String: Any]? = requestHeaders.isEmpty
+            ? nil
+            : ["AVURLAssetHTTPHeaderFieldsKey": requestHeaders]
+        let asset = AVURLAsset(url: url, options: assetOptions)
         do {
             let duration = try await asset.load(.duration)
             localDuration = duration.seconds.isFinite ? duration.seconds : 0
@@ -193,7 +199,7 @@ final class PlayerViewModel {
         let savedCandidate = fingerprint.flatMap { DanmakuBindingStore.candidate(for: $0) }
         currentBinding = savedCandidate
 
-        guard client != nil || builtInClient != nil else {
+        guard client != nil || builtInClient != nil || builtInPublicClient != nil else {
             if let fingerprint, let savedCandidate,
                await restoreCachedDanmaku(for: savedCandidate, fingerprint: fingerprint) {
                 return
@@ -228,7 +234,7 @@ final class PlayerViewModel {
         candidates = result.candidates
         guard let best = result.candidates.first else {
             let detail = result.errors.isEmpty ? "" : "（\(result.errors.joined(separator: "；"))）"
-            danmakuStats = failureMessage("未匹配到弹幕\(detail)，可输入剧名或 B 站链接搜索")
+            danmakuStats = failureMessage("未匹配到弹幕\(detail)，可输入剧名、集数或平台链接搜索")
             isShowingCandidates = true
             return
         }
@@ -241,25 +247,41 @@ final class PlayerViewModel {
         }
     }
 
-    /// 按“App 内置来源 → 用户网关”的顺序解析候选，任一来源失败都不会阻塞播放。
+    /// 合并 App 内置来源与用户网关候选，任一来源失败都不会阻塞播放。
     /// - Parameter request: 标题、季集号、时长与可选指纹。
     /// - Returns: 候选列表与可展示的降级原因。
     private func resolveCandidates(
         _ request: ResolveRequest
     ) async -> (candidates: [ProviderCandidate], errors: [String]) {
         var errors: [String] = []
+        var merged: [String: ProviderCandidate] = [:]
+
+        /// 追加候选并按来源与剧集 ID 去重，重复时保留置信度更高的一项。
+        func append(_ candidates: [ProviderCandidate]) {
+            for candidate in candidates {
+                if let existing = merged[candidate.id], existing.confidence >= candidate.confidence { continue }
+                merged[candidate.id] = candidate
+            }
+        }
+
         if let builtInClient {
             do {
-                let candidates = try await builtInClient.search(request)
-                if !candidates.isEmpty { return (candidates, errors) }
+                append(try await builtInClient.search(request))
             } catch {
-                errors.append(error.localizedDescription)
+                errors.append("哔哩哔哩：\(error.localizedDescription)")
+            }
+        }
+        if let builtInPublicClient {
+            let candidates = await builtInPublicClient.search(request)
+            append(candidates)
+            if candidates.isEmpty {
+                errors.append("爱奇艺、腾讯视频未找到匹配结果")
             }
         }
         if let client {
             do {
                 let response = try await client.resolve(request)
-                if !response.candidates.isEmpty { return (response.candidates, errors) }
+                append(response.candidates)
                 errors.append(contentsOf: response.degraded.map { "\($0.displayName)暂不可用" })
             } catch let error as GatewayError {
                 errors.append(error.requiresLogin ? "网关来源需要登录" : error.errorMessage)
@@ -267,7 +289,11 @@ final class PlayerViewModel {
                 errors.append("网关连接失败")
             }
         }
-        return ([], errors)
+        let candidates = merged.values.sorted { left, right in
+            if left.confidence == right.confidence { return left.id < right.id }
+            return left.confidence > right.confidence
+        }
+        return (candidates, errors)
     }
 
     /// 拉取指定候选的弹幕，并在成功后保存文件指纹绑定。
@@ -297,6 +323,25 @@ final class PlayerViewModel {
                     return true
                 }
                 errors.append("内置来源返回空弹幕")
+            } catch {
+                errors.append(error.localizedDescription)
+            }
+        }
+        if [.iqiyi, .qq].contains(candidate.source), let builtInPublicClient {
+            let startedAt = Date()
+            do {
+                let items = try await builtInPublicClient.danmaku(for: candidate)
+                if !items.isEmpty {
+                    await applyLoadedDanmaku(
+                        items,
+                        candidate: candidate,
+                        elapsedMs: Int(Date().timeIntervalSince(startedAt) * 1_000),
+                        fallback: false,
+                        persistBinding: persistBinding
+                    )
+                    return true
+                }
+                errors.append("内置\(candidate.source.displayName)来源返回空弹幕")
             } catch {
                 errors.append(error.localizedDescription)
             }
@@ -419,7 +464,7 @@ final class PlayerViewModel {
     /// 手动搜索并刷新候选列表
     func search(keyword: String) async {
         let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty, client != nil || builtInClient != nil else {
+        guard !query.isEmpty, client != nil || builtInClient != nil || builtInPublicClient != nil else {
             danmakuStats = "没有启用可用的在线弹幕来源"
             return
         }

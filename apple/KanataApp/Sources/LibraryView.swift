@@ -4,7 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
 
-/// 媒体库首页。M0 只支持本地文件导入，NAS 与媒体服务器在 M1 接入（FR-IMP-003 起）。
+/// 媒体库首页，统一管理本地文件、网络直链、WebDAV 与媒体服务器条目。
 struct LibraryView: View {
     @Environment(AppSettings.self) private var settings
     @State private var isImporting = false
@@ -13,7 +13,7 @@ struct LibraryView: View {
     @State private var playing: LibraryItem?
     @State private var importError: String?
     @State private var isProcessingImport = false
-    @State private var isAddingNetworkVideo = false
+    @State private var isAddingMediaSource = false
     @State private var searchText = ""
     @State private var isSearching = false
 
@@ -57,7 +57,7 @@ struct LibraryView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(isProcessingImport)
                         #endif
-                        Button("添加网络视频") { isAddingNetworkVideo = true }
+                        Button("添加媒体源") { isAddingMediaSource = true }
                             .buttonStyle(.bordered)
                     }
                 } else {
@@ -112,9 +112,9 @@ struct LibraryView: View {
                             }
                             #endif
                             Button {
-                                isAddingNetworkVideo = true
+                                isAddingMediaSource = true
                             } label: {
-                                Label("添加网络视频", systemImage: "network")
+                                Label("添加媒体源", systemImage: "network")
                             }
                         } label: {
                             Image(systemName: "plus")
@@ -143,7 +143,7 @@ struct LibraryView: View {
             }
             .fullScreenCover(item: $playing) { item in
                 if let url = item.resolveURL() {
-                    PlayerScreen(url: url)
+                    PlayerScreen(url: url, requestHeaders: item.requestHeaders())
                 } else {
                     ContentUnavailableView(
                         "无法访问该文件",
@@ -160,12 +160,18 @@ struct LibraryView: View {
                 TVLibrarySearchSheet(searchText: $searchText)
             }
             #endif
-            .sheet(isPresented: $isAddingNetworkVideo) {
-                NetworkVideoSheet { item in
-                    if !items.contains(where: { $0.id == item.id }) {
+            .sheet(isPresented: $isAddingMediaSource) {
+                MediaSourceSheet { item in
+                    if let index = items.firstIndex(where: { $0.id == item.id }) {
+                        if let oldAccount = items[index].credentialAccount,
+                           oldAccount != item.credentialAccount {
+                            KeychainStore.remove(account: oldAccount)
+                        }
+                        items[index] = item
+                    } else {
                         items.append(item)
-                        LibraryStore.save(items)
                     }
+                    LibraryStore.save(items)
                     playing = item
                 }
             }
@@ -219,6 +225,9 @@ struct LibraryView: View {
     /// 从媒体库索引移除条目，不删除原始视频文件。
     /// - Parameter item: 待移除的条目。
     private func removeItem(_ item: LibraryItem) {
+        if let account = item.credentialAccount {
+            KeychainStore.remove(account: account)
+        }
         items.removeAll { $0.id == item.id }
         LibraryStore.save(items)
     }
@@ -481,60 +490,7 @@ private struct MediaArtworkView: View {
     }
 }
 
-/// 添加网络直链或 HLS 地址的轻量表单。
-private struct NetworkVideoSheet: View {
-    let onAdd: (LibraryItem) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var urlString = ""
-    @State private var errorMessage: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("视频地址") {
-                    TextField("名称（可选）", text: $name)
-                    TextField("https://…/video.mp4 或 playlist.m3u8", text: $urlString)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    if let errorMessage {
-                        Text(errorMessage).font(.caption).foregroundStyle(.red)
-                    }
-                }
-                Section {
-                    Text("支持 HTTPS、HLS，以及同一局域网内可直接访问的 HTTP 视频地址。需要账号密码的 WebDAV、SMB 和媒体服务器会在媒体源页统一管理。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("添加网络视频")
-            .kanataInlineNavigationTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("添加并播放") { addVideo() }
-                        .disabled(urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-        }
-    }
-
-    /// 校验 URL、保存媒体条目并立即开始播放。
-    private func addVideo() {
-        let value = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased()) else {
-            errorMessage = "请输入有效的 HTTP 或 HTTPS 地址"
-            return
-        }
-        onAdd(LibraryItem(remoteURL: url, name: name))
-        dismiss()
-    }
-}
-
-/// 媒体库条目。M0 只保存书签与解析结果，扫描与刮削在 M1 补齐。
+/// 媒体库条目，保存本地书签或网络地址，认证信息只引用 Keychain。
 struct LibraryItem: Identifiable, Codable, Hashable {
     let id: String
     let displayName: String
@@ -542,6 +498,10 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     let bookmark: Data?
     /// 可直接交给 AVPlayer 的 HTTP(S) 视频或 HLS 地址。
     let remoteURLString: String?
+    /// 媒体来源显示名称，例如 WebDAV 或 Jellyfin。
+    let sourceName: String?
+    /// 存储在 Keychain 的请求头账号名，媒体库本身不保存密码或令牌。
+    let credentialAccount: String?
     let title: String
     let season: Int?
     let episode: Int?
@@ -556,6 +516,8 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.displayName = url.lastPathComponent
         self.bookmark = bookmark
         self.remoteURLString = nil
+        self.sourceName = nil
+        self.credentialAccount = nil
         self.title = parsed.title
         self.season = parsed.season
         self.episode = parsed.episode
@@ -565,7 +527,7 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// - Parameters:
     ///   - remoteURL: HTTP(S) 视频、HLS 或 NAS 直链。
     ///   - name: 用户提供的显示名称，空值时从 URL 推断。
-    init(remoteURL: URL, name: String) {
+    init(remoteURL: URL, name: String, sourceName: String? = nil, credentialAccount: String? = nil) {
         let inferredName = remoteURL.deletingPathExtension().lastPathComponent.removingPercentEncoding ?? ""
         let displayName = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? (!inferredName.isEmpty ? inferredName : (remoteURL.host ?? "网络视频"))
@@ -575,6 +537,8 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.displayName = displayName
         self.bookmark = nil
         self.remoteURLString = remoteURL.absoluteString
+        self.sourceName = sourceName
+        self.credentialAccount = credentialAccount
         self.title = parsed.title
         self.season = parsed.season
         self.episode = parsed.episode
@@ -589,6 +553,7 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         if let remoteURLString, let host = URL(string: remoteURLString)?.host {
             parts.append(host)
         }
+        if let sourceName { parts.append(sourceName) }
         return parts.joined(separator: " · ")
     }
 
@@ -604,6 +569,22 @@ struct LibraryItem: Identifiable, Codable, Hashable {
             bookmarkDataIsStale: &isStale
         )
     }
+
+    /// 从 Keychain 读取网络媒体播放所需的请求头。
+    /// - Returns: 没有凭证或凭证失效时返回空字典。
+    func requestHeaders() -> [String: String] {
+        guard let credentialAccount,
+              let data = KeychainStore.data(account: credentialAccount),
+              let credential = try? JSONDecoder().decode(MediaRequestCredential.self, from: data) else {
+            return [:]
+        }
+        return credential.headers
+    }
+}
+
+/// 保存在 Keychain 中的媒体请求头，不参与媒体库 JSON 持久化。
+struct MediaRequestCredential: Codable {
+    let headers: [String: String]
 }
 
 /// 媒体库的本地持久化。M0 用 UserDefaults，M1 换成 SQLite（docs/02 §5）。

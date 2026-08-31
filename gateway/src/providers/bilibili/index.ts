@@ -180,7 +180,7 @@ export class BilibiliProvider implements DanmakuProvider {
             ? `${episode.cid}@${Math.round(episode.duration / 1000)}`
             : String(episode.cid),
           title: item.title,
-          episodeTitle: episode.long_title || `第 ${number} 话`,
+          episodeTitle: formatEpisodeTitle(number, episode.long_title),
           duration: episode.duration ? Math.round(episode.duration / 1000) : undefined,
           confidence: Number(item.score.toFixed(3)),
         });
@@ -366,4 +366,11 @@ export class BilibiliProvider implements DanmakuProvider {
       };
     }
   }
+}
+
+/** 生成始终带集号的分集标题，副标题存在时追加在集号后。 */
+function formatEpisodeTitle(number: number, title?: string): string {
+  const prefix = `第 ${number} 集`;
+  const value = title?.trim();
+  return value ? `${prefix} · ${value}` : prefix;
 }

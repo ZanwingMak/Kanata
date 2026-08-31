@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var isVerifyingBilibili = false
     @State private var builtInSourceResult: String?
     @State private var isTestingBuiltInSource = false
+    @State private var isShowingBilibiliQRCode = false
 
     private enum ClearTarget {
         case onlineCache
@@ -47,18 +48,22 @@ struct SettingsView: View {
             Form {
                 Section("开箱即用弹幕") {
                     Toggle("内置哔哩哔哩来源", isOn: $settings.builtInBilibiliEnabled)
-                    Text("无需服务器即可搜索作品、B 站 BV/ep/ss 链接并加载弹幕；网关不可用时自动使用此来源。")
+                    Toggle("内置爱奇艺与腾讯视频来源", isOn: $settings.builtInPublicSourcesEnabled)
+                    Text("无需服务器即可跨平台搜索作品、逐集选择并加载弹幕；网关不可用时仍可正常使用。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button {
                         Task { await testBuiltInSource() }
                     } label: {
                         HStack {
-                            Text("测试内置来源")
+                            Text("测试全部内置来源")
                             if isTestingBuiltInSource { Spacer(); ProgressView() }
                         }
                     }
-                    .disabled(!settings.builtInBilibiliEnabled || isTestingBuiltInSource)
+                    .disabled(
+                        (!settings.builtInBilibiliEnabled && !settings.builtInPublicSourcesEnabled)
+                        || isTestingBuiltInSource
+                    )
                     if let builtInSourceResult {
                         Text(builtInSourceResult).font(.caption).foregroundStyle(.secondary)
                     }
@@ -84,7 +89,7 @@ struct SettingsView: View {
                     if let testResult {
                         Text(testResult).font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("用于扩展弹弹play、自定义聚合接口和更多平台。未配置时不影响内置来源使用。")
+                    Text("用于扩展弹弹play、自定义聚合接口及后续来源。未配置时不影响哔哩哔哩、爱奇艺和腾讯视频内置来源。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -92,24 +97,7 @@ struct SettingsView: View {
                 if !sources.isEmpty {
                     Section("弹幕源") {
                         ForEach(sources) { source in
-                            HStack {
-                                Circle()
-                                    .fill(source.available ? .green : .orange)
-                                    .frame(width: 8, height: 8)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(source.id.displayName)
-                                    if let error = source.lastError {
-                                        Text(error).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                                    } else if source.requiresCredential && !source.hasCredential {
-                                        Text("需要登录后获取完整弹幕")
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                if let latency = source.avgLatencyMs {
-                                    Text("\(Int(latency))ms").font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
+                            sourceStatusRow(source)
                         }
                     }
                 }
@@ -119,9 +107,26 @@ struct SettingsView: View {
                         Label("已在 Keychain 保存登录凭证", systemImage: "checkmark.shield")
                             .foregroundStyle(.green)
                     }
-                    SecureField("粘贴完整 Cookie", text: $bilibiliCookieInput)
+                    Button {
+                        isShowingBilibiliQRCode = true
+                    } label: {
+                        Label(
+                            settings.hasBilibiliCredential ? "重新扫码登录" : "扫码登录",
+                            systemImage: "qrcode.viewfinder"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    #if os(tvOS)
+                    SecureField("Cookie 备用登录", text: $bilibiliCookieInput)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                    #else
+                    DisclosureGroup("Cookie 备用登录") {
+                        SecureField("粘贴完整 Cookie", text: $bilibiliCookieInput)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    #endif
                     Button {
                         Task { await verifyBilibiliCredential() }
                     } label: {
@@ -144,33 +149,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("弹幕存储") {
-                    Picker("在线缓存上限", selection: $settings.onlineDanmakuCacheLimitMB) {
-                        Text("100 MB").tag(100)
-                        Text("250 MB").tag(250)
-                        Text("500 MB").tag(500)
-                        Text("1 GB").tag(1_024)
-                    }
-                    LabeledContent("在线缓存") {
-                        Text("\(onlineCacheUsage.fileCount) 个 · \(formatBytes(onlineCacheUsage.totalBytes))")
-                            .foregroundStyle(.secondary)
-                    }
-                    LabeledContent("导入弹幕") {
-                        Text("\(localDanmakuUsage.fileCount) 个 · \(formatBytes(localDanmakuUsage.totalBytes))")
-                            .foregroundStyle(.secondary)
-                    }
-                    Button("清除在线缓存", role: .destructive) {
-                        clearTarget = .onlineCache
-                    }
-                    .disabled(onlineCacheUsage.fileCount == 0)
-                    Button("删除全部导入弹幕", role: .destructive) {
-                        clearTarget = .importedDanmaku
-                    }
-                    .disabled(localDanmakuUsage.fileCount == 0)
-                    if let storageResult {
-                        Text(storageResult).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
+                storageSection
 
                 Section {
                     Text("Kanata 不提供任何影视内容。使用弹弹play数据时，来源标注为“弹弹play开放弹幕网络”；其他弹幕版权归对应平台与发送者所有，仅供个人观看时参考。")
@@ -189,6 +168,16 @@ struct SettingsView: View {
             .onChange(of: settings.onlineDanmakuCacheLimitMB) { _, newValue in
                 Task { await applyCacheLimit(newValue) }
             }
+            .sheet(isPresented: $isShowingBilibiliQRCode) {
+                BilibiliQRCodeLoginSheet { cookie in
+                    if settings.importBilibiliCookie(cookie) {
+                        bilibiliResult = "扫码登录成功，凭证已保存"
+                        Task { await verifyBilibiliCredential() }
+                    } else {
+                        bilibiliResult = "扫码完成，但凭证格式无效，请重试"
+                    }
+                }
+            }
             .alert(
                 clearTarget?.title ?? "确认清理",
                 isPresented: Binding(
@@ -204,6 +193,71 @@ struct SettingsView: View {
                 }
             } message: {
                 Text(clearConfirmationMessage)
+            }
+        }
+    }
+
+    /// 构建弹幕缓存与导入文件的存储管理分区。
+    private var storageSection: some View {
+        @Bindable var settings = settings
+        return Section("弹幕存储") {
+            Picker("在线缓存上限", selection: $settings.onlineDanmakuCacheLimitMB) {
+                Text("100 MB").tag(100)
+                Text("250 MB").tag(250)
+                Text("500 MB").tag(500)
+                Text("1 GB").tag(1_024)
+            }
+            LabeledContent("在线缓存") {
+                Text(storageLabel(onlineCacheUsage))
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent("导入弹幕") {
+                Text(storageLabel(localDanmakuUsage))
+                    .foregroundStyle(.secondary)
+            }
+            Button("清除在线缓存", role: .destructive) {
+                clearTarget = .onlineCache
+            }
+            .disabled(onlineCacheUsage.fileCount == 0)
+            Button("删除全部导入弹幕", role: .destructive) {
+                clearTarget = .importedDanmaku
+            }
+            .disabled(localDanmakuUsage.fileCount == 0)
+            if let storageResult {
+                Text(storageResult).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 把存储统计拼成稳定的简短文案。
+    /// - Parameter usage: 文件数量与字节数统计。
+    /// - Returns: “N 个 · 容量”格式。
+    private func storageLabel(_ usage: DanmakuStorageUsage) -> String {
+        "\(usage.fileCount) 个 · \(formatBytes(usage.totalBytes))"
+    }
+
+    /// 渲染单个弹幕来源的可用状态与延迟。
+    /// - Parameter source: 网关返回的来源状态。
+    /// - Returns: 设置页中的状态行。
+    private func sourceStatusRow(_ source: SourceStatus) -> some View {
+        HStack {
+            Circle()
+                .fill(source.available ? .green : .orange)
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(source.id.displayName)
+                if let error = source.lastError {
+                    Text(error).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                } else if source.requiresCredential && !source.hasCredential {
+                    Text("需要登录后获取完整弹幕")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if let latency = source.avgLatencyMs {
+                Text(String(format: "%.0fms", latency))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -230,20 +284,28 @@ struct SettingsView: View {
         }
     }
 
-    /// 检查无需网关的内置 B 站弹幕来源是否可访问。
+    /// 检查无需网关的哔哩哔哩、爱奇艺与腾讯视频来源是否可访问。
     private func testBuiltInSource() async {
-        guard let client = settings.makeBuiltInBilibiliClient() else {
+        let bilibiliClient = settings.makeBuiltInBilibiliClient()
+        let publicClient = settings.makeBuiltInPublicDanmakuClient()
+        guard bilibiliClient != nil || publicClient != nil else {
             builtInSourceResult = "内置来源已关闭"
             return
         }
         isTestingBuiltInSource = true
         defer { isTestingBuiltInSource = false }
         let startedAt = Date()
-        let available = await client.health()
+        var statuses: [String] = []
+        if let bilibiliClient {
+            statuses.append("哔哩哔哩\(await bilibiliClient.health() ? "可用" : "失败")")
+        }
+        if let publicClient {
+            let health = await publicClient.health()
+            statuses.append("爱奇艺\(health[.iqiyi] == true ? "可用" : "失败")")
+            statuses.append("腾讯视频\(health[.qq] == true ? "可用" : "失败")")
+        }
         let elapsed = Int(Date().timeIntervalSince(startedAt) * 1_000)
-        builtInSourceResult = available
-            ? "连接成功 · \(elapsed)ms"
-            : "连接失败，请检查网络或稍后重试"
+        builtInSourceResult = "\(statuses.joined(separator: " · ")) · \(elapsed)ms"
     }
 
     /// 导入可选 Cookie 后，通过网关校验 B 站登录态。

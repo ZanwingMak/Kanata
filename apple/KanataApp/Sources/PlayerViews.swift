@@ -4,6 +4,7 @@ import KanataCore
 import KanataRender
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// 管理 AVPlayerLayer 关联的画中画控制器，避免 SwiftUI 重建时丢失引用。
 @MainActor
@@ -162,6 +163,9 @@ struct DanmakuSettingsPanel: View {
     @Binding var config: DanmakuRenderConfig
     @Binding var offset: Double
     let onOffsetChanged: () -> Void
+    @State private var fontOptions = DanmakuFontRegistry.availableFonts()
+    @State private var isImportingFont = false
+    @State private var fontImportError: String?
 
     var body: some View {
         NavigationStack {
@@ -189,6 +193,28 @@ struct DanmakuSettingsPanel: View {
                         Text("超大").tag(1.7)
                     }
                     .pickerStyle(.segmented)
+                }
+
+                Section("弹幕字体") {
+                    Picker("字体", selection: selectedFontName) {
+                        ForEach(fontOptions) { option in
+                            Text(option.title).tag(option.id)
+                        }
+                    }
+                    #if !os(tvOS)
+                    Button {
+                        isImportingFont = true
+                    } label: {
+                        Label("导入字体文件", systemImage: "text.badge.plus")
+                    }
+                    Text("支持 TTF、OTF 和 TTC；字体仅保存在本机应用目录，不会上传。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    #else
+                    Text("Apple TV 支持上方内置字体；字体文件导入目前仅在 iPhone 和 iPad 提供。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    #endif
                 }
 
                 Section("弹幕延迟") {
@@ -328,6 +354,51 @@ struct DanmakuSettingsPanel: View {
             }
             .navigationTitle("弹幕设置")
             .kanataInlineNavigationTitle()
+            .kanataFileImporter(
+                isPresented: $isImportingFont,
+                allowedContentTypes: fontFileTypes,
+                allowsMultipleSelection: false,
+                onCompletion: handleFontImport
+            )
+            .alert(
+                "无法导入字体",
+                isPresented: Binding(
+                    get: { fontImportError != nil },
+                    set: { if !$0 { fontImportError = nil } }
+                )
+            ) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text(fontImportError ?? "未知错误")
+            }
+        }
+    }
+
+    /// 把可空字体名映射成 Picker 使用的字符串。
+    private var selectedFontName: Binding<String> {
+        Binding(
+            get: { config.fontName ?? "" },
+            set: { config.fontName = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    /// 返回字体文件选择器允许显示的类型。
+    private var fontFileTypes: [UTType] {
+        ["ttf", "otf", "ttc"].compactMap { UTType(filenameExtension: $0) }
+    }
+
+    /// 读取安全作用域字体文件、注册字体并立刻切换为新字体。
+    /// - Parameter result: 系统文件选择器结果。
+    private func handleFontImport(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let hasAccess = url.startAccessingSecurityScopedResource()
+            defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+            let fontName = try DanmakuFontRegistry.importFont(from: url)
+            fontOptions = DanmakuFontRegistry.availableFonts()
+            config.fontName = fontName
+        } catch {
+            fontImportError = error.localizedDescription
         }
     }
 

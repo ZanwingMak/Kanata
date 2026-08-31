@@ -1,5 +1,37 @@
 import Foundation
 
+#if os(iOS)
+import UIKit
+
+/// 使用系统场景几何请求切换播放器横竖屏。
+@MainActor
+enum PlayerOrientationController {
+    /// 请求播放器进入横屏或恢复竖屏。
+    /// - Parameters:
+    ///   - landscape: true 表示横屏全屏，false 表示竖屏。
+    ///   - onError: 系统拒绝方向切换时的错误回调。
+    static func requestLandscape(_ landscape: Bool, onError: @escaping (Error) -> Void) {
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) else { return }
+        let mask: UIInterfaceOrientationMask = landscape ? .landscape : .portrait
+        scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+            Task { @MainActor in onError(error) }
+        }
+    }
+
+    /// 读取当前前台场景是否处于横屏。
+    /// - Returns: 当前界面方向是横屏时返回 true。
+    static func isLandscape() -> Bool {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .interfaceOrientation.isLandscape == true
+    }
+}
+#endif
+
 /// 播放器可选择的一条音频或字幕轨道。
 struct MediaTrackOption: Identifiable, Hashable {
     let id: String

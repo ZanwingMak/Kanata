@@ -63,9 +63,7 @@ actor BuiltInBilibiliClient {
                     sourceInstanceName: "哔哩哔哩（App 内置）",
                     platformEpisodeId: duration.map { "\(cid)@\(Int($0.rounded()))" } ?? String(cid),
                     title: result.title,
-                    episodeTitle: episode.longTitle?.isEmpty == false
-                        ? episode.longTitle
-                        : "第 \(number) 话",
+                    episodeTitle: Self.episodeLabel(number: number, title: episode.longTitle),
                     duration: duration,
                     confidence: confidence
                 ))
@@ -499,6 +497,17 @@ actor BuiltInBilibiliClient {
     /// - Returns: 纯文本标题。
     private static func removeHTML(_ value: String) -> String {
         value.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+    }
+
+    /// 统一生成包含集号的分集标题，避免只显示单集副标题。
+    /// - Parameters:
+    ///   - number: 季度内集号。
+    ///   - title: 平台返回的单集副标题。
+    /// - Returns: “第 N 集”或“第 N 集 · 副标题”。
+    private static func episodeLabel(number: Int, title: String?) -> String {
+        let prefix = "第 \(number) 集"
+        let value = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? prefix : "\(prefix) · \(value)"
     }
 
     /// 计算两段标题的近似匹配程度。
