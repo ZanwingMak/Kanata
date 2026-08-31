@@ -12,5 +12,14 @@ services:
       # 弹弹play 开放平台密钥，未配置时该源不可用
       DANDANPLAY_APP_ID: ""
       DANDANPLAY_APP_SECRET: ""
+      CUSTOM_PROVIDER_STRATEGY: "fallback"
+      CUSTOM_PROVIDERS_JSON: "[]"
       DANMAKU_CACHE_TTL_SEC: "43200"
+      DANMAKU_STALE_TTL_SEC: "604800"
+      CACHE_PERSIST: "true"
+      CACHE_DIR: "/app/data/cache"
+      CACHE_MAX_MB: "2048"
+      CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
       LOG_LEVEL: "info"
+    volumes:
+      - ./data:/app/data

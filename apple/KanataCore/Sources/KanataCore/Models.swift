@@ -14,6 +14,21 @@ public enum DanmakuMode: Int, Codable, Sendable {
 /// 弹幕来源标识
 public enum DanmakuSourceId: String, Codable, Sendable, CaseIterable {
     case dandanplay, bilibili, iqiyi, qq, youku, mgtv, bahamut, local, custom
+
+    /// 面向用户展示的完整来源名称，避免暴露内部标识或使用不合规简称
+    public var displayName: String {
+        switch self {
+        case .dandanplay: "弹弹play开放弹幕网络"
+        case .bilibili: "哔哩哔哩"
+        case .iqiyi: "爱奇艺"
+        case .qq: "腾讯视频"
+        case .youku: "优酷"
+        case .mgtv: "芒果TV"
+        case .bahamut: "巴哈姆特动画疯"
+        case .local: "本地弹幕"
+        case .custom: "自定义弹幕源"
+        }
+    }
 }
 
 /// 统一弹幕条目
@@ -111,6 +126,10 @@ public struct ResolveRequest: Codable, Sendable {
 /// 平台侧候选剧集
 public struct ProviderCandidate: Codable, Sendable, Identifiable {
     public let source: DanmakuSourceId
+    /// custom 来源实际命中的实例 ID。
+    public let sourceInstanceId: String?
+    /// 实例面向用户的显示名称。
+    public let sourceInstanceName: String?
     public let platformEpisodeId: String
     public let title: String
     public let episodeTitle: String?
@@ -157,6 +176,14 @@ public struct SourceStatus: Codable, Sendable, Identifiable {
     public let lastCheckedAt: Double
     public let lastError: String?
     public let avgLatencyMs: Double?
+}
+
+/// 平台凭证校验结果，不包含任何原始凭证。
+public struct CredentialVerification: Codable, Sendable {
+    public let source: DanmakuSourceId
+    public let valid: Bool
+    public let displayName: String?
+    public let message: String?
 }
 
 /// 一次弹幕请求中对单个来源的引用

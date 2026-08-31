@@ -293,6 +293,28 @@ export class BilibiliProvider implements DanmakuProvider {
     return items;
   }
 
+  /** 调用 nav 接口校验客户端临时透传的 B 站登录态。 */
+  async verifyCredential(ctx: ProviderContext) {
+    if (!ctx.credential?.bilibili?.SESSDATA) {
+      return { source: this.id, valid: false, message: '未提供 SESSDATA' };
+    }
+    const response = await ctx.fetch('https://api.bilibili.com/x/web-interface/nav', {
+      headers: this.headers(ctx),
+    });
+    const data = (await response.json()) as {
+      code?: number;
+      message?: string;
+      data?: { isLogin?: boolean; uname?: string };
+    };
+    const valid = data.code === 0 && data.data?.isLogin === true;
+    return {
+      source: this.id,
+      valid,
+      displayName: valid ? data.data?.uname : undefined,
+      message: valid ? undefined : (data.message || '登录态已失效'),
+    };
+  }
+
   /** 探活：用固定 cid 拉第一个分片，验证 protobuf 结构未变（docs/05 §7） */
   async healthCheck(ctx: ProviderContext): Promise<HealthResult> {
     const startedAt = Date.now();

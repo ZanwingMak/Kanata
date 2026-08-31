@@ -53,14 +53,27 @@ export async function createServer(config: AppConfig): Promise<FastifyInstance> 
     bodyLimit: 1024 * 1024,
   });
 
-  // Web 端为纯前端直连，允许跨域；凭证走自定义头而非 cookie
+  // Web 端凭证走自定义头而非 cookie，只允许配置中的明确来源。
+  const allowedOrigins = new Set(config.corsOrigins);
   await app.register(cors, {
-    origin: true,
+    origin: (origin, callback) => {
+      callback(null, !origin || allowedOrigins.has(origin));
+    },
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Kanata-Credential'],
+  });
+
+  // 基础响应安全头，避免浏览器 MIME 猜测与非预期嵌入。
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Referrer-Policy', 'no-referrer');
+    return payload;
   });
 
   const registry = createRegistry(config);
   const service = new DanmakuService(config, registry);
+  await service.initialize();
+  app.addHook('onClose', async () => service.close());
 
   // Token 鉴权（FR-GW-004）：路径 Token 或 Authorization: Bearer 二选一
   app.addHook('onRequest', async (req) => {

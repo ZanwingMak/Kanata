@@ -25,6 +25,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kanata.app
+        DEVELOPMENT_TEAM: 2Q2LMV7BR6
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "6.0"
@@ -32,7 +35,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UIFileSharingEnabled: YES
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "用于连接局域网内的弹幕网关与 NAS 媒体源"
@@ -40,6 +43,40 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
+        ITSAppUsesNonExemptEncryption: false
         # 允许连接局域网内以 HTTP 部署的自托管网关
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+
+  KanataTV:
+    type: application
+    platform: tvOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Sources
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: KanataCore
+        product: KanataCore
+      - package: KanataRender
+        product: KanataRender
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kanata.app
+        DEVELOPMENT_TEAM: 2Q2LMV7BR6
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_NAME: Kanata
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "3"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "用于连接局域网内的弹幕网关与 NAS 媒体源"
+    info:
+      path: Sources/Info-tvOS.plist
+      properties:
+        ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

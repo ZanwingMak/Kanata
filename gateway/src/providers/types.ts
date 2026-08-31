@@ -8,6 +8,7 @@ import type { FetchLike } from '../http.js';
 import type { Logger } from '../logger.js';
 import type {
   CredentialPayload,
+  CredentialVerification,
   DanmakuItem,
   DanmakuSourceId,
   MediaFingerprint,
@@ -54,4 +55,7 @@ export interface DanmakuProvider {
 
   /** 探活：CI 每日调用，验证接口结构未变 */
   healthCheck(ctx: ProviderContext): Promise<HealthResult>;
+
+  /** 校验客户端临时透传的凭证，不得持久化或写日志。 */
+  verifyCredential?(ctx: ProviderContext): Promise<CredentialVerification>;
 }

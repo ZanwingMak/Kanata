@@ -23,9 +23,9 @@ export interface FetchOptions {
 
 export type FetchLike = (url: string, options?: FetchOptions) => Promise<Response>;
 
-/** 判断该响应是否值得重试：限流与服务端错误可重试，客户端错误不重试 */
+/** 判断该响应是否值得重试：只重试服务端错误，限流必须立即停止 */
 function shouldRetry(status: number): boolean {
-  return status === 429 || status >= 500;
+  return status >= 500;
 }
 
 /** 指数退避等待，第 n 次重试等待 250ms * 3^n */

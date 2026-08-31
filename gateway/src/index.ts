@@ -5,6 +5,19 @@
 import { loadConfig } from './config.js';
 import { createServer, VERSION } from './server.js';
 
+/** 注册 SIGINT/SIGTERM 处理，在退出前停止接收请求并等待缓存写入。 */
+function installShutdownHandlers(app: Awaited<ReturnType<typeof createServer>>): void {
+  let closing = false;
+  const shutdown = async (signal: string) => {
+    if (closing) return;
+    closing = true;
+    app.log.info({ signal }, '正在优雅关闭网关');
+    await app.close();
+  };
+  process.once('SIGINT', () => void shutdown('SIGINT'));
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
+}
+
 /** 启动 HTTP 服务并输出访问地址；启动失败时以非零码退出 */
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -17,6 +30,7 @@ async function main(): Promise<void> {
 
   const app = await createServer(config);
   await app.listen({ port: config.port, host: config.host });
+  installShutdownHandlers(app);
 
   app.log.info(
     `Kanata Gateway ${VERSION} 已启动，接口地址 http://${config.host}:${config.port}/${config.token}`,

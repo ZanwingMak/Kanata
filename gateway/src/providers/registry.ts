@@ -6,6 +6,7 @@
 import type { AppConfig } from '../config.js';
 import type { DanmakuSourceId, SourceStatus } from '../types.js';
 import { BilibiliProvider } from './bilibili/index.js';
+import { CustomProvider } from './custom.js';
 import { DandanplayProvider } from './dandanplay.js';
 import type { DanmakuProvider } from './types.js';
 
@@ -50,17 +51,21 @@ export class ProviderRegistry {
     return [...this.providers.values()];
   }
 
+  /** 判断指定来源是否已结束冷却，可以访问上游 */
+  isAvailable(id: DanmakuSourceId): boolean {
+    const status = this.status.get(id);
+    return !status || status.cooldownUntil <= Date.now();
+  }
+
   /**
    * 取当前可用的适配器列表。
    * 处于冷却期的源会被跳过，避免拖垮整体响应（FR-GW-005）。
    * @param wanted 期望使用的源，为空表示全部
    */
   available(wanted?: DanmakuSourceId[]): DanmakuProvider[] {
-    const now = Date.now();
     return this.all().filter((provider) => {
       if (wanted && wanted.length > 0 && !wanted.includes(provider.id)) return false;
-      const status = this.status.get(provider.id);
-      return !status || status.cooldownUntil <= now;
+      return this.isAvailable(provider.id);
     });
   }
 
@@ -120,5 +125,8 @@ export function createRegistry(config: AppConfig): ProviderRegistry {
     }),
   );
   registry.register(new BilibiliProvider());
+  if (config.customProviders.instances.some((instance) => instance.enabled)) {
+    registry.register(new CustomProvider(config.customProviders));
+  }
   return registry;
 }

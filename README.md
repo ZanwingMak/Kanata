@@ -8,7 +8,7 @@
 
 ## 0. 本仓库是什么
 
-这是**方案与文档仓库**（当前阶段无代码）。所有文档按「可被不同 AI 接手」的标准编写：
+这是包含方案、网关、Apple 端与 Web 端实现的开源项目。当前已完成本地视频播放、文件指纹匹配、在线/本地弹幕合并、持久缓存、自定义来源故障回退、Apple 安全凭证存储和 Web 播放闭环；后续进度以开发记录为准。所有文档按「可被不同 AI 接手」的标准编写：
 
 - 每条需求有唯一 ID（`FR-*` / `NFR-*`），每条测试用例有唯一 ID（`TC-*`）并**反向映射需求 ID**；
 - 所有跨模块交互都以**接口契约**（JSON Schema / TypeScript 类型 / HTTP 端点表）定义，而非自然语言描述；
@@ -29,6 +29,7 @@
 | [`docs/06-Skill评估与AI协作.md`](docs/06-Skill评估与AI协作.md) | 需要哪些 Skill、缺口、AI 分工与交接协议 | 编排者 |
 | [`docs/07-合规与风险.md`](docs/07-合规与风险.md) | 法务红线、平台协议、分发策略、风险登记册 | 全员 |
 | [`docs/08-播放器功能基准.md`](docs/08-播放器功能基准.md) | 市面播放器对标、视频/音频/字幕/弹幕完整能力清单 | 产品 / 客户端开发 |
+| [`docs/09-开发记录与功能计划.md`](docs/09-开发记录与功能计划.md) | 已实现功能、验证结果、已知限制与后续计划 | 全员 |
 
 ## 2. 一句话架构
 
@@ -43,14 +44,32 @@
 │  ├─ 识别层：文件 hash / 文件名 / TMDB 归一   │
 │  ├─ 适配器：bilibili / iqiyi / qq / youku…  │
 │  ├─ 归一化：统一弹幕模型 + 时轴对齐          │
-│  └─ 缓存：内存 + Redis（可选）+ 客户端本地   │
+│  └─ 缓存：内存 + 文件持久化 + 客户端本地     │
 └────────────────────────────────────────────┘
 ```
 
 **关键设计**：所有平台差异（接口逆向、签名、分片、加解压）收敛在 **网关**，客户端永远只面对一套稳定契约。
 平台接口一改，只需更新网关，客户端不必发版。
 
-## 3. 决策点（需用户确认，未确认则按「推荐值」执行）
+## 3. 本地运行
+
+```bash
+# 终端 1：启动网关（先复制并修改 gateway/.env.example 中的 Token）
+cd gateway
+npm install
+npm run build
+cp .env.example .env
+node --env-file=.env dist/index.js
+
+# 终端 2：启动 Web 播放器
+cd web
+npm install
+npm run dev
+```
+
+Apple 端使用 Xcode 打开 `apple/KanataApp/KanataApp.xcodeproj`，选择 `KanataApp` 或 `KanataTV` Scheme。
+
+## 4. 决策点（需用户确认，未确认则按「推荐值」执行）
 
 | ID | 决策 | 推荐值 | 影响面 |
 | --- | --- | --- | --- |
@@ -61,7 +80,7 @@
 | DEC-05 | 凭证存储位置 | 存客户端 Keychain，按请求加密透传给网关；网关**默认不落盘**用户凭证 | 安全 / 合规 |
 | DEC-06 | 是否支持发送弹幕 | 一期只读（不回传弹幕到第三方平台） | 合规 |
 
-## 4. 红线（不做）
+## 5. 红线（不做）
 
 - ❌ 不解析 / 不下载 / 不播放第三方平台的**视频流**，不破解 DRM，不做 VIP 去广告解析；
 - ❌ 不做规模化、商业化的弹幕抓取与转售；
@@ -69,11 +88,11 @@
 
 应用只承担两件事：**播放用户自己合法拥有的视频** + **拉取公开弹幕数据用于个人观看**。详见 `docs/07-合规与风险.md`。
 
-## 5. 参考资料
+## 6. 参考资料
 
 - [弹弹play 开放弹幕网络文档](https://doc.dandanplay.com/open/)
 - [huangxd-/danmu_api（多平台弹幕聚合，弹弹play 接口兼容）](https://github.com/huangxd-/danmu_api)
-- [SocialSisterYi/bilibili-API-collect（protobuf 弹幕）](https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/docs/danmaku/danmaku_proto.md)
+- [alittlehuaji/bilibili-api-collect-mirror（protobuf 弹幕历史资料）](https://github.com/alittlehuaji/bilibili-api-collect-mirror/blob/master/docs/danmaku/danmaku_proto.md)
 - [ArtPlayer + artplayer-plugin-danmuku](https://artplayer.org/document/plugin/danmuku.html)
 - [virtualox/vlckit-spm（VLCKit 全 Apple 平台 SPM 包）](https://github.com/virtualox/vlckit-spm)
 - [OpenDanmakuCommunity/awesome-danmaku](https://github.com/OpenDanmakuCommunity/awesome-danmaku)

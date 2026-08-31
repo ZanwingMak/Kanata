@@ -71,6 +71,10 @@ export interface ResolveRequest {
 /** 平台侧候选剧集 */
 export interface ProviderCandidate {
   source: DanmakuSourceId;
+  /** custom 来源实际命中的实例 ID */
+  sourceInstanceId?: string;
+  /** 实例面向用户的显示名称 */
+  sourceInstanceName?: string;
   /** 平台内剧集标识（episodeId / cid / tvid / vid …） */
   platformEpisodeId: string;
   title: string;
@@ -119,6 +123,14 @@ export interface CredentialPayload {
     DedeUserID?: string;
     buvid3?: string;
   };
+}
+
+/** 平台凭证校验结果，不返回任何原始凭证内容。 */
+export interface CredentialVerification {
+  source: DanmakuSourceId;
+  valid: boolean;
+  displayName?: string;
+  message?: string;
 }
 
 /* ---------- 弹弹play v2 兼容格式 ---------- */

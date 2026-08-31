@@ -5,7 +5,8 @@ let package = Package(
     name: "KanataRender",
     platforms: [
         .iOS(.v17),
-        .tvOS(.v17)
+        .tvOS(.v17),
+        .macOS(.v14)
     ],
     products: [
         .library(name: "KanataRender", targets: ["KanataRender"])

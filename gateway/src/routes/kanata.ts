@@ -75,6 +75,20 @@ export function registerKanataRoutes(
     return service.resolve({ ...body, title: body.title ?? body.fingerprint?.fileName ?? '' }, ctx);
   });
 
+  /** 校验客户端临时透传的平台凭证，不在网关持久化。 */
+  app.post<{ Body: { source?: DanmakuSourceId } }>(
+    '/kanata/v1/credential/verify',
+    async (req) => {
+      const source = req.body?.source;
+      if (!source) throw new GatewayError(ErrorCode.BAD_REQUEST, 'source 不能为空');
+      const ctx = service.createContext(
+        parseCredential(req.headers[CREDENTIAL_HEADER] as string | undefined),
+        AbortSignal.timeout(15_000),
+      );
+      return service.verifyCredential(source, ctx);
+    },
+  );
+
   /** 取统一模型弹幕，支持多源聚合、去重与每源偏移 */
   app.get<{ Querystring: { refs?: string; offsets?: string; dedup?: string } }>(
     '/kanata/v1/danmaku',

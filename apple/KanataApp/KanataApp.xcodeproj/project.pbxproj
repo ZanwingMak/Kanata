@@ -7,32 +7,59 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0031258D7C92F9CFC2903A64 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 24054567603F95C0EC6A1783 /* Assets.xcassets */; };
+		0190C59C861A69A9EAD144FD /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E24DE0179BDBA88E26F4FB /* LibraryView.swift */; };
 		143668390E7F4314EA2B50DA /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054C1F753EBC3CAF4CAB9C4 /* AppSettings.swift */; };
 		230F4EFC9749FD9CBA7B9A66 /* PlayerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54F8F7451DA189DC5B2969CB /* PlayerViewModel.swift */; };
+		2EAB75D7C16FCDB4D5129668 /* KanataApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F54CA6B81DF75A8D593DBB /* KanataApp.swift */; };
+		36C08EA5757A1AD39FD2C9F3 /* PlayerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54F8F7451DA189DC5B2969CB /* PlayerViewModel.swift */; };
+		64BCDEEC8B6DCCC7E5FA30AF /* KanataRender in Frameworks */ = {isa = PBXBuildFile; productRef = 8EE44E1F48B4D8E9D04CA922 /* KanataRender */; };
+		6813B82BF031BB5A506EC7AC /* PlatformFileImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA68DAA542BB5DD17707BE90 /* PlatformFileImporter.swift */; };
+		6BDE8BA75A71E2FB96893521 /* PlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D71423032201822DE1CEC33 /* PlayerScreen.swift */; };
+		78DF13F860AEC8C9703AEEFA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 24054567603F95C0EC6A1783 /* Assets.xcassets */; };
 		8755E5218B5A5740FA3A87C6 /* KanataRender in Frameworks */ = {isa = PBXBuildFile; productRef = 2B1BA21A40301952737E6088 /* KanataRender */; };
+		93D4CF481CFCCB1EA52DFB6F /* PlatformFileImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA68DAA542BB5DD17707BE90 /* PlatformFileImporter.swift */; };
 		94A4EB0FDAEC4E23571FDBA1 /* KanataCore in Frameworks */ = {isa = PBXBuildFile; productRef = D0F19C87A69C96ACBF02E301 /* KanataCore */; };
 		9F4DDDA0BF75D781CBE70B52 /* PlayerViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20B5DDBFFBFC71CD4E8BFF5 /* PlayerViews.swift */; };
 		A0DC7C89B456A362447704FB /* PlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D71423032201822DE1CEC33 /* PlayerScreen.swift */; };
+		B7DC3F8CB5A7004442098AC1 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BA5EDEB5BE98DBEE96E3EB /* SettingsView.swift */; };
 		B8DD7D6499400A064B2CDA19 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E24DE0179BDBA88E26F4FB /* LibraryView.swift */; };
 		C024A5EADFCE8F9980FDE6B4 /* KanataApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F54CA6B81DF75A8D593DBB /* KanataApp.swift */; };
+		C368F0EAFAB10B17EA4CDF24 /* PlayerViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20B5DDBFFBFC71CD4E8BFF5 /* PlayerViews.swift */; };
 		CE9E35E870EB0641755C63C3 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BA5EDEB5BE98DBEE96E3EB /* SettingsView.swift */; };
+		CF17866599270F7C8DF7F77D /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054C1F753EBC3CAF4CAB9C4 /* AppSettings.swift */; };
+		D1DCDF1163EED827FB0FDE2F /* Info-tvOS.plist in Resources */ = {isa = PBXBuildFile; fileRef = 567CC9ADFBD1B18B4B7E3814 /* Info-tvOS.plist */; };
+		E4D8BE599F573D1C65BCB792 /* KanataCore in Frameworks */ = {isa = PBXBuildFile; productRef = A2444D4C17E00FAEC8B9CBCA /* KanataCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		2054C1F753EBC3CAF4CAB9C4 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		24054567603F95C0EC6A1783 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		37FE9DC3DA20A78BD65CFCCC /* KanataTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KanataTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		42B14A0149AA61453CC026E8 /* KanataApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KanataApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		54F8F7451DA189DC5B2969CB /* PlayerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerViewModel.swift; sourceTree = "<group>"; };
+		567CC9ADFBD1B18B4B7E3814 /* Info-tvOS.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Info-tvOS.plist"; sourceTree = "<group>"; };
 		89BA5EDEB5BE98DBEE96E3EB /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		8AC79591E41687EB97713726 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		9D71423032201822DE1CEC33 /* PlayerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerScreen.swift; sourceTree = "<group>"; };
 		AE0B608A17E4D899DDF4C3C0 /* KanataCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = KanataCore; path = ../KanataCore; sourceTree = SOURCE_ROOT; };
 		B20B5DDBFFBFC71CD4E8BFF5 /* PlayerViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerViews.swift; sourceTree = "<group>"; };
 		C7F54CA6B81DF75A8D593DBB /* KanataApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanataApp.swift; sourceTree = "<group>"; };
+		CA68DAA542BB5DD17707BE90 /* PlatformFileImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformFileImporter.swift; sourceTree = "<group>"; };
 		D4E24DE0179BDBA88E26F4FB /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		DB8BB661202EC97429766ACF /* KanataRender */ = {isa = PBXFileReference; lastKnownFileType = folder; name = KanataRender; path = ../KanataRender; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		60390661EC2D099310C647CA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E4D8BE599F573D1C65BCB792 /* KanataCore in Frameworks */,
+				64BCDEEC8B6DCCC7E5FA30AF /* KanataRender in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B195997C1485E5C1C45B08B8 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -58,9 +85,12 @@
 			isa = PBXGroup;
 			children = (
 				2054C1F753EBC3CAF4CAB9C4 /* AppSettings.swift */,
+				24054567603F95C0EC6A1783 /* Assets.xcassets */,
+				567CC9ADFBD1B18B4B7E3814 /* Info-tvOS.plist */,
 				8AC79591E41687EB97713726 /* Info.plist */,
 				C7F54CA6B81DF75A8D593DBB /* KanataApp.swift */,
 				D4E24DE0179BDBA88E26F4FB /* LibraryView.swift */,
+				CA68DAA542BB5DD17707BE90 /* PlatformFileImporter.swift */,
 				9D71423032201822DE1CEC33 /* PlayerScreen.swift */,
 				54F8F7451DA189DC5B2969CB /* PlayerViewModel.swift */,
 				B20B5DDBFFBFC71CD4E8BFF5 /* PlayerViews.swift */,
@@ -73,6 +103,7 @@
 			isa = PBXGroup;
 			children = (
 				42B14A0149AA61453CC026E8 /* KanataApp.app */,
+				37FE9DC3DA20A78BD65CFCCC /* KanataTV.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -89,11 +120,33 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		6A2B39172D7B294ADC3ED6ED /* KanataTV */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 62C75F255A69310CD15F1878 /* Build configuration list for PBXNativeTarget "KanataTV" */;
+			buildPhases = (
+				B43DE78BE85F6F6420C18F62 /* Sources */,
+				4B83F59D87297154B21EB715 /* Resources */,
+				60390661EC2D099310C647CA /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = KanataTV;
+			packageProductDependencies = (
+				A2444D4C17E00FAEC8B9CBCA /* KanataCore */,
+				8EE44E1F48B4D8E9D04CA922 /* KanataRender */,
+			);
+			productName = KanataTV;
+			productReference = 37FE9DC3DA20A78BD65CFCCC /* KanataTV.app */;
+			productType = "com.apple.product-type.application";
+		};
 		70E3A6CD8EC064F6F32FE06D /* KanataApp */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 2B04CC5F69ED70BF653F001C /* Build configuration list for PBXNativeTarget "KanataApp" */;
 			buildPhases = (
 				7D3E7C1B9EEAC80E1C46293D /* Sources */,
+				D5826008677CA2E888CA33E0 /* Resources */,
 				B195997C1485E5C1C45B08B8 /* Frameworks */,
 			);
 			buildRules = (
@@ -118,6 +171,14 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					6A2B39172D7B294ADC3ED6ED = {
+						DevelopmentTeam = 2Q2LMV7BR6;
+						ProvisioningStyle = Automatic;
+					};
+					70E3A6CD8EC064F6F32FE06D = {
+						DevelopmentTeam = 2Q2LMV7BR6;
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = 3F875C53978E467B37AF9562 /* Build configuration list for PBXProject "KanataApp" */;
@@ -139,9 +200,30 @@
 			projectRoot = "";
 			targets = (
 				70E3A6CD8EC064F6F32FE06D /* KanataApp */,
+				6A2B39172D7B294ADC3ED6ED /* KanataTV */,
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		4B83F59D87297154B21EB715 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				78DF13F860AEC8C9703AEEFA /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D5826008677CA2E888CA33E0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0031258D7C92F9CFC2903A64 /* Assets.xcassets in Resources */,
+				D1DCDF1163EED827FB0FDE2F /* Info-tvOS.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		7D3E7C1B9EEAC80E1C46293D /* Sources */ = {
@@ -151,6 +233,7 @@
 				143668390E7F4314EA2B50DA /* AppSettings.swift in Sources */,
 				C024A5EADFCE8F9980FDE6B4 /* KanataApp.swift in Sources */,
 				B8DD7D6499400A064B2CDA19 /* LibraryView.swift in Sources */,
+				6813B82BF031BB5A506EC7AC /* PlatformFileImporter.swift in Sources */,
 				A0DC7C89B456A362447704FB /* PlayerScreen.swift in Sources */,
 				230F4EFC9749FD9CBA7B9A66 /* PlayerViewModel.swift in Sources */,
 				9F4DDDA0BF75D781CBE70B52 /* PlayerViews.swift in Sources */,
@@ -158,9 +241,50 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B43DE78BE85F6F6420C18F62 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CF17866599270F7C8DF7F77D /* AppSettings.swift in Sources */,
+				2EAB75D7C16FCDB4D5129668 /* KanataApp.swift in Sources */,
+				0190C59C861A69A9EAD144FD /* LibraryView.swift in Sources */,
+				93D4CF481CFCCB1EA52DFB6F /* PlatformFileImporter.swift in Sources */,
+				6BDE8BA75A71E2FB96893521 /* PlayerScreen.swift in Sources */,
+				36C08EA5757A1AD39FD2C9F3 /* PlayerViewModel.swift in Sources */,
+				C368F0EAFAB10B17EA4CDF24 /* PlayerViews.swift in Sources */,
+				B7DC3F8CB5A7004442098AC1 /* SettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		0ABA49C59BD64912C04F919B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Sources/Info-tvOS.plist";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于连接局域网内的弹幕网关与 NAS 媒体源";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanata.app;
+				PRODUCT_NAME = Kanata;
+				SDKROOT = appletvos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
+			};
+			name = Release;
+		};
 		32AF00C39BA51062B86A6E3A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -217,10 +341,35 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		4DAD825B022612FB220781E6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Sources/Info-tvOS.plist";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于连接局域网内的弹幕网关与 NAS 媒体源";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kanata.app;
+				PRODUCT_NAME = Kanata;
+				SDKROOT = appletvos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 17.0;
 			};
 			name = Debug;
 		};
@@ -229,7 +378,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
@@ -238,7 +389,7 @@
 				INFOPLIST_KEY_UIBackgroundModes = audio;
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -300,7 +451,6 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -312,7 +462,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
@@ -321,7 +473,7 @@
 				INFOPLIST_KEY_UIBackgroundModes = audio;
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -355,6 +507,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		62C75F255A69310CD15F1878 /* Build configuration list for PBXNativeTarget "KanataTV" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4DAD825B022612FB220781E6 /* Debug */,
+				0ABA49C59BD64912C04F919B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -372,6 +533,14 @@
 		2B1BA21A40301952737E6088 /* KanataRender */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = KanataRender;
+		};
+		8EE44E1F48B4D8E9D04CA922 /* KanataRender */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = KanataRender;
+		};
+		A2444D4C17E00FAEC8B9CBCA /* KanataCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = KanataCore;
 		};
 		D0F19C87A69C96ACBF02E301 /* KanataCore */ = {
 			isa = XCSwiftPackageProductDependency;

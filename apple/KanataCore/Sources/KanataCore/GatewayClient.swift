@@ -32,12 +32,21 @@ public actor GatewayClient {
     /// - Parameters:
     ///   - baseURL: 网关根地址，例如 http://192.168.1.7:9321
     ///   - token: 访问令牌
-    public init(baseURL: URL, token: String, session: URLSession = .shared) {
+    public init(
+        baseURL: URL,
+        token: String,
+        credential: [String: [String: String]]? = nil,
+        session: URLSession = .shared
+    ) {
         self.baseURL = baseURL
         self.token = token
         self.session = session
         self.decoder = JSONDecoder()
         self.encoder = JSONEncoder()
+        if let credential,
+           let data = try? JSONSerialization.data(withJSONObject: credential) {
+            self.credentialHeader = data.base64EncodedString()
+        }
     }
 
     /// 设置平台凭证，传 nil 表示清除
@@ -84,6 +93,17 @@ public actor GatewayClient {
     public func health() async throws -> Bool {
         struct Response: Decodable { let ok: Bool }
         return try await request(path: "/kanata/v1/health", method: "GET", body: Optional<Int>.none, as: Response.self).ok
+    }
+
+    /// 校验指定平台的临时透传凭证是否仍然有效。
+    public func verifyCredential(source: DanmakuSourceId) async throws -> CredentialVerification {
+        struct Request: Encodable { let source: DanmakuSourceId }
+        return try await request(
+            path: "/kanata/v1/credential/verify",
+            method: "POST",
+            body: Request(source: source),
+            as: CredentialVerification.self
+        )
     }
 
     /// 发起一次网关请求并解码响应

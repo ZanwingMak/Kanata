@@ -96,12 +96,21 @@ struct DanmakuSettingsPanel: View {
         NavigationStack {
             Form {
                 Section("字体大小") {
+                    #if os(tvOS)
+                    TVValueAdjuster(
+                        title: "字号比例",
+                        value: "\(Int(config.fontScale * 100))%",
+                        onDecrement: { config.fontScale = max(0.5, config.fontScale - 0.05) },
+                        onIncrement: { config.fontScale = min(2, config.fontScale + 0.05) }
+                    )
+                    #else
                     HStack {
                         Text("\(Int(config.fontScale * 100))%")
                             .monospacedDigit()
                             .frame(width: 60, alignment: .leading)
                         Slider(value: $config.fontScale, in: 0.5...2.0, step: 0.05)
                     }
+                    #endif
                     Picker("快捷档位", selection: $config.fontScale) {
                         Text("小").tag(0.75)
                         Text("中").tag(1.0)
@@ -136,9 +145,11 @@ struct DanmakuSettingsPanel: View {
                         .font(.footnote)
                     }
                     .buttonStyle(.plain)
+                    #if !os(tvOS)
                     Slider(value: $offset, in: -120...120, step: TimelineResolver.offsetStep) { editing in
                         if !editing { onOffsetChanged() }
                     }
+                    #endif
                     Text("正值表示弹幕延后播放。设置会按季记住，同季其他集自动沿用。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -146,11 +157,20 @@ struct DanmakuSettingsPanel: View {
 
                 Section("显示") {
                     Toggle("显示弹幕", isOn: $config.enabled)
+                    #if os(tvOS)
+                    TVValueAdjuster(
+                        title: "不透明度",
+                        value: "\(Int(config.opacity * 100))%",
+                        onDecrement: { config.opacity = max(0.1, config.opacity - 0.05) },
+                        onIncrement: { config.opacity = min(1, config.opacity + 0.05) }
+                    )
+                    #else
                     HStack {
                         Text("不透明度")
                         Slider(value: $config.opacity, in: 0.1...1.0, step: 0.05)
                         Text("\(Int(config.opacity * 100))%").monospacedDigit().frame(width: 50)
                     }
+                    #endif
                     Picker("显示区域", selection: $config.displayArea) {
                         Text("1/4 屏").tag(DanmakuDisplayArea.quarter)
                         Text("半屏").tag(DanmakuDisplayArea.half)
@@ -159,11 +179,20 @@ struct DanmakuSettingsPanel: View {
                         Text("仅顶部").tag(DanmakuDisplayArea.topOnly)
                         Text("仅底部").tag(DanmakuDisplayArea.bottomOnly)
                     }
+                    #if os(tvOS)
+                    TVValueAdjuster(
+                        title: "滚动速度",
+                        value: String(format: "%.1f 秒", config.scrollDuration),
+                        onDecrement: { config.scrollDuration = max(3, config.scrollDuration - 0.5) },
+                        onIncrement: { config.scrollDuration = min(15, config.scrollDuration + 0.5) }
+                    )
+                    #else
                     HStack {
                         Text("滚动速度")
                         Slider(value: $config.scrollDuration, in: 3...15, step: 0.5)
                         Text("\(config.scrollDuration, specifier: "%.1f")s").monospacedDigit().frame(width: 50)
                     }
+                    #endif
                     Toggle("加粗", isOn: $config.bold)
                     Toggle("合并重复弹幕", isOn: $config.mergeDuplicates)
                 }
@@ -176,7 +205,7 @@ struct DanmakuSettingsPanel: View {
                 }
             }
             .navigationTitle("弹幕设置")
-            .navigationBarTitleDisplayMode(.inline)
+            .kanataInlineNavigationTitle()
         }
     }
 
@@ -195,3 +224,29 @@ struct DanmakuSettingsPanel: View {
         ))
     }
 }
+
+#if os(tvOS)
+/// tvOS 使用可聚焦的加减按钮替代系统未提供的 Slider 与 Stepper。
+private struct TVValueAdjuster: View {
+    let title: String
+    let value: String
+    let onDecrement: () -> Void
+    let onIncrement: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value).monospacedDigit()
+            Button(action: onDecrement) {
+                Image(systemName: "minus")
+            }
+            .accessibilityLabel("减小\(title)")
+            Button(action: onIncrement) {
+                Image(systemName: "plus")
+            }
+            .accessibilityLabel("增大\(title)")
+        }
+    }
+}
+#endif

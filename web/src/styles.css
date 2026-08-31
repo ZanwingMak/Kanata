@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+:root {
+  font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  color: #f1f3ee;
+  background: #111412;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100dvh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #aabcaa;
+  outline-offset: 3px;
+}
+
+.field {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 4%);
+  padding: 0 12px;
+  color: #f1f3ee;
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+.field:hover,
+.field:focus {
+  border-color: rgb(170 188 170 / 55%);
+  background: rgb(255 255 255 / 6%);
+}
+
+.field::placeholder {
+  color: #626b60;
+}
+
+.primary-button,
+.secondary-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 12px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: transform 150ms ease, border-color 180ms ease, background-color 180ms ease;
+}
+
+.primary-button {
+  border: 1px solid #7f9a78;
+  background: #7f9a78;
+  color: #101310;
+}
+
+.secondary-button {
+  border: 1px solid rgb(255 255 255 / 11%);
+  background: rgb(255 255 255 / 4%);
+  color: #e8ece5;
+}
+
+.primary-button:hover,
+.secondary-button:hover {
+  border-color: #91aa8b;
+  background-color: rgb(127 154 120 / 18%);
+}
+
+.primary-button:active,
+.secondary-button:active,
+.candidate-row:active {
+  transform: scale(0.98);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.compact-toggle {
+  min-height: 36px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 999px;
+  padding: 0 13px;
+  color: #9ca69a;
+  font-size: 12px;
+}
+
+.compact-toggle.is-active {
+  border-color: rgb(127 154 120 / 60%);
+  background: rgb(127 154 120 / 13%);
+  color: #dce4d9;
+}
+
+.text-button {
+  min-height: 36px;
+  padding: 0 8px;
+  color: #aabcaa;
+  font-size: 12px;
+}
+
+.candidate-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 2px;
+  text-align: left;
+  transition: transform 150ms ease, background-color 180ms ease;
+}
+
+.candidate-row:hover {
+  background: rgb(255 255 255 / 3%);
+}
+
+.loading-line {
+  animation: loading-sweep 1.2s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+@keyframes loading-sweep {
+  from { transform: translateX(-35%); }
+  to { transform: translateX(135%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
