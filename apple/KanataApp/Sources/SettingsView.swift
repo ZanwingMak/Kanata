@@ -15,6 +15,8 @@ struct SettingsView: View {
     @State private var bilibiliCookieInput = ""
     @State private var bilibiliResult: String?
     @State private var isVerifyingBilibili = false
+    @State private var builtInSourceResult: String?
+    @State private var isTestingBuiltInSource = false
 
     private enum ClearTarget {
         case onlineCache
@@ -43,12 +45,31 @@ struct SettingsView: View {
 
         NavigationStack {
             Form {
-                Section("弹幕网关") {
-                    TextField("网关地址", text: $settings.gatewayURLString)
+                Section("开箱即用弹幕") {
+                    Toggle("内置哔哩哔哩来源", isOn: $settings.builtInBilibiliEnabled)
+                    Text("无需服务器即可搜索作品、B 站 BV/ep/ss 链接并加载弹幕；网关不可用时自动使用此来源。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        Task { await testBuiltInSource() }
+                    } label: {
+                        HStack {
+                            Text("测试内置来源")
+                            if isTestingBuiltInSource { Spacer(); ProgressView() }
+                        }
+                    }
+                    .disabled(!settings.builtInBilibiliEnabled || isTestingBuiltInSource)
+                    if let builtInSourceResult {
+                        Text(builtInSourceResult).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("扩展弹幕网关（可选）") {
+                    TextField("例如 http://192.168.1.7:9321", text: $settings.gatewayURLString)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
-                    TextField("访问令牌", text: $settings.gatewayToken)
+                    SecureField("访问令牌", text: $settings.gatewayToken)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     Button {
@@ -63,6 +84,9 @@ struct SettingsView: View {
                     if let testResult {
                         Text(testResult).font(.caption).foregroundStyle(.secondary)
                     }
+                    Text("用于扩展弹弹play、自定义聚合接口和更多平台。未配置时不影响内置来源使用。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if !sources.isEmpty {
@@ -206,6 +230,22 @@ struct SettingsView: View {
         }
     }
 
+    /// 检查无需网关的内置 B 站弹幕来源是否可访问。
+    private func testBuiltInSource() async {
+        guard let client = settings.makeBuiltInBilibiliClient() else {
+            builtInSourceResult = "内置来源已关闭"
+            return
+        }
+        isTestingBuiltInSource = true
+        defer { isTestingBuiltInSource = false }
+        let startedAt = Date()
+        let available = await client.health()
+        let elapsed = Int(Date().timeIntervalSince(startedAt) * 1_000)
+        builtInSourceResult = available
+            ? "连接成功 · \(elapsed)ms"
+            : "连接失败，请检查网络或稍后重试"
+    }
+
     /// 导入可选 Cookie 后，通过网关校验 B 站登录态。
     private func verifyBilibiliCredential() async {
         if !bilibiliCookieInput.isEmpty,
@@ -213,12 +253,26 @@ struct SettingsView: View {
             bilibiliResult = "Cookie 中未找到有效的 SESSDATA"
             return
         }
-        guard let client = settings.makeClient() else {
-            bilibiliResult = "请先填写有效的网关地址"
-            return
-        }
         isVerifyingBilibili = true
         defer { isVerifyingBilibili = false }
+        if let directClient = settings.makeBuiltInBilibiliClient() {
+            do {
+                let result = try await directClient.verifyCredential()
+                if result.valid {
+                    bilibiliCookieInput = ""
+                    bilibiliResult = result.displayName.map { "登录有效 · \($0)" } ?? "登录有效"
+                } else {
+                    bilibiliResult = "凭证无效：\(result.message ?? "请重新获取 Cookie")"
+                }
+            } catch {
+                bilibiliResult = "校验失败：\(error.localizedDescription)"
+            }
+            return
+        }
+        guard let client = settings.makeClient() else {
+            bilibiliResult = "请启用内置来源或填写有效的网关地址"
+            return
+        }
         do {
             let result = try await client.verifyCredential(source: .bilibili)
             if result.valid {

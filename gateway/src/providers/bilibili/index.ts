@@ -13,7 +13,12 @@ import { titleSimilarity } from '../../normalize/title.js';
 import type { DanmakuItem, ProviderCandidate, ResolveRequest } from '../../types.js';
 import type { DanmakuProvider, HealthResult, ProviderContext } from '../types.js';
 import { parseDmSegment } from './protobuf.js';
-import { getMixinKey, signWbi } from './wbi.js';
+import {
+  BILIBILI_MOBILE_APP_KEY,
+  getMixinKey,
+  signBilibiliMobile,
+  signWbi,
+} from './wbi.js';
 
 /** 单片时长（秒） */
 const SEGMENT_SECONDS = 360;
@@ -25,6 +30,7 @@ const SEGMENT_CONCURRENCY = 5;
 const COMMON_HEADERS = {
   Referer: 'https://www.bilibili.com',
   Origin: 'https://www.bilibili.com',
+  'User-Agent': 'Mozilla/5.0 BiliDroid/8.0.0 (Kanata Gateway)',
 };
 
 interface SeasonEpisode {
@@ -101,28 +107,54 @@ export class BilibiliProvider implements DanmakuProvider {
    */
   async search(query: ResolveRequest, ctx: ProviderContext): Promise<ProviderCandidate[]> {
     await this.ensureBuvid(ctx);
-    const mixinKey = await getMixinKey(ctx);
-    const signed = signWbi(
-      { search_type: 'media_bangumi', keyword: query.title, page: '1' },
-      mixinKey,
-    );
-    const response = await ctx.fetch(
-      `https://api.bilibili.com/x/web-interface/wbi/search/type?${signed}`,
+    const mobileSigned = signBilibiliMobile({
+      appkey: BILIBILI_MOBILE_APP_KEY,
+      build: '8000300',
+      c_locale: 'zh_CN',
+      device: 'android',
+      keyword: query.title,
+      mobi_app: 'android',
+      platform: 'android',
+      pn: '1',
+      ps: '20',
+      s_locale: 'zh_CN',
+      ts: Math.floor(Date.now() / 1000).toString(),
+      type: '7',
+    });
+    const mobileResponse = await ctx.fetch(
+      `https://app.bilibili.com/x/v2/search/type?${mobileSigned}`,
       { headers: this.headers(ctx) },
     );
-    const data = (await response.json()) as {
+    const mobileData = (await mobileResponse.json()) as {
       code?: number;
       message?: string;
-      data?: { result?: Array<{ season_id?: number; title?: string }> };
+      data?: { items?: Array<{ season_id?: number; title?: string }> };
     };
-    if (data.code !== 0) {
-      throw new GatewayError(
-        ErrorCode.PROVIDER_ERROR,
-        `B 站搜索失败：${data.message ?? data.code}`,
-      );
-    }
+    let results = mobileData.code === 0 ? (mobileData.data?.items ?? []) : [];
 
-    const results = data.data?.result ?? [];
+    if (results.length === 0) {
+      const mixinKey = await getMixinKey(ctx);
+      const signed = signWbi(
+        { search_type: 'media_bangumi', keyword: query.title, page: '1' },
+        mixinKey,
+      );
+      const response = await ctx.fetch(
+        `https://api.bilibili.com/x/web-interface/wbi/search/type?${signed}`,
+        { headers: this.headers(ctx) },
+      );
+      const data = (await response.json()) as {
+        code?: number;
+        message?: string;
+        data?: { result?: Array<{ season_id?: number; title?: string }> };
+      };
+      if (data.code !== 0) {
+        throw new GatewayError(
+          ErrorCode.PROVIDER_ERROR,
+          `B 站搜索失败：${data.message ?? data.code}`,
+        );
+      }
+      results = data.data?.result ?? [];
+    }
     const candidates: ProviderCandidate[] = [];
     // 只展开相似度最高的两部作品，避免为每个搜索结果都拉一次分集列表
     const ranked = results

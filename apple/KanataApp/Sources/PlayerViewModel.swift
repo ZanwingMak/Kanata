@@ -26,6 +26,15 @@ final class PlayerViewModel {
     private(set) var currentBinding: ProviderCandidate?
     private(set) var localDanmakuFileName: String?
     private(set) var localDanmakuCount = 0
+    private(set) var isSearchingCandidates = false
+    private(set) var isBuffering = false
+    private(set) var playbackRate: Double = 1
+    private(set) var audioTracks: [MediaTrackOption] = []
+    private(set) var subtitleTracks: [MediaTrackOption] = [MediaTrackOption(id: "off", title: "关闭")]
+    private(set) var selectedAudioTrackID: String?
+    private(set) var selectedSubtitleTrackID = "off"
+    private(set) var mediaInfo = PlaybackMediaInfo()
+    private(set) var resumePosition: Double?
     /// 匹配到多个候选且置信度不足时，交由用户选择（FR-MATCH-003）
     var isShowingCandidates = false
 
@@ -46,9 +55,19 @@ final class PlayerViewModel {
     var onItemsChanged: (([DanmakuItem]) -> Void)?
     /// 播放时间变化时的回调
     var onTimeChanged: ((Double, Double) -> Void)?
+    /// 播放、暂停或缓冲状态变化时通知界面同步按钮状态。
+    var onPlaybackStateChanged: ((Bool) -> Void)?
+    /// 播放自然结束时通知界面恢复控制层。
+    var onPlaybackEnded: (() -> Void)?
 
     private var client: GatewayClient?
+    private var builtInClient: BuiltInBilibiliClient?
     private var timeObserver: Any?
+    private var endObserver: NSObjectProtocol?
+    private var timeControlObservation: NSKeyValueObservation?
+    private var itemStatusObservation: NSKeyValueObservation?
+    private var matchingTask: Task<Void, Never>?
+    private var mediaTask: Task<Void, Never>?
     private var securityScopedURL: URL?
     private var seasonKey: String?
     private var localDuration: Double = 0
@@ -56,6 +75,12 @@ final class PlayerViewModel {
     private var onlineItems: [DanmakuItem] = []
     private var localItems: [DanmakuItem] = []
     private var onlineCacheLimitBytes: Int64 = 250 * 1024 * 1024
+    private var audioGroup: AVMediaSelectionGroup?
+    private var subtitleGroup: AVMediaSelectionGroup?
+    private var audioOptions: [String: AVMediaSelectionOption] = [:]
+    private var subtitleOptions: [String: AVMediaSelectionOption] = [:]
+    private var mediaKey = ""
+    private var lastProgressSaveTime: Double = 0
 
     /// 当前视频是否已关联本地弹幕文件。
     var hasLocalDanmaku: Bool { !localItems.isEmpty }
@@ -78,10 +103,21 @@ final class PlayerViewModel {
     /// 释放播放资源与文件访问权。
     /// Swift 6 的 nonisolated deinit 无法访问主线程隔离状态，改由播放页在消失时显式调用。
     func teardown() {
+        matchingTask?.cancel()
+        mediaTask?.cancel()
+        matchingTask = nil
+        mediaTask = nil
+        saveProgressIfNeeded(force: true)
         if let timeObserver {
             player?.removeTimeObserver(timeObserver)
             self.timeObserver = nil
         }
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+        timeControlObservation = nil
+        itemStatusObservation = nil
         player?.pause()
         player = nil
         securityScopedURL?.stopAccessingSecurityScopedResource()
@@ -96,7 +132,10 @@ final class PlayerViewModel {
         resetDanmakuState()
         state = .preparing("正在读取视频…")
         client = settings.makeClient()
+        builtInClient = settings.makeBuiltInBilibiliClient()
         onlineCacheLimitBytes = Int64(settings.onlineDanmakuCacheLimitMB) * 1024 * 1024
+        mediaKey = url.absoluteString
+        mediaInfo.source = url.isFileURL ? "本地文件" : (url.host ?? "网络视频")
 
         // 文件选择器返回的地址需要显式申请访问权（FR-IMP-001）
         if url.startAccessingSecurityScopedResource() {
@@ -114,11 +153,23 @@ final class PlayerViewModel {
 
         let item = AVPlayerItem(asset: asset)
         let player = AVPlayer(playerItem: item)
+        player.automaticallyWaitsToMinimizeStalling = true
         self.player = player
         installTimeObserver(on: player)
+        installPlaybackObservers(on: player, item: item)
+        resumePosition = PlaybackProgressStore.position(for: mediaKey, duration: localDuration)
+        if let resumePosition {
+            await player.seek(to: CMTime(seconds: resumePosition, preferredTimescale: 600))
+        }
         state = .ready
+        mediaInfo.duration = Self.timeLabel(localDuration)
 
-        await matchDanmaku(url: url)
+        mediaTask = Task { [weak self] in
+            await self?.loadMediaOptions(asset: asset, item: item)
+        }
+        matchingTask = Task { [weak self] in
+            await self?.matchDanmaku(url: url)
+        }
     }
 
     /// 识别文件并向网关请求候选
@@ -142,7 +193,7 @@ final class PlayerViewModel {
         let savedCandidate = fingerprint.flatMap { DanmakuBindingStore.candidate(for: $0) }
         currentBinding = savedCandidate
 
-        guard let client else {
+        guard client != nil || builtInClient != nil else {
             if let fingerprint, let savedCandidate,
                await restoreCachedDanmaku(for: savedCandidate, fingerprint: fingerprint) {
                 return
@@ -165,40 +216,58 @@ final class PlayerViewModel {
             danmakuStats = "已保存来源不可用，正在重新匹配…"
         }
 
-        do {
-            let response = try await client.resolve(
-                ResolveRequest(
-                    title: parsedTitle.title,
-                    season: parsedTitle.season,
-                    episode: parsedTitle.isCollection ? nil : parsedTitle.episode,
-                    duration: localDuration,
-                    fingerprint: fingerprint
-                )
+        let result = await resolveCandidates(
+            ResolveRequest(
+                title: parsedTitle.title,
+                season: parsedTitle.season,
+                episode: parsedTitle.isCollection ? nil : parsedTitle.episode,
+                duration: localDuration,
+                fingerprint: fingerprint
             )
-            candidates = response.candidates
-            guard let best = response.candidates.first else {
-                let message = response.degraded.isEmpty
-                    ? "未匹配到弹幕，可手动搜索"
-                    : "未匹配到弹幕（\(response.degraded.map(\.displayName).joined(separator: "、")) 不可用）"
-                danmakuStats = failureMessage(message)
-                isShowingCandidates = true
-                return
-            }
-            // 置信度足够高时直接采用，否则让用户确认
-            if best.confidence >= 0.9 {
-                await loadDanmaku(for: best)
-            } else {
-                danmakuStats = "找到 \(response.candidates.count) 个候选，请选择"
-                isShowingCandidates = true
-            }
-        } catch let error as GatewayError {
-            let message = error.requiresLogin ? "需要登录后才能获取弹幕" : "匹配失败：\(error.errorMessage)"
-            danmakuStats = failureMessage(message)
+        )
+        candidates = result.candidates
+        guard let best = result.candidates.first else {
+            let detail = result.errors.isEmpty ? "" : "（\(result.errors.joined(separator: "；"))）"
+            danmakuStats = failureMessage("未匹配到弹幕\(detail)，可输入剧名或 B 站链接搜索")
             isShowingCandidates = true
-        } catch {
-            danmakuStats = failureMessage("匹配失败：\(error.localizedDescription)")
+            return
+        }
+        // 置信度足够高时直接采用，否则让用户确认。
+        if best.confidence >= 0.9 {
+            await loadDanmaku(for: best)
+        } else {
+            danmakuStats = "找到 \(result.candidates.count) 个候选，请选择"
             isShowingCandidates = true
         }
+    }
+
+    /// 按“App 内置来源 → 用户网关”的顺序解析候选，任一来源失败都不会阻塞播放。
+    /// - Parameter request: 标题、季集号、时长与可选指纹。
+    /// - Returns: 候选列表与可展示的降级原因。
+    private func resolveCandidates(
+        _ request: ResolveRequest
+    ) async -> (candidates: [ProviderCandidate], errors: [String]) {
+        var errors: [String] = []
+        if let builtInClient {
+            do {
+                let candidates = try await builtInClient.search(request)
+                if !candidates.isEmpty { return (candidates, errors) }
+            } catch {
+                errors.append(error.localizedDescription)
+            }
+        }
+        if let client {
+            do {
+                let response = try await client.resolve(request)
+                if !response.candidates.isEmpty { return (response.candidates, errors) }
+                errors.append(contentsOf: response.degraded.map { "\($0.displayName)暂不可用" })
+            } catch let error as GatewayError {
+                errors.append(error.requiresLogin ? "网关来源需要登录" : error.errorMessage)
+            } catch {
+                errors.append("网关连接失败")
+            }
+        }
+        return ([], errors)
     }
 
     /// 拉取指定候选的弹幕，并在成功后保存文件指纹绑定。
@@ -211,45 +280,91 @@ final class PlayerViewModel {
         for candidate: ProviderCandidate,
         persistBinding: Bool = true
     ) async -> Bool {
-        guard let client else { return false }
         danmakuStats = "正在加载弹幕…"
-        do {
-            let response = try await client.danmaku(
-                refs: [DanmakuRef(source: candidate.source, platformEpisodeId: candidate.platformEpisodeId)]
-            )
-            onlineItems = response.items
-            rebuildRawItems()
-            if persistBinding, let currentFingerprint {
-                DanmakuBindingStore.save(candidate, for: currentFingerprint)
+        var errors: [String] = []
+        if candidate.source == .bilibili, let builtInClient {
+            let startedAt = Date()
+            do {
+                let items = try await builtInClient.danmaku(platformEpisodeID: candidate.platformEpisodeId)
+                if !items.isEmpty {
+                    await applyLoadedDanmaku(
+                        items,
+                        candidate: candidate,
+                        elapsedMs: Int(Date().timeIntervalSince(startedAt) * 1_000),
+                        fallback: false,
+                        persistBinding: persistBinding
+                    )
+                    return true
+                }
+                errors.append("内置来源返回空弹幕")
+            } catch {
+                errors.append(error.localizedDescription)
             }
-            if let currentFingerprint {
-                try? await DanmakuCacheStore.shared.save(
-                    items: response.items,
-                    candidate: candidate,
-                    for: currentFingerprint,
-                    maximumBytes: onlineCacheLimitBytes
-                )
-            }
-            currentBinding = candidate
-            isShowingCandidates = false
-            // 本地与平台时长差异较大时提示用户校正（FR-SYNC-003）
-            let hint = shouldHintTimeline(remote: candidate.duration) ? "，时长差异较大建议校正" : ""
-            let fallback = response.degraded.contains { $0.source == candidate.source }
-                ? " · 缓存兜底"
-                : ""
-            let count = localItems.isEmpty
-                ? "\(response.items.count) 条"
-                : "\(response.items.count) 条在线 + \(localItems.count) 条本地"
-            let sourceName = candidate.sourceInstanceName ?? candidate.source.displayName
-            danmakuStats = "\(count) · \(sourceName) · \(response.stats.elapsedMs)ms\(fallback)\(hint)"
-            return true
-        } catch let error as GatewayError {
-            danmakuStats = failureMessage("弹幕加载失败：\(error.errorMessage)")
-        } catch {
-            danmakuStats = failureMessage("弹幕加载失败：\(error.localizedDescription)")
         }
+        if let client {
+            do {
+                let response = try await client.danmaku(
+                    refs: [DanmakuRef(source: candidate.source, platformEpisodeId: candidate.platformEpisodeId)]
+                )
+                if response.items.isEmpty {
+                    errors.append("网关来源返回空弹幕")
+                } else {
+                    await applyLoadedDanmaku(
+                        response.items,
+                        candidate: candidate,
+                        elapsedMs: response.stats.elapsedMs,
+                        fallback: response.degraded.contains { $0.source == candidate.source },
+                        persistBinding: persistBinding
+                    )
+                    return true
+                }
+            } catch let error as GatewayError {
+                errors.append(error.errorMessage)
+            } catch {
+                errors.append("网关连接失败")
+            }
+        }
+        danmakuStats = failureMessage("弹幕加载失败：\(errors.joined(separator: "；"))")
         isShowingCandidates = true
         return false
+    }
+
+    /// 应用已获取的在线弹幕，并写入绑定与离线缓存。
+    /// - Parameters:
+    ///   - items: 统一弹幕条目。
+    ///   - candidate: 当前来源候选。
+    ///   - elapsedMs: 获取耗时。
+    ///   - fallback: 是否来自旧缓存或来源降级。
+    ///   - persistBinding: 是否保存本次绑定。
+    private func applyLoadedDanmaku(
+        _ items: [DanmakuItem],
+        candidate: ProviderCandidate,
+        elapsedMs: Int,
+        fallback: Bool,
+        persistBinding: Bool
+    ) async {
+        onlineItems = items
+        rebuildRawItems()
+        if persistBinding, let currentFingerprint {
+            DanmakuBindingStore.save(candidate, for: currentFingerprint)
+        }
+        if let currentFingerprint {
+            try? await DanmakuCacheStore.shared.save(
+                items: items,
+                candidate: candidate,
+                for: currentFingerprint,
+                maximumBytes: onlineCacheLimitBytes
+            )
+        }
+        currentBinding = candidate
+        isShowingCandidates = false
+        let hint = shouldHintTimeline(remote: candidate.duration) ? " · 时长差异较大，建议校正" : ""
+        let fallbackText = fallback ? " · 缓存兜底" : ""
+        let count = localItems.isEmpty
+            ? "\(items.count) 条"
+            : "\(items.count) 条在线 + \(localItems.count) 条本地"
+        let sourceName = candidate.sourceInstanceName ?? candidate.source.displayName
+        danmakuStats = "\(count) · \(sourceName) · \(elapsedMs)ms\(fallbackText)\(hint)"
     }
 
     /// 导入本地弹幕并按当前视频指纹持久化。
@@ -303,17 +418,22 @@ final class PlayerViewModel {
 
     /// 手动搜索并刷新候选列表
     func search(keyword: String) async {
-        guard let client else { return }
-        danmakuStats = "正在搜索…"
-        do {
-            let response = try await client.resolve(
-                ResolveRequest(title: keyword, episode: parsed?.episode, duration: localDuration)
-            )
-            candidates = response.candidates
-            danmakuStats = "找到 \(response.candidates.count) 个候选"
-        } catch {
-            danmakuStats = "搜索失败：\(error.localizedDescription)"
+        let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, client != nil || builtInClient != nil else {
+            danmakuStats = "没有启用可用的在线弹幕来源"
+            return
         }
+        isSearchingCandidates = true
+        defer { isSearchingCandidates = false }
+        danmakuStats = "正在搜索…"
+        // 手动搜索不强制文件名解析出的集号，避免错误集号把全部候选过滤掉。
+        let result = await resolveCandidates(
+            ResolveRequest(title: query, duration: localDuration)
+        )
+        candidates = result.candidates
+        danmakuStats = result.candidates.isEmpty
+            ? "没有找到结果\(result.errors.isEmpty ? "" : "：\(result.errors.joined(separator: "；"))")"
+            : "找到 \(result.candidates.count) 个候选"
     }
 
     /// 读取当前视频此前导入的本地弹幕归档。
@@ -393,17 +513,72 @@ final class PlayerViewModel {
         localDanmakuCount = 0
         currentFingerprint = nil
         isShowingCandidates = false
+        isSearchingCandidates = false
         onItemsChanged?([])
     }
 
     // MARK: - 播放控制
 
-    func play() { player?.play() }
-    func pause() { player?.pause() }
+    /// 按当前倍速继续播放。
+    func play() {
+        guard let player else { return }
+        player.playImmediately(atRate: Float(playbackRate))
+        onPlaybackStateChanged?(true)
+    }
+
+    /// 暂停视频并保存当前断点。
+    func pause() {
+        player?.pause()
+        saveProgressIfNeeded(force: true)
+        onPlaybackStateChanged?(false)
+    }
+
+    /// 设置播放倍速；播放中立即生效，暂停时只记住选择。
+    /// - Parameter rate: 0.5 到 2.0 的播放倍率。
+    func setPlaybackRate(_ rate: Double) {
+        playbackRate = min(max(rate, 0.5), 2)
+        if player?.rate ?? 0 > 0 {
+            player?.rate = Float(playbackRate)
+        }
+    }
+
+    /// 设置播放器输出音量。
+    /// - Parameter volume: 0 到 1 的音量值。
+    func setVolume(_ volume: Double) {
+        player?.volume = Float(min(max(volume, 0), 1))
+    }
+
+    /// 读取播放器当前输出音量。
+    var volume: Double { Double(player?.volume ?? 1) }
+
+    /// 选择一条内封音轨。
+    /// - Parameter id: 音轨稳定标识。
+    func selectAudioTrack(id: String) {
+        guard let item = player?.currentItem,
+              let audioGroup,
+              let option = audioOptions[id] else { return }
+        item.select(option, in: audioGroup)
+        selectedAudioTrackID = id
+    }
+
+    /// 选择或关闭一条内封字幕轨。
+    /// - Parameter id: 字幕轨标识；off 表示关闭。
+    func selectSubtitleTrack(id: String) {
+        guard let item = player?.currentItem, let subtitleGroup else { return }
+        item.select(id == "off" ? nil : subtitleOptions[id], in: subtitleGroup)
+        selectedSubtitleTrackID = id
+    }
 
     /// 跳转到指定时间，弹幕层会在下一次同步时重建（FR-PLY-012）
     func seek(to seconds: Double) {
-        player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 600))
+        let target = min(max(seconds, 0), max(localDuration, 0))
+        player?.seek(
+            to: CMTime(seconds: target, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+        lastProgressSaveTime = target
+        PlaybackProgressStore.save(position: target, duration: localDuration, for: mediaKey)
     }
 
     var duration: Double { localDuration }
@@ -415,7 +590,116 @@ final class PlayerViewModel {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.onTimeChanged?(time.seconds, Double(player.rate))
+                self.saveProgressIfNeeded(currentTime: time.seconds)
             }
         }
+    }
+
+    /// 监听播放缓冲、失败和自然结束状态。
+    /// - Parameters:
+    ///   - player: 当前 AVPlayer。
+    ///   - item: 当前播放项。
+    private func installPlaybackObservers(on player: AVPlayer, item: AVPlayerItem) {
+        timeControlObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isBuffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                self.onPlaybackStateChanged?(player.timeControlStatus == .playing)
+            }
+        }
+        itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor [weak self] in
+                self?.state = .failed(item.error?.localizedDescription ?? "播放器无法解码该视频")
+                self?.onPlaybackStateChanged?(false)
+            }
+        }
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                PlaybackProgressStore.remove(for: self.mediaKey)
+                self.onPlaybackStateChanged?(false)
+                self.onPlaybackEnded?()
+            }
+        }
+    }
+
+    /// 枚举内封音频、字幕与视频分辨率，供播放控制面板展示。
+    /// - Parameters:
+    ///   - asset: 当前媒体资源。
+    ///   - item: 当前播放项。
+    private func loadMediaOptions(asset: AVAsset, item: AVPlayerItem) async {
+        do {
+            let group = try await asset.loadMediaSelectionGroup(for: .audible)
+            audioGroup = group
+            if let group {
+                audioOptions = Dictionary(uniqueKeysWithValues: group.options.enumerated().map { index, option in
+                    ("audio-\(index)", option)
+                })
+                audioTracks = group.options.enumerated().map { index, option in
+                    MediaTrackOption(id: "audio-\(index)", title: option.displayName)
+                }
+                if let selected = item.currentMediaSelection.selectedMediaOption(in: group),
+                   let index = group.options.firstIndex(of: selected) {
+                    selectedAudioTrackID = "audio-\(index)"
+                } else {
+                    selectedAudioTrackID = audioTracks.first?.id
+                }
+            }
+        } catch {
+            audioTracks = []
+        }
+
+        do {
+            let group = try await asset.loadMediaSelectionGroup(for: .legible)
+            subtitleGroup = group
+            if let group {
+                subtitleOptions = Dictionary(uniqueKeysWithValues: group.options.enumerated().map { index, option in
+                    ("subtitle-\(index)", option)
+                })
+                subtitleTracks = [MediaTrackOption(id: "off", title: "关闭")] + group.options.enumerated().map { index, option in
+                    MediaTrackOption(id: "subtitle-\(index)", title: option.displayName)
+                }
+            }
+        } catch {
+            subtitleTracks = [MediaTrackOption(id: "off", title: "关闭")]
+        }
+
+        if let track = try? await asset.loadTracks(withMediaType: .video).first,
+           let naturalSize = try? await track.load(.naturalSize),
+           let transform = try? await track.load(.preferredTransform) {
+            let transformed = naturalSize.applying(transform)
+            mediaInfo.resolution = "\(Int(abs(transformed.width))) × \(Int(abs(transformed.height)))"
+        }
+    }
+
+    /// 定期保存断点，避免每 0.1 秒写入 UserDefaults。
+    /// - Parameters:
+    ///   - currentTime: 可选的当前秒数，缺省时读取播放器。
+    ///   - force: 是否忽略五秒节流。
+    private func saveProgressIfNeeded(currentTime: Double? = nil, force: Bool = false) {
+        guard !mediaKey.isEmpty else { return }
+        let value = currentTime ?? player?.currentTime().seconds ?? 0
+        guard force || abs(value - lastProgressSaveTime) >= 5 else { return }
+        lastProgressSaveTime = value
+        PlaybackProgressStore.save(position: value, duration: localDuration, for: mediaKey)
+    }
+
+    /// 把秒数转换为播放信息面板使用的时间文本。
+    /// - Parameter seconds: 秒数。
+    /// - Returns: mm:ss 或 h:mm:ss。
+    private static func timeLabel(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "--:--" }
+        let value = Int(seconds.rounded())
+        let hours = value / 3_600
+        let minutes = value % 3_600 / 60
+        let remaining = value % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, remaining)
+            : String(format: "%02d:%02d", minutes, remaining)
     }
 }

@@ -155,11 +155,13 @@ public final class DanmakuCanvasView: UIView {
         let rules = config.blockRules
         let regexes = rules.regexPatterns.compactMap { try? NSRegularExpression(pattern: $0) }
         var seenContents = Set<String>()
+        var seenMergeKeys = Set<String>()
         var duplicateCount: [String: Int] = [:]
 
-        if config.mergeDuplicates || rules.blockRepeated {
+        if config.mergeDuplicates {
             for item in allItems {
-                duplicateCount[item.content, default: 0] += 1
+                let key = "\(Int(item.time / 2))|\(item.content)"
+                duplicateCount[key, default: 0] += 1
             }
         }
 
@@ -171,10 +173,25 @@ public final class DanmakuCanvasView: UIView {
             if rules.keywords.contains(where: { !$0.isEmpty && item.content.contains($0) }) { return nil }
             let range = NSRange(item.content.startIndex..., in: item.content)
             if regexes.contains(where: { $0.firstMatch(in: item.content, range: range) != nil }) { return nil }
-            if (rules.blockRepeated || config.mergeDuplicates) && !seenContents.insert(item.content).inserted {
+            if rules.blockRepeated, !seenContents.insert(item.content).inserted {
                 return nil
             }
-            return item
+            guard config.mergeDuplicates else { return item }
+            let mergeKey = "\(Int(item.time / 2))|\(item.content)"
+            guard seenMergeKeys.insert(mergeKey).inserted else { return nil }
+            return DanmakuItem(
+                id: item.id,
+                time: item.time,
+                mode: item.mode,
+                fontSize: item.fontSize,
+                color: item.color,
+                content: item.content,
+                source: item.source,
+                senderHash: item.senderHash,
+                createdAt: item.createdAt,
+                weight: item.weight,
+                dupCount: duplicateCount[mergeKey]
+            )
         }
     }
 

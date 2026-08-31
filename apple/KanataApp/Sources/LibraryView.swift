@@ -1,6 +1,8 @@
+import AVFoundation
 import KanataCore
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 /// 媒体库首页。M0 只支持本地文件导入，NAS 与媒体服务器在 M1 接入（FR-IMP-003 起）。
 struct LibraryView: View {
@@ -11,69 +13,115 @@ struct LibraryView: View {
     @State private var playing: LibraryItem?
     @State private var importError: String?
     @State private var isProcessingImport = false
+    @State private var isAddingNetworkVideo = false
+    @State private var searchText = ""
+    @State private var isSearching = false
+
+    #if os(tvOS)
+    private let columns = [GridItem(.adaptive(minimum: 300, maximum: 480), spacing: 36)]
+    #else
+    private let columns = [GridItem(.adaptive(minimum: 170, maximum: 320), spacing: 16)]
+    #endif
+
+    /// 按标题与解析信息过滤媒体库。
+    private var filteredItems: [LibraryItem] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return items }
+        return items.filter {
+            $0.displayName.localizedCaseInsensitiveContains(query)
+                || $0.subtitle.localizedCaseInsensitiveContains(query)
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            Group {
+            ZStack {
+                LinearGradient(
+                    colors: [Color.black, Color(red: 0.035, green: 0.055, blue: 0.11)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
                 if items.isEmpty {
                     ContentUnavailableView {
-                        Label("还没有视频", systemImage: "film.stack")
+                        Label("开始建立你的媒体库", systemImage: "play.rectangle.on.rectangle")
                     } description: {
                         #if os(tvOS)
-                        Text("Apple TV 仅显示已同步的网络媒体；请先在其他设备添加媒体源")
+                        Text("添加 NAS、HLS 或其他可访问的网络视频地址")
                         #else
-                        Text("导入本地视频后，Kanata 会自动匹配并加载弹幕")
+                        Text("导入本地视频或添加网络地址，Kanata 会边播放边自动匹配弹幕")
                         #endif
                     } actions: {
-                        #if os(tvOS)
-                        Button("打开设置") { isShowingSettings = true }
-                            .buttonStyle(.borderedProminent)
-                        #else
-                        Button("导入视频") { isImporting = true }
+                        #if !os(tvOS)
+                        Button("导入本地视频") { isImporting = true }
                             .buttonStyle(.borderedProminent)
                             .disabled(isProcessingImport)
                         #endif
+                        Button("添加网络视频") { isAddingNetworkVideo = true }
+                            .buttonStyle(.bordered)
                     }
                 } else {
-                    List {
-                        ForEach(items) { item in
-                            Button {
-                                playing = item
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.displayName).font(.body).lineLimit(2)
-                                    Text(item.subtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text("全部视频")
+                                    .font(.title2.bold())
+                                Spacer()
+                                Text("\(filteredItems.count) 个项目")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+                                ForEach(filteredItems) { item in
+                                    mediaCard(item)
                                 }
                             }
                         }
-                        .onDelete { offsets in
-                            items.remove(atOffsets: offsets)
-                            LibraryStore.save(items)
-                        }
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 32)
                     }
+                    .scrollIndicators(.hidden)
                 }
             }
             .navigationTitle("媒体库")
+            .kanataLibrarySearch(text: $searchText, isPresented: $isSearching)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { isShowingSettings = true } label: {
                         Image(systemName: "gearshape")
                     }
                 }
-                #if !os(tvOS)
+                #if os(tvOS)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { isSearching = true } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel("搜索媒体库")
+                }
+                #endif
                 ToolbarItem(placement: .topBarTrailing) {
                     if isProcessingImport {
                         ProgressView()
                     } else {
-                        Button { isImporting = true } label: {
+                        Menu {
+                            #if !os(tvOS)
+                            Button {
+                                isImporting = true
+                            } label: {
+                                Label("导入本地视频", systemImage: "folder.badge.plus")
+                            }
+                            #endif
+                            Button {
+                                isAddingNetworkVideo = true
+                            } label: {
+                                Label("添加网络视频", systemImage: "network")
+                            }
+                        } label: {
                             Image(systemName: "plus")
                         }
                         .accessibilityLabel("导入视频和弹幕")
                     }
                 }
-                #endif
             }
             .kanataFileImporter(
                 isPresented: $isImporting,
@@ -107,8 +155,72 @@ struct LibraryView: View {
             .sheet(isPresented: $isShowingSettings) {
                 SettingsView()
             }
+            #if os(tvOS)
+            .sheet(isPresented: $isSearching) {
+                TVLibrarySearchSheet(searchText: $searchText)
+            }
+            #endif
+            .sheet(isPresented: $isAddingNetworkVideo) {
+                NetworkVideoSheet { item in
+                    if !items.contains(where: { $0.id == item.id }) {
+                        items.append(item)
+                        LibraryStore.save(items)
+                    }
+                    playing = item
+                }
+            }
             .task { await scanDocuments() }
         }
+        .tint(.cyan)
+    }
+
+    /// 创建一个带视频缩略图、来源与删除菜单的媒体卡片。
+    /// - Parameter item: 媒体库条目。
+    /// - Returns: 可点击播放的卡片视图。
+    private func mediaCard(_ item: LibraryItem) -> some View {
+        Button {
+            playing = item
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                MediaArtworkView(item: item)
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(alignment: .bottomLeading) {
+                        Label(
+                            item.remoteURLString == nil ? "本地" : "网络",
+                            systemImage: item.remoteURLString == nil ? "internaldrive" : "network"
+                        )
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(.black.opacity(0.62), in: Capsule())
+                        .padding(10)
+                    }
+                Text(item.displayName)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Text(item.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("从媒体库移除", systemImage: "trash", role: .destructive) {
+                removeItem(item)
+            }
+        }
+        .accessibilityLabel("播放 \(item.displayName)")
+    }
+
+    /// 从媒体库索引移除条目，不删除原始视频文件。
+    /// - Parameter item: 待移除的条目。
+    private func removeItem(_ item: LibraryItem) {
+        items.removeAll { $0.id == item.id }
+        LibraryStore.save(items)
     }
 
     /// 扫描 App 的 Documents 目录，收录通过文件共享或 AirDrop 放进来的视频（FR-IMP-002）
@@ -284,12 +396,152 @@ struct LibraryView: View {
     }
 }
 
+private extension View {
+    /// 仅在触屏平台使用系统搜索栏，避免 tvOS 启动时自动弹出屏幕键盘。
+    /// - Parameters:
+    ///   - text: 当前搜索关键词。
+    ///   - isPresented: 搜索栏是否已展开。
+    /// - Returns: 应用平台搜索行为后的视图。
+    @ViewBuilder
+    func kanataLibrarySearch(text: Binding<String>, isPresented: Binding<Bool>) -> some View {
+        #if os(tvOS)
+        self
+        #else
+        searchable(text: text, isPresented: isPresented, prompt: "搜索标题或集数")
+        #endif
+    }
+}
+
+#if os(tvOS)
+/// Apple TV 媒体库搜索面板，仅在用户主动点击搜索后显示键盘。
+private struct TVLibrarySearchSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var searchText: String
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("标题或集数", text: $searchText)
+            }
+            .navigationTitle("搜索媒体库")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("清除") {
+                        searchText = ""
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
+
+/// 媒体卡片的异步视频缩略图；网络视频保持轻量占位，避免列表预加载整段流。
+private struct MediaArtworkView: View {
+    let item: LibraryItem
+    @State private var thumbnail: UIImage?
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.08, green: 0.16, blue: 0.32), Color(red: 0.22, green: 0.08, blue: 0.34)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: item.remoteURLString == nil ? "play.rectangle.fill" : "network")
+                    .font(.system(size: 42, weight: .light))
+                    .foregroundStyle(.white.opacity(0.82))
+            }
+        }
+        .clipped()
+        .task(id: item.id) { await loadThumbnail() }
+    }
+
+    /// 从本地视频第一秒异步生成缩略图；失败时保留渐变占位。
+    private func loadThumbnail() async {
+        guard item.remoteURLString == nil, let url = item.resolveURL() else { return }
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 640, height: 360)
+        if let (image, _) = try? await generator.image(at: CMTime(seconds: 1, preferredTimescale: 600)) {
+            thumbnail = UIImage(cgImage: image)
+        }
+    }
+}
+
+/// 添加网络直链或 HLS 地址的轻量表单。
+private struct NetworkVideoSheet: View {
+    let onAdd: (LibraryItem) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var urlString = ""
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("视频地址") {
+                    TextField("名称（可选）", text: $name)
+                    TextField("https://…/video.mp4 或 playlist.m3u8", text: $urlString)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    if let errorMessage {
+                        Text(errorMessage).font(.caption).foregroundStyle(.red)
+                    }
+                }
+                Section {
+                    Text("支持 HTTPS、HLS，以及同一局域网内可直接访问的 HTTP 视频地址。需要账号密码的 WebDAV、SMB 和媒体服务器会在媒体源页统一管理。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("添加网络视频")
+            .kanataInlineNavigationTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("添加并播放") { addVideo() }
+                        .disabled(urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    /// 校验 URL、保存媒体条目并立即开始播放。
+    private func addVideo() {
+        let value = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased()) else {
+            errorMessage = "请输入有效的 HTTP 或 HTTPS 地址"
+            return
+        }
+        onAdd(LibraryItem(remoteURL: url, name: name))
+        dismiss()
+    }
+}
+
 /// 媒体库条目。M0 只保存书签与解析结果，扫描与刮削在 M1 补齐。
 struct LibraryItem: Identifiable, Codable, Hashable {
     let id: String
     let displayName: String
     /// 安全作用域书签，App 重启后仍可访问原文件
-    let bookmark: Data
+    let bookmark: Data?
+    /// 可直接交给 AVPlayer 的 HTTP(S) 视频或 HLS 地址。
+    let remoteURLString: String?
     let title: String
     let season: Int?
     let episode: Int?
@@ -303,6 +555,26 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.id = url.lastPathComponent
         self.displayName = url.lastPathComponent
         self.bookmark = bookmark
+        self.remoteURLString = nil
+        self.title = parsed.title
+        self.season = parsed.season
+        self.episode = parsed.episode
+    }
+
+    /// 创建一个网络视频条目。
+    /// - Parameters:
+    ///   - remoteURL: HTTP(S) 视频、HLS 或 NAS 直链。
+    ///   - name: 用户提供的显示名称，空值时从 URL 推断。
+    init(remoteURL: URL, name: String) {
+        let inferredName = remoteURL.deletingPathExtension().lastPathComponent.removingPercentEncoding ?? ""
+        let displayName = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? (!inferredName.isEmpty ? inferredName : (remoteURL.host ?? "网络视频"))
+            : name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsed = TitleParser.parse(displayName)
+        self.id = "remote:\(remoteURL.absoluteString)"
+        self.displayName = displayName
+        self.bookmark = nil
+        self.remoteURLString = remoteURL.absoluteString
         self.title = parsed.title
         self.season = parsed.season
         self.episode = parsed.episode
@@ -314,11 +586,16 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         if let season, let episode {
             parts.append(String(format: "S%02dE%02d", season, episode))
         }
+        if let remoteURLString, let host = URL(string: remoteURLString)?.host {
+            parts.append(host)
+        }
         return parts.joined(separator: " · ")
     }
 
     /// 解析书签取回文件地址，文件已失效时返回 nil
     func resolveURL() -> URL? {
+        if let remoteURLString { return URL(string: remoteURLString) }
+        guard let bookmark else { return nil }
         var isStale = false
         return try? URL(
             resolvingBookmarkData: bookmark,

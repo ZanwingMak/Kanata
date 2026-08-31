@@ -3,6 +3,43 @@ import KanataCore
 import KanataRender
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(iOS)
+import UIKit
+#endif
+
+/// 播放画面的缩放方式。
+enum PlayerScalingMode: String, CaseIterable, Identifiable {
+    case fit
+    case fill
+    case stretch
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fit: "适应"
+        case .fill: "填充"
+        case .stretch: "拉伸"
+        }
+    }
+
+    var gravity: AVLayerVideoGravity {
+        switch self {
+        case .fit: .resizeAspect
+        case .fill: .resizeAspectFill
+        case .stretch: .resize
+        }
+    }
+}
+
+#if os(iOS)
+/// iPhone 与 iPad 播放画面的连续手势类型。
+private enum PlayerGestureMode {
+    case seek
+    case brightness
+    case volume
+}
+#endif
 
 /// 播放页。视频、弹幕、控制三层叠加。
 struct PlayerScreen: View {
@@ -13,8 +50,10 @@ struct PlayerScreen: View {
 
     @State private var viewModel = PlayerViewModel()
     @State private var canvasBridge = DanmakuCanvasBridge()
+    @State private var surfaceController = PlayerSurfaceController()
     @State private var isShowingControls = true
     @State private var isShowingDanmakuPanel = false
+    @State private var isShowingPlaybackPanel = false
     @State private var isPlaying = false
     @State private var currentTime: Double = 0
     @State private var isSeeking = false
@@ -24,13 +63,23 @@ struct PlayerScreen: View {
     @State private var osdText: String?
     @State private var osdTask: Task<Void, Never>?
     @State private var controlsTask: Task<Void, Never>?
+    @State private var scalingMode = PlayerScalingMode.fit
+    #if os(iOS)
+    @State private var gestureMode: PlayerGestureMode?
+    @State private var gestureStartValue: Double = 0
+    #endif
 
     var body: some View {
         @Bindable var settings = settings
 
         ZStack {
             Color.black.ignoresSafeArea()
-            VideoSurface(player: viewModel.player).ignoresSafeArea()
+            VideoSurface(
+                player: viewModel.player,
+                videoGravity: scalingMode.gravity,
+                controller: surfaceController
+            )
+                .ignoresSafeArea()
 
             DanmakuOverlay(config: settings.danmakuConfig) { view in
                 canvasBridge.attach(view)
@@ -38,8 +87,18 @@ struct PlayerScreen: View {
             .ignoresSafeArea()
             .allowsHitTesting(false)
 
+            interactionLayer
+
             if isShowingControls {
                 controlsLayer
+            }
+            if viewModel.isBuffering, case .ready = viewModel.state {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+                    .padding(16)
+                    .background(.black.opacity(0.55), in: Circle())
+                    .allowsHitTesting(false)
             }
             stateOverlay
             if let osdText {
@@ -51,10 +110,6 @@ struct PlayerScreen: View {
                     .transition(.opacity)
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            setControlsVisible(!isShowingControls)
-        }
         .kanataStatusBarHidden()
         .task {
             wireCallbacks()
@@ -62,6 +117,10 @@ struct PlayerScreen: View {
             if case .ready = viewModel.state {
                 viewModel.play()
                 isPlaying = true
+                if let resumePosition = viewModel.resumePosition {
+                    currentTime = resumePosition
+                    showOSD("继续播放 · \(timeLabel(resumePosition))")
+                }
                 scheduleControlsHide()
             }
         }
@@ -75,6 +134,22 @@ struct PlayerScreen: View {
                 config: $settings.danmakuConfig,
                 offset: $viewModel.offset,
                 onOffsetChanged: { showOSD(String(format: "弹幕延迟 %@%.1fs", viewModel.offset >= 0 ? "+" : "", viewModel.offset)) }
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $isShowingPlaybackPanel) {
+            PlaybackOptionsPanel(
+                viewModel: viewModel,
+                scalingMode: $scalingMode,
+                onImportDanmaku: {
+                    isShowingPlaybackPanel = false
+                    isImportingDanmaku = true
+                },
+                onMatchDanmaku: {
+                    isShowingPlaybackPanel = false
+                    viewModel.isShowingCandidates = true
+                },
+                onPictureInPicture: { surfaceController.togglePictureInPicture() }
             )
             .presentationDetents([.medium, .large])
         }
@@ -99,6 +174,76 @@ struct PlayerScreen: View {
             Text(danmakuOperationError ?? "未知错误")
         }
     }
+
+    /// 覆盖在视频与弹幕之上的手势层；控制按钮出现时仍由上层按钮优先响应。
+    @ViewBuilder
+    private var interactionLayer: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                togglePlayback()
+                showOSD(isPlaying ? "播放" : "暂停")
+            }
+            .onTapGesture {
+                setControlsVisible(!isShowingControls)
+            }
+            #if os(iOS)
+            .gesture(playerDragGesture)
+            #endif
+    }
+
+    #if os(iOS)
+    /// 横向拖动快进/后退，纵向拖动左侧亮度、右侧音量。
+    private var playerDragGesture: some Gesture {
+        DragGesture(minimumDistance: 18)
+            .onChanged { value in
+                if gestureMode == nil {
+                    controlsTask?.cancel()
+                    if abs(value.translation.width) >= abs(value.translation.height) {
+                        gestureMode = .seek
+                        gestureStartValue = currentTime
+                        isSeeking = true
+                    } else if value.startLocation.x < UIScreen.main.bounds.width / 2 {
+                        gestureMode = .brightness
+                        gestureStartValue = Double(UIScreen.main.brightness)
+                    } else {
+                        gestureMode = .volume
+                        gestureStartValue = viewModel.volume
+                    }
+                }
+                switch gestureMode {
+                case .seek:
+                    let span = min(max(viewModel.duration / 8, 30), 300)
+                    currentTime = min(
+                        max(gestureStartValue + Double(value.translation.width / 280) * span, 0),
+                        max(viewModel.duration, 0)
+                    )
+                    osdText = "\(value.translation.width >= 0 ? "快进" : "后退") · \(timeLabel(currentTime))"
+                case .brightness:
+                    let value = min(max(gestureStartValue - Double(value.translation.height / 300), 0.05), 1)
+                    UIScreen.main.brightness = CGFloat(value)
+                    osdText = "亮度 · \(Int(value * 100))%"
+                case .volume:
+                    let volume = min(max(gestureStartValue - Double(value.translation.height / 300), 0), 1)
+                    viewModel.setVolume(volume)
+                    osdText = "音量 · \(Int(volume * 100))%"
+                case nil:
+                    break
+                }
+            }
+            .onEnded { _ in
+                let finalText = osdText
+                if gestureMode == .seek {
+                    viewModel.seek(to: currentTime)
+                    canvasBridge.sync(time: currentTime, rate: isPlaying ? viewModel.playbackRate : 0)
+                }
+                gestureMode = nil
+                isSeeking = false
+                if let finalText { showOSD(finalText) }
+                scheduleControlsHide()
+            }
+    }
+    #endif
 
     /// 根据播放器加载状态显示进度或可恢复的错误提示。
     @ViewBuilder
@@ -134,23 +279,41 @@ struct PlayerScreen: View {
                 Button {
                     dismiss()
                 } label: {
-                    Image(systemName: "chevron.left").font(.title2)
-                        .frame(minWidth: 44, minHeight: 44)
+                    controlSymbol("chevron.left", prominent: false)
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("返回媒体库")
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(viewModel.parsed?.title ?? url.lastPathComponent)
                         .font(.headline).lineLimit(1)
                     Text(viewModel.danmakuStats)
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(2)
                 }
                 Spacer()
+                Button {
+                    isShowingPlaybackPanel = true
+                } label: {
+                    controlSymbol("ellipsis", prominent: false)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("更多播放设置")
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 30)
+            .background(
+                LinearGradient(
+                    colors: [.black.opacity(0.78), .black.opacity(0.35), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
 
             Spacer()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 HStack(spacing: 8) {
                     Text(timeLabel(currentTime)).font(.caption.monospacedDigit())
                     #if os(tvOS)
@@ -173,69 +336,88 @@ struct PlayerScreen: View {
                     Text(timeLabel(viewModel.duration)).font(.caption.monospacedDigit())
                 }
 
-                HStack(spacing: 28) {
+                HStack(spacing: 10) {
                     Button {
                         viewModel.seek(to: max(currentTime - 10, 0))
+                        showOSD("后退 10 秒")
                     } label: {
-                        Image(systemName: "gobackward.10").font(.title2)
-                            .frame(minWidth: 44, minHeight: 44)
+                        controlSymbol("gobackward.10", prominent: false)
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("后退 10 秒")
                     Button {
                         togglePlayback()
                     } label: {
-                        Image(systemName: isPlaying ? "pause.fill" : "play.fill").font(.largeTitle)
-                            .frame(minWidth: 52, minHeight: 52)
+                        controlSymbol(isPlaying ? "pause.fill" : "play.fill", prominent: true)
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel(isPlaying ? "暂停" : "播放")
                     Button {
                         viewModel.seek(to: min(currentTime + 10, viewModel.duration))
+                        showOSD("前进 10 秒")
                     } label: {
-                        Image(systemName: "goforward.10").font(.title2)
-                            .frame(minWidth: 44, minHeight: 44)
+                        controlSymbol("goforward.10", prominent: false)
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("前进 10 秒")
                     Spacer()
-                    // 弹幕开关与设置入口：从播放画面 1 步可达（FR-PLY-406）
                     Button {
                         settings.danmakuConfig.enabled.toggle()
                         showOSD(settings.danmakuConfig.enabled ? "弹幕已开启" : "弹幕已关闭")
                     } label: {
-                        Image(systemName: settings.danmakuConfig.enabled ? "captions.bubble.fill" : "captions.bubble")
-                            .font(.title2)
-                            .frame(minWidth: 44, minHeight: 44)
+                        controlSymbol(
+                            settings.danmakuConfig.enabled ? "captions.bubble.fill" : "captions.bubble",
+                            prominent: false
+                        )
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel(settings.danmakuConfig.enabled ? "关闭弹幕" : "开启弹幕")
                     Button {
                         isShowingDanmakuPanel = true
                     } label: {
-                        Image(systemName: "slider.horizontal.3").font(.title2)
-                            .frame(minWidth: 44, minHeight: 44)
+                        controlSymbol("slider.horizontal.3", prominent: false)
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("弹幕设置")
-                    #if !os(tvOS)
-                    Button {
-                        isImportingDanmaku = true
-                    } label: {
-                        Image(systemName: "doc.badge.plus").font(.title2)
-                            .frame(minWidth: 44, minHeight: 44)
-                    }
-                    .accessibilityLabel("导入本地弹幕")
-                    #endif
                     Button {
                         viewModel.isShowingCandidates = true
                     } label: {
-                        Image(systemName: "magnifyingglass").font(.title2)
-                            .frame(minWidth: 44, minHeight: 44)
+                        controlSymbol("text.magnifyingglass", prominent: false)
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("手动匹配弹幕")
                 }
             }
-            .padding()
-            .background(.black.opacity(0.5))
+            .padding(.horizontal, 16)
+            .padding(.top, 28)
+            .padding(.bottom, 12)
+            .background(
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.4), .black.opacity(0.82)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
         }
         .foregroundStyle(.white)
         .transition(.opacity)
+    }
+
+    /// 统一播放器控制按钮的尺寸、材质与高对比度。
+    /// - Parameters:
+    ///   - name: SF Symbol 名称。
+    ///   - prominent: 是否为中心播放主按钮。
+    /// - Returns: 可直接放进 Button label 的图标视图。
+    private func controlSymbol(_ name: String, prominent: Bool) -> some View {
+        Image(systemName: name)
+            .font(prominent ? .title2.weight(.semibold) : .body.weight(.semibold))
+            .frame(width: prominent ? 52 : 44, height: prominent ? 52 : 44)
+            .background(
+                prominent ? Color.white.opacity(0.24) : Color.black.opacity(0.34),
+                in: Circle()
+            )
+            .overlay(Circle().stroke(.white.opacity(prominent ? 0.25 : 0.12), lineWidth: 1))
+            .contentShape(Circle())
     }
 
     /// 把 ViewModel 的数据与时间回调接到渲染层
@@ -247,6 +429,20 @@ struct PlayerScreen: View {
         viewModel.onTimeChanged = { time, rate in
             if !isSeeking { currentTime = time }
             bridge.sync(time: time, rate: rate)
+        }
+        viewModel.onPlaybackStateChanged = { playing in
+            isPlaying = playing
+            if playing {
+                scheduleControlsHide()
+            } else {
+                setControlsVisible(true)
+            }
+        }
+        viewModel.onPlaybackEnded = {
+            isPlaying = false
+            currentTime = viewModel.duration
+            setControlsVisible(true)
+            showOSD("播放结束")
         }
     }
 
@@ -385,12 +581,23 @@ struct CandidatePicker: View {
                     }
                 }
                 Section {
-                    HStack {
-                        TextField("手动搜索剧名", text: $keyword)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField("剧名、BV号或B站播放页链接", text: $keyword)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .onSubmit { Task { await viewModel.search(keyword: keyword) } }
+                            if viewModel.isSearchingCandidates { ProgressView() }
+                        }
                         Button("搜索") {
                             Task { await viewModel.search(keyword: keyword) }
                         }
-                        .disabled(keyword.isEmpty)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSearchingCandidates)
+                        Text("搜索不会再强制使用文件名推断的集号；选择正确分集后会记住，下次自动加载。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Section("候选（\(viewModel.candidates.count)）") {
@@ -441,6 +648,114 @@ struct CandidatePicker: View {
                 Button("好", role: .cancel) {}
             } message: {
                 Text(operationError ?? "未知错误")
+            }
+        }
+    }
+}
+
+/// 播放器二级控制面板，集中放置低频但重要的画面、音轨、字幕与媒体信息。
+struct PlaybackOptionsPanel: View {
+    let viewModel: PlayerViewModel
+    @Binding var scalingMode: PlayerScalingMode
+    let onImportDanmaku: () -> Void
+    let onMatchDanmaku: () -> Void
+    let onPictureInPicture: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("播放") {
+                    Picker(
+                        "播放速度",
+                        selection: Binding(
+                            get: { viewModel.playbackRate },
+                            set: { viewModel.setPlaybackRate($0) }
+                        )
+                    ) {
+                        ForEach([0.5, 0.75, 1, 1.25, 1.5, 2], id: \.self) { rate in
+                            Text(rate == 1 ? "正常" : "\(rate.formatted())×").tag(rate)
+                        }
+                    }
+                    Picker("画面比例", selection: $scalingMode) {
+                        ForEach(PlayerScalingMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                if !viewModel.audioTracks.isEmpty {
+                    Section("音轨") {
+                        Picker(
+                            "当前音轨",
+                            selection: Binding(
+                                get: { viewModel.selectedAudioTrackID },
+                                set: { id in if let id { viewModel.selectAudioTrack(id: id) } }
+                            )
+                        ) {
+                            ForEach(viewModel.audioTracks) { track in
+                                Text(track.title).tag(Optional(track.id))
+                            }
+                        }
+                    }
+                }
+
+                Section("字幕") {
+                    Picker(
+                        "内封字幕",
+                        selection: Binding(
+                            get: { viewModel.selectedSubtitleTrackID },
+                            set: { viewModel.selectSubtitleTrack(id: $0) }
+                        )
+                    ) {
+                        ForEach(viewModel.subtitleTracks) { track in
+                            Text(track.title).tag(track.id)
+                        }
+                    }
+                }
+
+                #if os(iOS)
+                Section("输出") {
+                    Button {
+                        dismiss()
+                        onPictureInPicture()
+                    } label: {
+                        Label("进入画中画", systemImage: "pip.enter")
+                    }
+                    HStack {
+                        Label("AirPlay", systemImage: "airplayvideo")
+                        Spacer()
+                        AirPlayRouteButton()
+                            .frame(width: 44, height: 44)
+                    }
+                }
+                #endif
+
+                Section("弹幕来源") {
+                    Button(action: onMatchDanmaku) {
+                        Label("搜索或重新匹配弹幕", systemImage: "text.magnifyingglass")
+                    }
+                    #if !os(tvOS)
+                    Button(action: onImportDanmaku) {
+                        Label("导入本地弹幕文件", systemImage: "doc.badge.plus")
+                    }
+                    #endif
+                }
+
+                Section("媒体信息") {
+                    LabeledContent("分辨率", value: viewModel.mediaInfo.resolution)
+                    LabeledContent("时长", value: viewModel.mediaInfo.duration)
+                    LabeledContent("来源", value: viewModel.mediaInfo.source)
+                    LabeledContent("弹幕", value: viewModel.danmakuStats.isEmpty ? "尚未加载" : viewModel.danmakuStats)
+                }
+            }
+            .navigationTitle("播放设置")
+            .kanataInlineNavigationTitle()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
             }
         }
     }

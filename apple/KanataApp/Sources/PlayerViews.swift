@@ -1,8 +1,32 @@
 import AVFoundation
+import AVKit
 import KanataCore
 import KanataRender
 import SwiftUI
 import UIKit
+
+/// 管理 AVPlayerLayer 关联的画中画控制器，避免 SwiftUI 重建时丢失引用。
+@MainActor
+final class PlayerSurfaceController {
+    private weak var containerView: VideoSurface.PlayerContainerView?
+
+    /// 绑定当前承载视频图层的 UIKit 视图。
+    /// - Parameter view: SwiftUI 当前创建的容器。
+    func attach(_ view: VideoSurface.PlayerContainerView) {
+        containerView = view
+        view.preparePictureInPicture()
+    }
+
+    /// 启动或停止系统画中画；设备不支持时安全忽略。
+    func togglePictureInPicture() {
+        containerView?.togglePictureInPicture()
+    }
+
+    /// 当前设备是否支持画中画。
+    var isPictureInPictureSupported: Bool {
+        AVPictureInPictureController.isPictureInPictureSupported()
+    }
+}
 
 /// 在 SwiftUI 状态与 UIKit 弹幕画布之间转发数据，并处理两者创建顺序不确定的问题。
 @MainActor
@@ -41,18 +65,44 @@ final class DanmakuCanvasBridge {
 /// 承载 AVPlayerLayer 的视频画面层
 struct VideoSurface: UIViewRepresentable {
     let player: AVPlayer?
+    let videoGravity: AVLayerVideoGravity
+    let controller: PlayerSurfaceController
 
     /// 内部视图：让 AVPlayerLayer 成为 layerClass，随视图自动布局
     final class PlayerContainerView: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
 
         var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        private var pictureInPictureController: AVPictureInPictureController?
+
+        /// 在图层已有播放器后创建系统画中画控制器。
+        func preparePictureInPicture() {
+            guard AVPictureInPictureController.isPictureInPictureSupported(),
+                  pictureInPictureController == nil else { return }
+            guard let controller = AVPictureInPictureController(playerLayer: playerLayer) else { return }
+#if os(iOS)
+            controller.canStartPictureInPictureAutomaticallyFromInline = true
+#endif
+            pictureInPictureController = controller
+        }
+
+        /// 切换系统画中画状态。
+        func togglePictureInPicture() {
+            preparePictureInPicture()
+            guard let pictureInPictureController else { return }
+            if pictureInPictureController.isPictureInPictureActive {
+                pictureInPictureController.stopPictureInPicture()
+            } else if pictureInPictureController.isPictureInPicturePossible {
+                pictureInPictureController.startPictureInPicture()
+            }
+        }
     }
 
     func makeUIView(context: Context) -> PlayerContainerView {
         let view = PlayerContainerView()
         view.backgroundColor = .black
-        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.videoGravity = videoGravity
+        controller.attach(view)
         return view
     }
 
@@ -60,8 +110,29 @@ struct VideoSurface: UIViewRepresentable {
         if uiView.playerLayer.player !== player {
             uiView.playerLayer.player = player
         }
+        if uiView.playerLayer.videoGravity != videoGravity {
+            uiView.playerLayer.videoGravity = videoGravity
+        }
+        uiView.preparePictureInPicture()
     }
 }
+
+#if os(iOS)
+/// 系统 AirPlay 路由选择按钮。
+struct AirPlayRouteButton: UIViewRepresentable {
+    /// 创建原生路由选择器并使用浅色图标适配播放器背景。
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.tintColor = .white
+        view.activeTintColor = .systemCyan
+        view.prioritizesVideoDevices = true
+        return view
+    }
+
+    /// 路由状态由系统维护，无需额外同步。
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
+#endif
 
 /// 弹幕渲染层的 SwiftUI 包装。
 /// 时间同步不走 SwiftUI 的状态更新，而是由 ViewModel 持有画布引用后直接调用，
@@ -195,6 +266,38 @@ struct DanmakuSettingsPanel: View {
                     #endif
                     Toggle("加粗", isOn: $config.bold)
                     Toggle("合并重复弹幕", isOn: $config.mergeDuplicates)
+                    #if os(tvOS)
+                    TVValueAdjuster(
+                        title: "描边宽度",
+                        value: String(format: "%.1f", config.strokeWidth),
+                        onDecrement: { config.strokeWidth = max(0, config.strokeWidth - 0.5) },
+                        onIncrement: { config.strokeWidth = min(5, config.strokeWidth + 0.5) }
+                    )
+                    TVValueAdjuster(
+                        title: "同屏上限",
+                        value: "\(config.densityLimit) 条",
+                        onDecrement: { config.densityLimit = max(50, config.densityLimit - 50) },
+                        onIncrement: { config.densityLimit = min(500, config.densityLimit + 50) }
+                    )
+                    #else
+                    HStack {
+                        Text("描边")
+                        Slider(value: $config.strokeWidth, in: 0...5, step: 0.5)
+                        Text("\(config.strokeWidth, specifier: "%.1f")").monospacedDigit().frame(width: 36)
+                    }
+                    HStack {
+                        Text("同屏上限")
+                        Slider(
+                            value: Binding(
+                                get: { Double(config.densityLimit) },
+                                set: { config.densityLimit = Int($0) }
+                            ),
+                            in: 50...500,
+                            step: 50
+                        )
+                        Text("\(config.densityLimit)").monospacedDigit().frame(width: 40)
+                    }
+                    #endif
                 }
 
                 Section("弹幕类型") {
@@ -202,6 +305,25 @@ struct DanmakuSettingsPanel: View {
                     modeToggle("顶部", mode: .top)
                     modeToggle("底部", mode: .bottom)
                     modeToggle("逆向", mode: .reverse)
+                }
+
+                Section("屏蔽") {
+                    Toggle("屏蔽彩色弹幕", isOn: $config.blockRules.blockColorful)
+                    Toggle("相同内容只显示一次", isOn: $config.blockRules.blockRepeated)
+                    TextField("屏蔽关键词，用逗号分隔", text: keywordsText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Text("关键词会立即应用到当前视频；可同时填写中文逗号和英文逗号。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Button("恢复默认弹幕样式", role: .destructive) {
+                        config = DanmakuRenderConfig()
+                        offset = 0
+                        onOffsetChanged()
+                    }
                 }
             }
             .navigationTitle("弹幕设置")
@@ -212,6 +334,19 @@ struct DanmakuSettingsPanel: View {
     /// 当前偏移的显示文案，带正负号
     private var offsetLabel: String {
         String(format: "%@%.1fs", offset >= 0 ? "+" : "", offset)
+    }
+
+    /// 把屏蔽关键词数组映射成逗号分隔的可编辑文本。
+    private var keywordsText: Binding<String> {
+        Binding(
+            get: { config.blockRules.keywords.joined(separator: "，") },
+            set: { value in
+                config.blockRules.keywords = value
+                    .split(whereSeparator: { $0 == "," || $0 == "，" })
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            }
+        )
     }
 
     /// 单个弹幕模式的开关

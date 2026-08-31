@@ -140,6 +140,39 @@ public struct ProviderCandidate: Codable, Sendable, Identifiable {
 
     /// 由来源与平台 ID 组合出的稳定标识，供 SwiftUI 列表使用
     public var id: String { "\(source.rawValue):\(platformEpisodeId)" }
+
+    /// 创建一个可供网关或客户端内置来源使用的候选剧集。
+    /// - Parameters:
+    ///   - source: 弹幕来源。
+    ///   - sourceInstanceId: 自定义来源实例标识，内置来源传 nil。
+    ///   - sourceInstanceName: 面向用户展示的实例名称。
+    ///   - platformEpisodeId: 平台剧集标识。
+    ///   - title: 作品标题。
+    ///   - episodeTitle: 分集标题。
+    ///   - duration: 平台视频时长，单位秒。
+    ///   - confidence: 匹配置信度，范围 0 到 1。
+    ///   - danmakuCount: 已知弹幕数量，未知时传 nil。
+    public init(
+        source: DanmakuSourceId,
+        sourceInstanceId: String? = nil,
+        sourceInstanceName: String? = nil,
+        platformEpisodeId: String,
+        title: String,
+        episodeTitle: String? = nil,
+        duration: Double? = nil,
+        confidence: Double,
+        danmakuCount: Int? = nil
+    ) {
+        self.source = source
+        self.sourceInstanceId = sourceInstanceId
+        self.sourceInstanceName = sourceInstanceName
+        self.platformEpisodeId = platformEpisodeId
+        self.title = title
+        self.episodeTitle = episodeTitle
+        self.duration = duration
+        self.confidence = confidence
+        self.danmakuCount = danmakuCount
+    }
 }
 
 public struct ResolveResponse: Codable, Sendable {

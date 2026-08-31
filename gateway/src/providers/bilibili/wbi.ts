@@ -17,6 +17,10 @@ const MIXIN_KEY_ENC_TAB = [
 /** 混淆密钥缓存有效期：1 小时 */
 const KEY_TTL_MS = 60 * 60 * 1000;
 
+/** BiliDroid 公共请求参数，用于 WBI 搜索被风控为空时的移动端兜底。 */
+export const BILIBILI_MOBILE_APP_KEY = '1d8b6e7d45233436';
+const BILIBILI_MOBILE_APP_SECRET = '560c52ccd288fed045859ed18bffd973';
+
 let cachedMixinKey = '';
 let cachedAt = 0;
 
@@ -72,4 +76,18 @@ export function signWbi(params: Record<string, string>, mixinKey: string): strin
     .join('&');
   const wRid = createHash('md5').update(query + mixinKey).digest('hex');
   return `${query}&w_rid=${wRid}`;
+}
+
+/**
+ * 按移动端接口规则排序、编码并追加 sign。
+ * @param params 已包含 appkey 与 ts 的请求参数
+ * @returns 可直接拼接到 URL 的查询串
+ */
+export function signBilibiliMobile(params: Record<string, string>): string {
+  const query = Object.keys(params)
+    .sort()
+    .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(params[key] ?? '')}`)
+    .join('&');
+  const sign = createHash('md5').update(query + BILIBILI_MOBILE_APP_SECRET).digest('hex');
+  return `${query}&sign=${sign}`;
 }
