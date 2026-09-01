@@ -40,6 +40,26 @@ private enum LibrarySortMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// 首页“最近添加”统一承载单个视频和整部合集。
+private enum RecentLibraryEntry: Identifiable {
+    case item(LibraryItem)
+    case collection(MediaCollection, Date)
+
+    var id: String {
+        switch self {
+        case let .item(item): "item:\(item.id)"
+        case let .collection(collection, _): "collection:\(collection.id)"
+        }
+    }
+
+    var addedAt: Date {
+        switch self {
+        case let .item(item): item.addedAt ?? .distantPast
+        case let .collection(_, date): date
+        }
+    }
+}
+
 /// 媒体库首页，统一管理本地文件、网络直链、WebDAV 与媒体服务器条目。
 struct LibraryView: View {
     @Environment(AppSettings.self) private var settings
@@ -117,11 +137,18 @@ struct LibraryView: View {
         items.filter { favoriteIDs.contains($0.id) }
     }
 
-    /// 返回最近加入媒体库的条目，方便从大批导入结果中立即找到新内容。
-    private var recentlyAddedItems: [LibraryItem] {
-        items
-            .filter { $0.addedAt != nil }
-            .sorted { ($0.addedAt ?? .distantPast) > ($1.addedAt ?? .distantPast) }
+    /// 返回最近加入的单个视频或合集，合集不再拆成大量单集占满栏目。
+    private var recentlyAddedEntries: [RecentLibraryEntry] {
+        let collectionEntries = mediaCollections.compactMap { collection -> RecentLibraryEntry? in
+            guard let date = collection.items.compactMap(\.addedAt).max() else { return nil }
+            return .collection(collection, date)
+        }
+        let itemEntries = items.compactMap { item -> RecentLibraryEntry? in
+            guard item.collectionID == nil, item.addedAt != nil else { return nil }
+            return .item(item)
+        }
+        return (collectionEntries + itemEntries)
+            .sorted { $0.addedAt > $1.addedAt }
             .prefix(12)
             .map { $0 }
     }
@@ -178,11 +205,11 @@ struct LibraryView: View {
                     } actions: {
                         #if !os(tvOS)
                         Button("导入本地视频") { isImporting = true }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(KanataPrimaryButtonStyle())
                             .disabled(isProcessingImport)
                         #endif
                         Button("添加媒体源") { isAddingMediaSource = true }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(KanataSecondaryButtonStyle())
                     }
                 } else {
                     ScrollViewReader { proxy in
@@ -191,7 +218,7 @@ struct LibraryView: View {
                                 if !mediaSources.isEmpty {
                                     sourceChannels
                                 }
-                                if !recentlyAddedItems.isEmpty && searchText.isEmpty {
+                                if !recentlyAddedEntries.isEmpty && searchText.isEmpty {
                                     recentlyAddedSection
                                         .id("recently-added")
                                 }
@@ -376,6 +403,7 @@ struct LibraryView: View {
                         .toolbar {
                             ToolbarItem(placement: .cancellationAction) {
                                 Button("关闭") { browsingSource = nil }
+                                    .kanataToolbarTextButton()
                             }
                         }
                 }
@@ -395,6 +423,7 @@ struct LibraryView: View {
                             playing = PlaybackQueue(items: queueItems, initialItemID: item.id)
                         },
                         onRemove: removeItem,
+                        onRename: renameCollection,
                         onChanged: { progressRevision += 1 }
                     )
                 }
@@ -426,7 +455,7 @@ struct LibraryView: View {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(continueWatchingItems) { item in
                         mediaCard(item, showsHistoryContext: true)
-                            .frame(width: 260)
+                            .frame(width: horizontalCardWidth)
                     }
                 }
             }
@@ -441,15 +470,20 @@ struct LibraryView: View {
                 Text("最近添加")
                     .font(.title2.bold())
                 Spacer()
-                Text("最新 \(recentlyAddedItems.count) 项")
+                Text("最新 \(recentlyAddedEntries.count) 项")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 14) {
-                    ForEach(recentlyAddedItems) { item in
-                        mediaCard(item, showsHistoryContext: true)
-                            .frame(width: 260)
+                    ForEach(recentlyAddedEntries) { entry in
+                        switch entry {
+                        case let .item(item):
+                            mediaCard(item, showsHistoryContext: true)
+                                .frame(width: horizontalCardWidth)
+                        case let .collection(collection, _):
+                            collectionCard(collection, detail: "最近添加 · 共 \(collection.items.count) 集")
+                        }
                     }
                 }
             }
@@ -466,7 +500,7 @@ struct LibraryView: View {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(favoriteItems) { item in
                         mediaCard(item)
-                            .frame(width: 260)
+                            .frame(width: horizontalCardWidth)
                     }
                 }
             }
@@ -488,52 +522,62 @@ struct LibraryView: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 14) {
                     ForEach(mediaCollections) { collection in
-                        Button {
-                            selectedCollectionID = collection.id
-                        } label: {
-                            VStack(alignment: .leading, spacing: 10) {
-                                ZStack {
-                                    LinearGradient(
-                                        colors: [KanataTheme.accentStrong.opacity(0.95), KanataTheme.accent.opacity(0.38)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                    Image(systemName: "rectangle.stack.fill")
-                                        .font(.system(size: 44, weight: .light))
-                                        .foregroundStyle(.white.opacity(0.88))
-                                }
-                                .frame(width: 250, height: 140)
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .overlay(alignment: .bottomLeading) {
-                                    Text("共 \(collection.items.count) 集")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 9)
-                                        .padding(.vertical, 5)
-                                        .background(.black.opacity(0.62), in: Capsule())
-                                        .padding(10)
-                                }
-                                Text(collection.title)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                Text("接着播放 · \(collection.nextItem.episodeLabel ?? collection.nextItem.displayName)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            .frame(width: 250, alignment: .leading)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button("从媒体库移除合集", systemImage: "trash", role: .destructive) {
-                                removeCollection(collection.id)
-                            }
-                        }
+                        collectionCard(collection)
                     }
                 }
             }
             .scrollIndicators(.hidden)
+        }
+    }
+
+    /// 生成首页与最近添加栏目共用的合集卡片。
+    /// - Parameters:
+    ///   - collection: 要展示的合集。
+    ///   - detail: 可选副标题；为空时显示续播集数。
+    /// - Returns: 可进入合集编排页并支持移除的卡片。
+    private func collectionCard(_ collection: MediaCollection, detail: String? = nil) -> some View {
+        Button {
+            selectedCollectionID = collection.id
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                ZStack {
+                    LinearGradient(
+                        colors: [KanataTheme.accentStrong.opacity(0.95), KanataTheme.accent.opacity(0.38)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    Image(systemName: "rectangle.stack.fill")
+                        .font(.system(size: 44, weight: .light))
+                        .foregroundStyle(.white.opacity(0.88))
+                }
+                .frame(width: collectionCardWidth, height: collectionCardHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(alignment: .bottomLeading) {
+                    Text("共 \(collection.items.count) 集")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(.black.opacity(0.62), in: Capsule())
+                        .padding(10)
+                }
+                Text(collection.title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(detail ?? "接着播放 · \(collection.nextItem.episodeLabel ?? collection.nextItem.displayName)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(width: collectionCardWidth, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .kanataTVFocus(cornerRadius: 18)
+        .contextMenu {
+            Button("从媒体库移除合集", systemImage: "trash", role: .destructive) {
+                removeCollection(collection.id)
+            }
         }
     }
 
@@ -544,8 +588,16 @@ struct LibraryView: View {
                 Text("媒体源")
                     .font(.title2.bold())
                 Spacer()
-                Button("管理") { isAddingMediaSource = true }
-                    .font(.callout)
+                Button { isAddingMediaSource = true } label: {
+                    Label("管理", systemImage: "slider.horizontal.3")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(KanataTheme.surface, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .kanataTVFocus(cornerRadius: 22)
             }
             ScrollView(.horizontal) {
                 HStack(spacing: 12) {
@@ -571,11 +623,12 @@ struct LibraryView: View {
                                         .foregroundStyle(.tertiary)
                                 }
                             }
-                            .frame(width: 260, alignment: .leading)
+                            .frame(width: sourceCardWidth, alignment: .leading)
                             .padding(14)
                             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
                         .buttonStyle(.plain)
+                        .kanataTVFocus(cornerRadius: 18)
                         .contextMenu {
                             Button("删除登录记录", systemImage: "trash", role: .destructive) {
                                 MediaSourceProfileStore.remove(profile)
@@ -687,6 +740,7 @@ struct LibraryView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .kanataTVFocus(cornerRadius: 18)
         .contextMenu {
             Button(
                 favoriteIDs.contains(item.id) ? "取消收藏" : "加入收藏",
@@ -704,6 +758,42 @@ struct LibraryView: View {
             }
         }
         .accessibilityLabel("播放 \(item.displayName)")
+    }
+
+    /// 返回首页横向媒体卡片在当前平台上的宽度。
+    private var horizontalCardWidth: CGFloat {
+        #if os(tvOS)
+        360
+        #else
+        260
+        #endif
+    }
+
+    /// 返回媒体源频道卡片在当前平台上的宽度。
+    private var sourceCardWidth: CGFloat {
+        #if os(tvOS)
+        380
+        #else
+        260
+        #endif
+    }
+
+    /// 返回合集封面在当前平台上的宽度。
+    private var collectionCardWidth: CGFloat {
+        #if os(tvOS)
+        360
+        #else
+        250
+        #endif
+    }
+
+    /// 返回合集封面在当前平台上的高度。
+    private var collectionCardHeight: CGFloat {
+        #if os(tvOS)
+        202
+        #else
+        140
+        #endif
     }
 
     /// 从用户点击的条目构建单视频或同合集播放队列。
@@ -788,6 +878,20 @@ struct LibraryView: View {
         items.removeAll { $0.collectionID == collectionID }
         LibraryStore.save(items)
         CollectionLayoutStore.remove(collectionID: collectionID)
+    }
+
+    /// 重命名合集内全部条目并立即刷新首页和详情页。
+    /// - Parameters:
+    ///   - collectionID: 要重命名的合集 ID。
+    ///   - title: 用户输入的新名称。
+    private func renameCollection(_ collectionID: String, _ title: String) {
+        let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        for index in items.indices where items[index].collectionID == collectionID {
+            items[index].collectionTitle = value
+        }
+        LibraryStore.save(items)
+        progressRevision += 1
     }
 
     /// 扫描 App 的 Documents 目录，收录通过文件共享或 AirDrop 放进来的视频（FR-IMP-002）
@@ -1014,12 +1118,14 @@ private struct TVLibrarySearchSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
+                        .kanataToolbarTextButton()
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("清除") {
                         searchText = ""
                         dismiss()
                     }
+                    .kanataToolbarTextButton()
                 }
             }
         }
@@ -1114,7 +1220,9 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         url: URL,
         collectionID: String? = nil,
         collectionTitle: String? = nil,
-        collectionIndex: Int? = nil
+        collectionIndex: Int? = nil,
+        season: Int? = nil,
+        episode: Int? = nil
     ) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
@@ -1133,8 +1241,8 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.collectionIndex = collectionIndex
         self.addedAt = Date()
         self.title = parsed.title
-        self.season = parsed.season
-        self.episode = parsed.episode
+        self.season = season ?? parsed.season
+        self.episode = episode ?? parsed.episode
     }
 
     /// 创建一个网络视频条目。
@@ -1150,7 +1258,9 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         sourceProfileID: String? = nil,
         collectionID: String? = nil,
         collectionTitle: String? = nil,
-        collectionIndex: Int? = nil
+        collectionIndex: Int? = nil,
+        season: Int? = nil,
+        episode: Int? = nil
     ) {
         let inferredName = remoteURL.deletingPathExtension().lastPathComponent.removingPercentEncoding ?? ""
         let displayName = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1170,8 +1280,8 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.collectionIndex = collectionIndex
         self.addedAt = Date()
         self.title = parsed.title
-        self.season = parsed.season
-        self.episode = parsed.episode
+        self.season = season ?? parsed.season
+        self.episode = episode ?? parsed.episode
     }
 
     /// 列表副标题：展示解析出的剧名与季集号
@@ -1284,6 +1394,47 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         }
         return left.displayName.localizedStandardCompare(right.displayName) == .orderedAscending
     }
+
+    /// 合并多个目录时按季度、原目录、真实集数和自然文件名稳定排序。
+    /// - Parameters:
+    ///   - left: 左侧媒体条目。
+    ///   - right: 右侧媒体条目。
+    /// - Returns: 左侧应排在前面时返回 true。
+    static func mergedCollectionOrder(_ left: LibraryItem, _ right: LibraryItem) -> Bool {
+        let leftSeason = left.season ?? TitleParser.parse(left.collectionTitle ?? "").season
+        let rightSeason = right.season ?? TitleParser.parse(right.collectionTitle ?? "").season
+        if leftSeason != rightSeason {
+            if let leftSeason, let rightSeason { return leftSeason < rightSeason }
+            return leftSeason != nil
+        }
+        let leftGroup = left.collectionTitle ?? ""
+        let rightGroup = right.collectionTitle ?? ""
+        let groupComparison = leftGroup.localizedStandardCompare(rightGroup)
+        if groupComparison != .orderedSame { return groupComparison == .orderedAscending }
+        if left.episode != right.episode {
+            if let leftEpisode = left.episode, let rightEpisode = right.episode {
+                return leftEpisode < rightEpisode
+            }
+            return left.episode != nil
+        }
+        return collectionOrder(left, right)
+    }
+
+    /// 保留各目录为独立合集时，先稳定排列合集，再排列合集内剧集。
+    /// - Parameters:
+    ///   - left: 左侧媒体条目。
+    ///   - right: 右侧媒体条目。
+    /// - Returns: 左侧应排在前面时返回 true。
+    static func groupedCollectionOrder(_ left: LibraryItem, _ right: LibraryItem) -> Bool {
+        let leftTitle = left.collectionTitle ?? ""
+        let rightTitle = right.collectionTitle ?? ""
+        let titleComparison = leftTitle.localizedStandardCompare(rightTitle)
+        if titleComparison != .orderedSame { return titleComparison == .orderedAscending }
+        let leftID = left.collectionID ?? left.id
+        let rightID = right.collectionID ?? right.id
+        if leftID != rightID { return leftID < rightID }
+        return collectionOrder(left, right)
+    }
 }
 
 /// 首页用于展示同一目录、剧集或季度的聚合模型。
@@ -1299,25 +1450,32 @@ private struct CollectionDetailView: View {
     let collection: MediaCollection
     let onPlay: ([LibraryItem], LibraryItem) -> Void
     let onRemove: (LibraryItem) -> Void
+    let onRename: (String, String) -> Void
     let onChanged: () -> Void
     @State private var orderedItems: [LibraryItem]
     @State private var ignoredIDs: Set<String>
+    @State private var collectionTitle: String
+    @State private var pendingTitle: String
+    @State private var isRenaming = false
 
     /// 使用已保存顺序初始化合集详情。
     /// - Parameters:
     ///   - collection: 当前合集。
     ///   - onPlay: 播放队列回调。
     ///   - onRemove: 从媒体库移除单集的回调。
+    ///   - onRename: 合集重命名回调。
     ///   - onChanged: 编排变化通知。
     init(
         collection: MediaCollection,
         onPlay: @escaping ([LibraryItem], LibraryItem) -> Void,
         onRemove: @escaping (LibraryItem) -> Void,
+        onRename: @escaping (String, String) -> Void,
         onChanged: @escaping () -> Void
     ) {
         self.collection = collection
         self.onPlay = onPlay
         self.onRemove = onRemove
+        self.onRename = onRename
         self.onChanged = onChanged
         let values = CollectionLayoutStore.ordered(
             collection.items,
@@ -1326,6 +1484,8 @@ private struct CollectionDetailView: View {
         )
         _orderedItems = State(initialValue: values)
         _ignoredIDs = State(initialValue: CollectionLayoutStore.layout(for: collection.id).ignoredItemIDs)
+        _collectionTitle = State(initialValue: collection.title)
+        _pendingTitle = State(initialValue: collection.title)
     }
 
     /// 当前自动连播会使用的剧集队列。
@@ -1344,7 +1504,7 @@ private struct CollectionDetailView: View {
                             .frame(width: 54, height: 54)
                             .background(KanataTheme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 14))
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(collection.title)
+                            Text(collectionTitle)
                                 .font(.title3.bold())
                             Text("\(activeItems.count) 集参与连播 · \(ignoredIDs.count) 集已忽略")
                                 .font(.caption)
@@ -1365,62 +1525,108 @@ private struct CollectionDetailView: View {
 
             Section("剧集顺序") {
                 ForEach(Array(orderedItems.enumerated()), id: \.element.id) { index, item in
-                    Button {
-                        let queue = ignoredIDs.contains(item.id) ? [item] : activeItems
-                        onPlay(queue, item)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Text("\(index + 1)")
-                                .font(.caption.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 30)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.episodeLabel ?? item.displayName)
-                                    .foregroundStyle(ignoredIDs.contains(item.id) ? .secondary : .primary)
-                                Text(item.displayName)
-                                    .font(.caption)
+                    HStack(spacing: 12) {
+                        Button {
+                            let queue = ignoredIDs.contains(item.id) ? [item] : activeItems
+                            onPlay(queue, item)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Text("\(index + 1)")
+                                    .font(.caption.monospacedDigit().weight(.semibold))
                                     .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            if ignoredIDs.contains(item.id) {
-                                Text("已忽略")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(KanataTheme.warning)
-                            }
-                            Menu {
-                                Button("上移", systemImage: "arrow.up") { move(itemID: item.id, delta: -1) }
-                                    .disabled(index == 0)
-                                Button("下移", systemImage: "arrow.down") { move(itemID: item.id, delta: 1) }
-                                    .disabled(index == orderedItems.count - 1)
-                                Button(
-                                    ignoredIDs.contains(item.id) ? "恢复连播" : "从连播忽略",
-                                    systemImage: ignoredIDs.contains(item.id) ? "eye" : "eye.slash"
-                                ) {
-                                    toggleIgnored(item)
+                                    .frame(width: 30)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.episodeLabel ?? item.displayName)
+                                        .foregroundStyle(ignoredIDs.contains(item.id) ? .secondary : .primary)
+                                        #if os(tvOS)
+                                        .font(.title3.weight(.semibold))
+                                        #endif
+                                    Text(item.displayName)
+                                        #if os(tvOS)
+                                        .font(.body)
+                                        #else
+                                        .font(.caption)
+                                        #endif
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
                                 }
-                                Button("从媒体库移除", systemImage: "trash", role: .destructive) {
-                                    remove(item)
+                                Spacer()
+                                if ignoredIDs.contains(item.id) {
+                                    Text("已忽略")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(KanataTheme.warning)
                                 }
-                            } label: {
-                                Image(systemName: "ellipsis.circle")
-                                    .frame(width: 44, height: 44)
                             }
+                            .contentShape(Rectangle())
+                            .frame(maxWidth: .infinity, minHeight: collectionEpisodeRowHeight)
                         }
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .kanataTVFocus(cornerRadius: 14)
+                        Menu {
+                            Button("上移", systemImage: "arrow.up") { move(itemID: item.id, delta: -1) }
+                                .disabled(index == 0)
+                            Button("下移", systemImage: "arrow.down") { move(itemID: item.id, delta: 1) }
+                                .disabled(index == orderedItems.count - 1)
+                            Button(
+                                ignoredIDs.contains(item.id) ? "恢复连播" : "从连播忽略",
+                                systemImage: ignoredIDs.contains(item.id) ? "eye" : "eye.slash"
+                            ) {
+                                toggleIgnored(item)
+                            }
+                            Button("从媒体库移除", systemImage: "trash", role: .destructive) {
+                                remove(item)
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .frame(width: 54, height: 54)
+                        }
+                        .buttonStyle(.plain)
+                        .kanataTVFocus(cornerRadius: 27)
                     }
-                    .buttonStyle(.plain)
                 }
                 .onMove(perform: move)
             }
         }
-        .navigationTitle(collection.title)
+        .navigationTitle(collectionNavigationTitle)
         .kanataInlineNavigationTitle()
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    pendingTitle = collectionTitle
+                    isRenaming = true
+                } label: {
+                    Label("重命名", systemImage: "pencil")
+                }
+            }
             #if !os(tvOS)
             ToolbarItem(placement: .topBarTrailing) { EditButton() }
             #endif
         }
+        .alert("重命名合集", isPresented: $isRenaming) {
+            TextField("合集名称", text: $pendingTitle)
+            Button("取消", role: .cancel) {}
+            Button("保存") { renameCollection() }
+        } message: {
+            Text("只修改媒体库中的显示名称，不会更改服务器文件夹或文件。")
+        }
+    }
+
+    /// 返回 tvOS 避免与详情正文重复的导航标题。
+    private var collectionNavigationTitle: String {
+        #if os(tvOS)
+        "合集详情"
+        #else
+        collectionTitle
+        #endif
+    }
+
+    /// 返回适合电视观看距离的剧集行高。
+    private var collectionEpisodeRowHeight: CGFloat {
+        #if os(tvOS)
+        78
+        #else
+        44
+        #endif
     }
 
     /// 响应系统编辑模式拖动并保存新顺序。
@@ -1471,6 +1677,14 @@ private struct CollectionDetailView: View {
     private func persistOrder() {
         CollectionLayoutStore.saveOrder(orderedItems, collectionID: collection.id)
         onChanged()
+    }
+
+    /// 校验并保存合集的新显示名称。
+    private func renameCollection() {
+        let value = pendingTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        collectionTitle = value
+        onRename(collection.id, value)
     }
 }
 

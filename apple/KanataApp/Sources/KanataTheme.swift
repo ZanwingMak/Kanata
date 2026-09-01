@@ -98,6 +98,10 @@ enum KanataTheme {
 
 /// 适合表单主操作的高对比度按钮样式。
 struct KanataPrimaryButtonStyle: ButtonStyle {
+    #if os(tvOS)
+    @Environment(\.isFocused) private var isFocused
+    #endif
+
     /// 根据按压状态绘制不缩放的主按钮。
     /// - Parameter configuration: SwiftUI 按钮状态。
     /// - Returns: 保持清晰触控反馈的按钮视图。
@@ -105,8 +109,10 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.headline)
             .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, minHeight: 48)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 16)
+            .frame(minHeight: 50, alignment: .center)
             .background(
                 LinearGradient(
                     colors: [KanataTheme.accent, KanataTheme.accentStrong],
@@ -115,12 +121,39 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
                 ),
                 in: RoundedRectangle(cornerRadius: 13, style: .continuous)
             )
+            .overlay {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .stroke(.white.opacity(primaryFocusOpacity), lineWidth: primaryFocusLineWidth)
+            }
+            .shadow(color: KanataTheme.accent.opacity(primaryFocusOpacity), radius: 14)
             .opacity(configuration.isPressed ? 0.78 : 1)
+    }
+
+    /// 返回 Apple TV 当前焦点的描边透明度。
+    private var primaryFocusOpacity: Double {
+        #if os(tvOS)
+        isFocused ? 0.95 : 0
+        #else
+        0
+        #endif
+    }
+
+    /// 返回 Apple TV 当前焦点的描边宽度。
+    private var primaryFocusLineWidth: CGFloat {
+        #if os(tvOS)
+        isFocused ? 4 : 0
+        #else
+        0
+        #endif
     }
 }
 
 /// 适合列表和设置页次级操作的表面按钮样式。
 struct KanataSecondaryButtonStyle: ButtonStyle {
+    #if os(tvOS)
+    @Environment(\.isFocused) private var isFocused
+    #endif
+
     /// 根据按压状态绘制带细边框的次级按钮。
     /// - Parameter configuration: SwiftUI 按钮状态。
     /// - Returns: 无缩放动画的次级按钮视图。
@@ -128,18 +161,86 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.body.weight(.medium))
             .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity, minHeight: 46)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 14)
+            .frame(minHeight: 48, alignment: .center)
             .background(
-                configuration.isPressed ? KanataTheme.elevatedSurface : KanataTheme.surface,
+                secondaryBackground(configuration: configuration),
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(KanataTheme.separator, lineWidth: 1)
+                    .stroke(secondaryBorder, lineWidth: secondaryLineWidth)
             }
+            .shadow(color: KanataTheme.accent.opacity(secondaryFocusOpacity), radius: 12)
+    }
+
+    /// 返回次级按钮在按压和 Apple TV 聚焦状态下的背景色。
+    /// - Parameter configuration: SwiftUI 按钮状态。
+    /// - Returns: 不依赖缩放的清晰焦点背景。
+    private func secondaryBackground(configuration: Configuration) -> Color {
+        if configuration.isPressed { return KanataTheme.elevatedSurface }
+        #if os(tvOS)
+        if isFocused { return KanataTheme.accent.opacity(0.26) }
+        #endif
+        return KanataTheme.surface
+    }
+
+    /// 返回次级按钮当前描边颜色。
+    private var secondaryBorder: Color {
+        #if os(tvOS)
+        if isFocused { return .white.opacity(0.92) }
+        #endif
+        return KanataTheme.separator
+    }
+
+    /// 返回次级按钮当前描边宽度。
+    private var secondaryLineWidth: CGFloat {
+        #if os(tvOS)
+        isFocused ? 4 : 1
+        #else
+        1
+        #endif
+    }
+
+    /// 返回次级按钮 Apple TV 焦点阴影透明度。
+    private var secondaryFocusOpacity: Double {
+        #if os(tvOS)
+        isFocused ? 0.55 : 0
+        #else
+        0
+        #endif
     }
 }
+
+#if os(tvOS)
+/// Apple TV 上使用描边和底色表达焦点，避免系统放大遮挡相邻项目。
+private struct KanataTVFocusModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    @FocusState private var isFocused: Bool
+
+    /// 为可聚焦控件绘制稳定、不缩放的电视焦点反馈。
+    /// - Parameter content: 原始可聚焦控件。
+    /// - Returns: 禁用系统放大并带有高对比焦点框的控件。
+    func body(content: Content) -> some View {
+        content
+            .focused($isFocused)
+            .focusEffectDisabled()
+            .background(
+                isFocused ? KanataTheme.accent.opacity(0.22) : Color.clear,
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(isFocused ? Color.white.opacity(0.96) : Color.clear, lineWidth: 4)
+            }
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.5 : 0), radius: 14)
+            .zIndex(isFocused ? 1 : 0)
+            .animation(.easeOut(duration: 0.12), value: isFocused)
+    }
+}
+#endif
 
 /// 统一设置页与媒体源页面的图标标题行。
 struct KanataRowLabel: View {
@@ -164,27 +265,83 @@ struct KanataRowLabel: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: symbol)
+                #if os(tvOS)
+                .font(.title3.weight(.semibold))
+                .frame(width: 46, height: 46)
+                #else
                 .font(.body.weight(.semibold))
-                .foregroundStyle(tint)
                 .frame(width: 30, height: 30)
+                #endif
+                .foregroundStyle(tint)
                 .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
+                    #if os(tvOS)
+                    .font(.title3.weight(.semibold))
+                    #else
                     .font(.body.weight(.medium))
+                    #endif
                 if let detail, !detail.isEmpty {
                     Text(detail)
+                        #if os(tvOS)
+                        .font(.body)
+                        #else
                         .font(.caption)
+                        #endif
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
             }
             Spacer(minLength: 0)
         }
+        #if os(tvOS)
+        .frame(minHeight: 68)
+        #endif
         .contentShape(Rectangle())
     }
 }
 
 extension View {
+    /// 在 Apple TV 使用无缩放焦点框，其他平台保持原视图。
+    /// - Parameter cornerRadius: 控件焦点框圆角。
+    /// - Returns: 平台适配后的可聚焦视图。
+    @ViewBuilder
+    func kanataTVFocus(cornerRadius: CGFloat = 14) -> some View {
+        #if os(tvOS)
+        modifier(KanataTVFocusModifier(cornerRadius: cornerRadius))
+        #else
+        self
+        #endif
+    }
+
+    /// 在 Apple TV 的子目录中让遥控器返回键优先返回上一级，根目录保持系统导航行为。
+    /// - Parameters:
+    ///   - isEnabled: 当前是否存在可返回的内部目录层级。
+    ///   - action: 返回上一级目录的操作。
+    /// - Returns: 仅在需要时拦截遥控器返回键的视图。
+    @ViewBuilder
+    func kanataTVExitCommand(isEnabled: Bool, perform action: @escaping () -> Void) -> some View {
+        #if os(tvOS)
+        if isEnabled {
+            self.onExitCommand(perform: action)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+
+    /// 统一文字工具栏按钮的最小触控区和文字基线，避免胶囊内视觉偏移。
+    /// - Returns: 文字在 44pt 触控区内水平、垂直居中的按钮标签。
+    func kanataToolbarTextButton() -> some View {
+        self
+            .font(.body.weight(.medium))
+            .multilineTextAlignment(.center)
+            .frame(minWidth: 44, minHeight: 44, alignment: .center)
+            .contentShape(Rectangle())
+    }
+
     /// 为 iOS Form 隐藏系统底色，并在 tvOS 使用兼容背景。
     /// - Returns: 应用统一影院背景的视图。
     @ViewBuilder

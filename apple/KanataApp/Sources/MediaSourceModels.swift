@@ -133,6 +133,47 @@ enum MediaSourceProfileStore {
         return profile
     }
 
+    /// 编辑已保存媒体源的可见名称、地址和账号，并在需要时替换 Keychain 凭证。
+    /// - Parameters:
+    ///   - profile: 原媒体源配置。
+    ///   - name: 新显示名称。
+    ///   - serverURL: 新服务器地址。
+    ///   - username: 新用户名。
+    ///   - rootPath: WebDAV 新起始目录。
+    ///   - secret: 新凭证；传 nil 时沿用原 Keychain 内容。
+    /// - Returns: 保持原 ID 的更新后配置。
+    static func update(
+        _ profile: MediaSourceProfile,
+        name: String,
+        serverURL: URL,
+        username: String,
+        rootPath: String?,
+        secret: MediaSourceSecret?
+    ) -> MediaSourceProfile {
+        var profiles = load()
+        let displayName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let updated = MediaSourceProfile(
+            id: profile.id,
+            kind: profile.kind,
+            name: displayName.isEmpty ? profile.kind.title : displayName,
+            serverURLString: normalizedServerString(serverURL),
+            username: username,
+            rootPath: rootPath,
+            credentialAccount: profile.credentialAccount,
+            updatedAt: Date()
+        )
+        if let secret, let data = try? JSONEncoder().encode(secret) {
+            KeychainStore.set(data, account: profile.credentialAccount)
+        }
+        if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+            profiles[index] = updated
+        } else {
+            profiles.append(updated)
+        }
+        persist(profiles)
+        return updated
+    }
+
     /// 更新媒体源最近使用时间，让常用频道排在前面。
     /// - Parameter profile: 刚刚打开的媒体源。
     static func touch(_ profile: MediaSourceProfile) {

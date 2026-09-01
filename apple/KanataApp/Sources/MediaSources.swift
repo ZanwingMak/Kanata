@@ -96,21 +96,52 @@ struct MediaSourceSheet: View {
                             symbol: "qrcode.viewfinder"
                         )
                     }
+                    .kanataTVFocus(cornerRadius: 14)
                 }
                 #endif
                 if !profiles.isEmpty {
                     Section("最近使用") {
                         ForEach(profiles) { profile in
-                            NavigationLink {
-                                MediaSourceChannelView(profile: profile, onAdd: finish)
-                            } label: {
-                                sourceLabel(
-                                    profile.name,
-                                    detail: "\(profile.kind.title) · \(profile.subtitle)",
-                                    symbol: profile.kind.symbol
-                                )
+                            HStack(spacing: 8) {
+                                NavigationLink {
+                                    MediaSourceChannelView(profile: profile, onAdd: finish)
+                                } label: {
+                                    sourceLabel(
+                                        profile.name,
+                                        detail: "\(profile.kind.title) · \(profile.subtitle)",
+                                        symbol: profile.kind.symbol
+                                    )
+                                    .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+                                    .contentShape(Rectangle())
+                                }
+                                .kanataTVFocus(cornerRadius: 14)
+                                NavigationLink {
+                                    MediaSourceConnectionView(
+                                        kind: profile.kind,
+                                        existingProfile: profile,
+                                        onSaved: { _ in reloadProfiles() },
+                                        onAdd: finish
+                                    )
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .kanataTVFocus(cornerRadius: 22)
+                                .accessibilityLabel("编辑 \(profile.name)")
                             }
                             .contextMenu {
+                                NavigationLink {
+                                    MediaSourceConnectionView(
+                                        kind: profile.kind,
+                                        existingProfile: profile,
+                                        onSaved: { _ in reloadProfiles() },
+                                        onAdd: finish
+                                    )
+                                } label: {
+                                    Label("编辑媒体源", systemImage: "pencil")
+                                }
                                 Button("删除登录记录", systemImage: "trash", role: .destructive) {
                                     MediaSourceProfileStore.remove(profile)
                                     reloadProfiles()
@@ -126,6 +157,7 @@ struct MediaSourceSheet: View {
                     } label: {
                         sourceLabel("网络直链 / HLS", detail: "HTTP、HTTPS、m3u8", symbol: "link")
                     }
+                    .kanataTVFocus(cornerRadius: 14)
                     #if !os(tvOS)
                     Button {
                         isImportingFolder = true
@@ -147,6 +179,7 @@ struct MediaSourceSheet: View {
                         } label: {
                             sourceLabel(kind.title, detail: sourceDetail(kind), symbol: kind.symbol)
                         }
+                        .kanataTVFocus(cornerRadius: 14)
                     }
                 }
 
@@ -163,6 +196,7 @@ struct MediaSourceSheet: View {
             if !usesParentNavigation {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
+                        .kanataToolbarTextButton()
                 }
             }
         }
@@ -350,6 +384,7 @@ private struct DirectMediaSourceView: View {
 /// 新媒体源登录界面；连接成功后直接切换到频道浏览器。
 private struct MediaSourceConnectionView: View {
     let kind: MediaSourceKind
+    let existingProfile: MediaSourceProfile?
     let onSaved: (MediaSourceProfile) -> Void
     let onAdd: ([LibraryItem]) -> Void
     @State private var name = ""
@@ -383,6 +418,35 @@ private struct MediaSourceConnectionView: View {
         }
     }
 
+    /// 创建新增或编辑媒体源表单；编辑时直接回填全部非敏感字段。
+    /// - Parameters:
+    ///   - kind: 媒体源类型。
+    ///   - existingProfile: 要编辑的历史媒体源，nil 表示新增。
+    ///   - onSaved: 保存完成回调。
+    ///   - onAdd: 从频道加入媒体库的回调。
+    init(
+        kind: MediaSourceKind,
+        existingProfile: MediaSourceProfile? = nil,
+        onSaved: @escaping (MediaSourceProfile) -> Void,
+        onAdd: @escaping ([LibraryItem]) -> Void
+    ) {
+        self.kind = kind
+        self.existingProfile = existingProfile
+        self.onSaved = onSaved
+        self.onAdd = onAdd
+        guard let existingProfile else { return }
+        _name = State(initialValue: existingProfile.name)
+        _rootPath = State(initialValue: existingProfile.rootPath ?? "/")
+        _username = State(initialValue: existingProfile.username)
+        _plexLoginMode = State(initialValue: existingProfile.kind == .plex ? .token : .account)
+        if let url = existingProfile.serverURL {
+            _serverScheme = State(initialValue: url.scheme?.lowercased() == "https" ? "https" : "http")
+            _serverHost = State(initialValue: url.host ?? "")
+            _serverPort = State(initialValue: url.port.map(String.init) ?? "")
+            _serverPath = State(initialValue: url.path == "/" ? "" : url.path)
+        }
+    }
+
     var body: some View {
         Group {
             if let profile {
@@ -391,7 +455,7 @@ private struct MediaSourceConnectionView: View {
                 connectionForm
             }
         }
-        .navigationTitle(profile?.name ?? "添加 \(kind.title)")
+        .navigationTitle(profile?.name ?? (existingProfile == nil ? "添加 \(kind.title)" : "编辑 \(kind.title)"))
         .kanataInlineNavigationTitle()
         .onAppear { restoreDraft() }
         .onChange(of: name) { _, _ in saveDraft() }
@@ -500,14 +564,14 @@ private struct MediaSourceConnectionView: View {
             } else {
                 Section("登录") {
                     if kind == .plex {
-                        SecureField("X-Plex-Token", text: $plexToken)
+                        SecureField(existingProfile == nil ? "X-Plex-Token" : "留空沿用已保存 Token", text: $plexToken)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                     } else {
                         TextField(kind == .webDAV ? "用户名（可选）" : "用户名", text: $username)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                        SecureField(kind == .webDAV ? "密码（可选）" : "密码", text: $password)
+                        SecureField(passwordPlaceholder, text: $password)
                         if kind == .synology {
                             TextField("两步验证码（如已开启）", text: $otp)
                                 .textContentType(.oneTimeCode)
@@ -525,7 +589,7 @@ private struct MediaSourceConnectionView: View {
                         }
                     }
                     .buttonStyle(KanataPrimaryButtonStyle())
-                    .disabled(serverHost.isEmpty || isLoading || (kind == .plex && plexToken.isEmpty))
+                    .disabled(serverHost.isEmpty || isLoading || (kind == .plex && !hasUsablePlexToken))
                 }
             }
             if let errorMessage {
@@ -545,40 +609,78 @@ private struct MediaSourceConnectionView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
+            let savedSecret = existingProfile.flatMap(MediaSourceProfileStore.secret)
             let secret: MediaSourceSecret
+            let replacesSecret: Bool
             switch kind {
             case .webDAV:
+                let effectivePassword = password.isEmpty ? (savedSecret?.password ?? "") : password
                 let start = try webDAVStartURL(server: serverURL)
-                let client = WebDAVClient(username: username, password: password)
+                let client = WebDAVClient(username: username, password: effectivePassword)
                 _ = try await client.list(directory: start)
-                secret = MediaSourceSecret(password: password, token: nil, userID: nil)
+                secret = MediaSourceSecret(password: effectivePassword, token: nil, userID: nil)
+                replacesSecret = !password.isEmpty || existingProfile == nil
             case .jellyfin, .emby:
-                secret = try await MediaBrowserClient().login(
-                    server: serverURL,
-                    username: username,
-                    password: password
-                )
+                if password.isEmpty, let savedSecret, savedSecret.token != nil, savedSecret.userID != nil {
+                    _ = try await MediaBrowserClient().items(
+                        profile: validationProfile(serverURL: serverURL),
+                        parentID: nil
+                    )
+                    secret = savedSecret
+                    replacesSecret = false
+                } else {
+                    secret = try await MediaBrowserClient().login(
+                        server: serverURL,
+                        username: username,
+                        password: password
+                    )
+                    replacesSecret = true
+                }
             case .plex:
-                _ = try await PlexClient().verify(server: serverURL, token: plexToken)
-                secret = MediaSourceSecret(password: nil, token: plexToken, userID: nil)
+                let effectiveToken = plexToken.isEmpty ? (savedSecret?.token ?? "") : plexToken
+                _ = try await PlexClient().verify(server: serverURL, token: effectiveToken)
+                secret = MediaSourceSecret(password: nil, token: effectiveToken, userID: nil)
+                replacesSecret = !plexToken.isEmpty || existingProfile == nil
             case .synology:
-                secret = try await SynologyFileStationClient().login(
-                    server: serverURL,
+                if password.isEmpty, let savedSecret, savedSecret.token != nil {
+                    _ = try await SynologyFileStationClient().items(
+                        profile: validationProfile(serverURL: serverURL),
+                        parentPath: nil
+                    )
+                    secret = savedSecret
+                    replacesSecret = false
+                } else {
+                    secret = try await SynologyFileStationClient().login(
+                        server: serverURL,
+                        username: username,
+                        password: password,
+                        otp: otp
+                    )
+                    replacesSecret = true
+                }
+            }
+            let value: MediaSourceProfile
+            if let existingProfile {
+                value = MediaSourceProfileStore.update(
+                    existingProfile,
+                    name: resolvedName(server: serverURL),
+                    serverURL: serverURL,
                     username: username,
-                    password: password,
-                    otp: otp
+                    rootPath: kind == .webDAV ? normalizedRootPath : nil,
+                    secret: replacesSecret ? secret : nil
+                )
+            } else {
+                value = MediaSourceProfileStore.upsert(
+                    kind: kind,
+                    name: resolvedName(server: serverURL),
+                    serverURL: serverURL,
+                    username: username,
+                    rootPath: kind == .webDAV ? normalizedRootPath : nil,
+                    secret: secret
                 )
             }
-            let value = MediaSourceProfileStore.upsert(
-                kind: kind,
-                name: resolvedName(server: serverURL),
-                serverURL: serverURL,
-                username: username,
-                rootPath: kind == .webDAV ? normalizedRootPath : nil,
-                secret: secret
-            )
             profile = value
-            MediaSourceDraftStore.clear(for: kind)
+            if existingProfile == nil { MediaSourceDraftStore.clear(for: kind) }
             onSaved(value)
         } catch {
             errorMessage = error.localizedDescription
@@ -587,7 +689,11 @@ private struct MediaSourceConnectionView: View {
 
     /// 恢复当前媒体源未完成的非敏感表单字段。
     private func restoreDraft() {
-        guard profile == nil, name.isEmpty, serverHost.isEmpty, username.isEmpty else { return }
+        guard existingProfile == nil,
+              profile == nil,
+              name.isEmpty,
+              serverHost.isEmpty,
+              username.isEmpty else { return }
         let draft = MediaSourceDraftStore.load(for: kind)
         name = draft.name
         if let url = URL(string: draft.server), url.host != nil {
@@ -602,7 +708,7 @@ private struct MediaSourceConnectionView: View {
 
     /// 持久化当前媒体源的非敏感表单字段，供误触返回后恢复。
     private func saveDraft() {
-        guard profile == nil else { return }
+        guard profile == nil, existingProfile == nil else { return }
         MediaSourceDraftStore.save(
             MediaSourceConnectionDraft(
                 name: name,
@@ -674,6 +780,45 @@ private struct MediaSourceConnectionView: View {
         return value.hasPrefix("/") ? value : "/\(value)"
     }
 
+    /// 返回编辑模式下的密码提示，不在表单中回显任何敏感内容。
+    private var passwordPlaceholder: String {
+        if existingProfile != nil { return "留空沿用已保存密码" }
+        return kind == .webDAV ? "密码（可选）" : "密码"
+    }
+
+    /// 判断 Plex 表单当前是否已有可用于测试的 Token。
+    private var hasUsablePlexToken: Bool {
+        !plexToken.isEmpty || existingProfile.flatMap(MediaSourceProfileStore.secret)?.token?.isEmpty == false
+    }
+
+    /// 构建复用原 Keychain 账号、但采用表单中新地址和用户名的临时验证配置。
+    /// - Parameter serverURL: 当前表单生成的服务器地址。
+    /// - Returns: 供服务端客户端验证已有令牌的配置。
+    private func validationProfile(serverURL: URL) -> MediaSourceProfile {
+        guard let existingProfile else {
+            return MediaSourceProfile(
+                id: "validation",
+                kind: kind,
+                name: name,
+                serverURLString: serverURL.absoluteString,
+                username: username,
+                rootPath: kind == .webDAV ? normalizedRootPath : nil,
+                credentialAccount: "validation",
+                updatedAt: Date()
+            )
+        }
+        return MediaSourceProfile(
+            id: existingProfile.id,
+            kind: kind,
+            name: name,
+            serverURLString: serverURL.absoluteString,
+            username: username,
+            rootPath: kind == .webDAV ? normalizedRootPath : nil,
+            credentialAccount: existingProfile.credentialAccount,
+            updatedAt: existingProfile.updatedAt
+        )
+    }
+
     /// 生成频道显示名称，用户未填写时使用类型和主机名。
     /// - Parameter server: 已校验的服务器 URL。
     /// - Returns: 首页频道标题。
@@ -723,12 +868,12 @@ private struct PlexAuthorizationView: View {
                                 openURL(pin.authorizationURL)
                             } label: {
                                 Label("打开 Plex 官方登录页", systemImage: "safari")
-                                    .frame(maxWidth: .infinity)
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(KanataPrimaryButtonStyle())
                             ShareLink(item: pin.authorizationURL) {
                                 Label("发送登录链接到其他设备", systemImage: "square.and.arrow.up")
                             }
+                            .buttonStyle(KanataSecondaryButtonStyle())
                             #else
                             Text("请在手机或电脑打开 plex.tv/link，登录同一账号并输入上方授权码。")
                                 .font(.callout)
@@ -780,6 +925,7 @@ private struct PlexAuthorizationView: View {
                             Text(errorMessage)
                         } actions: {
                             Button("重新生成") { Task { await beginAuthorization() } }
+                                .buttonStyle(KanataPrimaryButtonStyle())
                         }
                     }
                 }
@@ -789,6 +935,7 @@ private struct PlexAuthorizationView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
+                        .kanataToolbarTextButton()
                 }
             }
             .task { await beginAuthorization() }
@@ -880,9 +1027,17 @@ private struct WebDAVChannelView: View {
             Section("当前位置") {
                 VStack(alignment: .leading, spacing: 5) {
                     Label(directoryStack.last?.name ?? profile.name, systemImage: "folder")
+                        #if os(tvOS)
+                        .font(.title2.weight(.semibold))
+                        #else
                         .font(.headline)
+                        #endif
                     Text(directoryStack.map(\.name).joined(separator: " / "))
+                        #if os(tvOS)
+                        .font(.body)
+                        #else
                         .font(.caption)
+                        #endif
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
@@ -894,7 +1049,6 @@ private struct WebDAVChannelView: View {
                 .buttonStyle(KanataSecondaryButtonStyle())
                 .disabled(entries.isEmpty || isLoading)
             }
-            if isLoading { ProgressView("正在读取目录…") }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
             Section("目录内容") {
                 ForEach(entries) { entry in
@@ -905,12 +1059,19 @@ private struct WebDAVChannelView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: entry.isDirectory ? "folder.fill" : "play.rectangle")
                                     .foregroundStyle(entry.isDirectory ? KanataTheme.accent : .secondary)
-                                    .frame(width: 28)
+                                    .frame(width: 34)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(entry.name)
                                         .lineLimit(2)
+                                        #if os(tvOS)
+                                        .font(.title3.weight(.semibold))
+                                        #endif
                                     Text(entry.isDirectory ? "打开文件夹" : "选择单个视频")
+                                        #if os(tvOS)
+                                        .font(.body)
+                                        #else
                                         .font(.caption)
+                                        #endif
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 4)
@@ -918,10 +1079,11 @@ private struct WebDAVChannelView: View {
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.tertiary)
                             }
-                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: tvDirectoryRowHeight, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .kanataTVFocus(cornerRadius: 14)
                         if entry.isDirectory {
                             Button {
                                 Task { await addDirectory(url: entry.url, title: entry.name) }
@@ -930,6 +1092,7 @@ private struct WebDAVChannelView: View {
                                     .frame(width: 44, height: 44)
                             }
                             .buttonStyle(.plain)
+                            .kanataTVFocus(cornerRadius: 22)
                             .accessibilityLabel("把 \(entry.name) 添加为合集")
                         }
                     }
@@ -939,6 +1102,14 @@ private struct WebDAVChannelView: View {
                 ContentUnavailableView("没有视频", systemImage: "film", description: Text("该目录没有支持的视频文件"))
             }
         }
+        .overlay {
+            if isLoading {
+                ProgressView("正在读取目录…")
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .allowsHitTesting(false)
+            }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if directoryStack.count > 1 {
@@ -946,10 +1117,35 @@ private struct WebDAVChannelView: View {
                 }
             }
         }
+        .kanataTVExitCommand(isEnabled: directoryStack.count > 1) {
+            Task { await goBack() }
+        }
         .task { await loadInitialDirectory() }
+        #if os(tvOS)
+        .navigationDestination(
+            isPresented: Binding(
+                get: { pendingImport != nil },
+                set: { if !$0 { pendingImport = nil } }
+            )
+        ) {
+            if let draft = pendingImport {
+                MediaImportPreview(draft: draft, usesParentNavigation: true, onConfirm: onAdd)
+            }
+        }
+        #else
         .sheet(item: $pendingImport) { draft in
             MediaImportPreview(draft: draft, onConfirm: onAdd)
         }
+        #endif
+    }
+
+    /// 返回适合当前平台观看距离的目录行高度。
+    private var tvDirectoryRowHeight: CGFloat {
+        #if os(tvOS)
+        76
+        #else
+        52
+        #endif
     }
 
     /// 读取配置中的 WebDAV 起始目录。
@@ -1186,9 +1382,17 @@ private struct MediaServerChannelView: View {
                 .pickerStyle(.segmented)
                 VStack(alignment: .leading, spacing: 4) {
                     Label(stack.last?.name ?? profile.name, systemImage: "folder")
+                        #if os(tvOS)
+                        .font(.title2.weight(.semibold))
+                        #else
                         .font(.headline)
+                        #endif
                     Text(stack.map(\.name).joined(separator: " / "))
+                        #if os(tvOS)
+                        .font(.body)
+                        #else
                         .font(.caption)
+                        #endif
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
@@ -1200,7 +1404,6 @@ private struct MediaServerChannelView: View {
                 .buttonStyle(KanataSecondaryButtonStyle())
                 .disabled(entries.isEmpty || isLoading)
             }
-            if isLoading { ProgressView("正在读取 \(profile.kind.title)…") }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
             Section(stack.last?.name ?? profile.name) {
                 ForEach(visibleEntries) { entry in
@@ -1217,16 +1420,27 @@ private struct MediaServerChannelView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(entry.name)
                                         .lineLimit(2)
+                                        #if os(tvOS)
+                                        .font(.title3.weight(.semibold))
+                                        #endif
                                     Text(entry.typeLabel)
+                                        #if os(tvOS)
+                                        .font(.body)
+                                        #else
                                         .font(.caption)
+                                        #endif
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
+                                Image(systemName: entry.isDirectory ? "chevron.right" : "play.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
                             }
+                            .frame(maxWidth: .infinity, minHeight: tvServerRowHeight, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
-                        .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
-                        .contentShape(Rectangle())
                         .buttonStyle(.plain)
+                        .kanataTVFocus(cornerRadius: 14)
                         if entry.isDirectory {
                             Button {
                                 Task { await addDirectory(entry) }
@@ -1235,6 +1449,7 @@ private struct MediaServerChannelView: View {
                                     .frame(width: 44, height: 44)
                             }
                             .buttonStyle(.plain)
+                            .kanataTVFocus(cornerRadius: 22)
                             .accessibilityLabel("把 \(entry.name) 添加为合集")
                         }
                     }
@@ -1242,6 +1457,14 @@ private struct MediaServerChannelView: View {
             }
             if !isLoading && visibleEntries.isEmpty && errorMessage == nil {
                 ContentUnavailableView("没有匹配内容", systemImage: "film.stack", description: Text("切换分类或搜索其他名称"))
+            }
+        }
+        .overlay {
+            if isLoading {
+                ProgressView("正在读取 \(profile.kind.title)…")
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .allowsHitTesting(false)
             }
         }
         .searchable(text: $searchText, prompt: "搜索当前频道")
@@ -1252,10 +1475,35 @@ private struct MediaServerChannelView: View {
                 }
             }
         }
+        .kanataTVExitCommand(isEnabled: stack.count > 1) {
+            Task { await goBack() }
+        }
         .task { await loadInitialContent() }
+        #if os(tvOS)
+        .navigationDestination(
+            isPresented: Binding(
+                get: { pendingImport != nil },
+                set: { if !$0 { pendingImport = nil } }
+            )
+        ) {
+            if let draft = pendingImport {
+                MediaImportPreview(draft: draft, usesParentNavigation: true, onConfirm: onAdd)
+            }
+        }
+        #else
         .sheet(item: $pendingImport) { draft in
             MediaImportPreview(draft: draft, onConfirm: onAdd)
         }
+        #endif
+    }
+
+    /// 返回适合当前平台观看距离的媒体服务器行高度。
+    private var tvServerRowHeight: CGFloat {
+        #if os(tvOS)
+        86
+        #else
+        62
+        #endif
     }
 
     /// 首次进入频道时读取根媒体库。
@@ -1330,7 +1578,7 @@ private struct MediaServerChannelView: View {
             var items: [LibraryItem] = []
             for group in groups {
                 let collectionID = "\(profile.kind.rawValue):\(profile.id):\(group.key)"
-                for (offset, entry) in group.entries.enumerated() where items.count < 500 {
+                for (offset, entry) in sortedPlayableEntries(group.entries).enumerated() where items.count < 500 {
                     if let item = await makeItem(
                         entry: entry,
                         collectionID: collectionID,
@@ -1356,7 +1604,7 @@ private struct MediaServerChannelView: View {
     /// - Parameters:
     ///   - key: 当前目录标识。
     ///   - depth: 递归深度，最多四层以避免扫描整台服务器。
-    /// - Returns: 按服务端顺序排列的可播放项目。
+    /// - Returns: 按季度、集号和名称排列的可播放项目。
     private func collectPlayable(key: String?, depth: Int) async throws -> [MediaSourceEntry] {
         guard depth <= 4 else { return [] }
         let values = try await fetchEntries(key: key)
@@ -1365,7 +1613,28 @@ private struct MediaServerChannelView: View {
             guard result.count < 500, let childKey = directory.navigationKey else { continue }
             result.append(contentsOf: try await collectPlayable(key: childKey, depth: depth + 1))
         }
-        return result
+        return sortedPlayableEntries(result)
+    }
+
+    /// 按服务端季度、集号和自然名称稳定排列可播放条目。
+    /// - Parameter entries: 递归扫描到的视频条目。
+    /// - Returns: 可直接用于合集编号的有序条目。
+    private func sortedPlayableEntries(_ entries: [MediaSourceEntry]) -> [MediaSourceEntry] {
+        entries.sorted { left, right in
+            if left.seasonIndex != right.seasonIndex {
+                if let leftSeason = left.seasonIndex, let rightSeason = right.seasonIndex {
+                    return leftSeason < rightSeason
+                }
+                return left.seasonIndex != nil
+            }
+            if left.index != right.index {
+                if let leftIndex = left.index, let rightIndex = right.index {
+                    return leftIndex < rightIndex
+                }
+                return left.index != nil
+            }
+            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+        }
     }
 
     /// 把统一媒体条目转换为带认证引用的 LibraryItem。
@@ -1402,7 +1671,9 @@ private struct MediaServerChannelView: View {
                 sourceProfileID: profile.id,
                 collectionID: collectionID,
                 collectionTitle: collectionTitle,
-                collectionIndex: index
+                collectionIndex: index,
+                season: entry.seasonIndex,
+                episode: entry.index
             )
         } catch {
             errorMessage = error.localizedDescription

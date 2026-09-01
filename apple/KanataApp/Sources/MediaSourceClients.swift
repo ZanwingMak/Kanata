@@ -253,6 +253,7 @@ actor SynologyFileStationClient {
                 navigationKey: item.isdir ? item.path : nil,
                 streamPath: item.isdir ? nil : item.path,
                 index: nil,
+                seasonIndex: nil,
                 artworkPath: nil
             )
         }
@@ -360,6 +361,7 @@ struct MediaSourceEntry: Identifiable, Sendable {
     let navigationKey: String?
     let streamPath: String?
     let index: Int?
+    let seasonIndex: Int?
     let artworkPath: String?
 
     var isPlayable: Bool { !isDirectory && streamPath != nil }
@@ -453,6 +455,7 @@ actor MediaBrowserClient {
                 navigationKey: isDirectory ? item.id : nil,
                 streamPath: isDirectory ? nil : item.id,
                 index: item.indexNumber,
+                seasonIndex: item.parentIndexNumber,
                 artworkPath: "/Items/\(item.id)/Images/Primary?maxWidth=640&quality=85"
             )
         }
@@ -518,6 +521,7 @@ private struct MediaBrowserItemsResponse: Decodable {
         let type: String
         let isFolder: Bool?
         let indexNumber: Int?
+        let parentIndexNumber: Int?
 
         private enum CodingKeys: String, CodingKey {
             case id = "Id"
@@ -525,6 +529,7 @@ private struct MediaBrowserItemsResponse: Decodable {
             case type = "Type"
             case isFolder = "IsFolder"
             case indexNumber = "IndexNumber"
+            case parentIndexNumber = "ParentIndexNumber"
         }
     }
     let Items: [Item]
@@ -960,6 +965,7 @@ private final class PlexXMLDelegate: NSObject, XMLParserDelegate {
                 navigationKey: navigationKey,
                 streamPath: nil,
                 index: attributeDict["index"].flatMap(Int.init),
+                seasonIndex: attributeDict["parentIndex"].flatMap(Int.init),
                 artworkPath: attributeDict["thumb"] ?? attributeDict["art"]
             ))
         case "Video":
@@ -990,6 +996,7 @@ private final class PlexXMLDelegate: NSObject, XMLParserDelegate {
             navigationKey: nil,
             streamPath: currentPartPath,
             index: video["index"].flatMap(Int.init),
+            seasonIndex: video["parentIndex"].flatMap(Int.init),
             artworkPath: video["thumb"] ?? video["grandparentThumb"] ?? video["art"]
         ))
         currentVideo = nil

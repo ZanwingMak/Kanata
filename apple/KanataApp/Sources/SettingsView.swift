@@ -77,7 +77,9 @@ struct SettingsView: View {
                             Label {
                                 Text(theme.title)
                             } icon: {
-                                Circle().fill(theme.accent)
+                                Circle()
+                                    .fill(theme.accent)
+                                    .frame(width: 18, height: 18)
                             }
                             .tag(theme)
                         }
@@ -327,6 +329,7 @@ struct SettingsView: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("完成") { dismiss() }
                             .buttonStyle(.plain)
+                            .kanataToolbarTextButton()
                     }
                 }
             }

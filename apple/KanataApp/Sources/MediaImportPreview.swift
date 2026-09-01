@@ -18,6 +18,7 @@ private struct MediaImportGroup: Identifiable {
 /// 在写入媒体库前提供分组预览、多选和合并策略。
 struct MediaImportPreview: View {
     let draft: MediaImportDraft
+    let usesParentNavigation: Bool
     let onConfirm: ([LibraryItem]) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var selectedIDs: Set<String>
@@ -28,8 +29,13 @@ struct MediaImportPreview: View {
     /// - Parameters:
     ///   - draft: 扫描结果。
     ///   - onConfirm: 用户确认后的条目回调。
-    init(draft: MediaImportDraft, onConfirm: @escaping ([LibraryItem]) -> Void) {
+    init(
+        draft: MediaImportDraft,
+        usesParentNavigation: Bool = false,
+        onConfirm: @escaping ([LibraryItem]) -> Void
+    ) {
         self.draft = draft
+        self.usesParentNavigation = usesParentNavigation
         self.onConfirm = onConfirm
         _selectedIDs = State(initialValue: Set(draft.items.map(\.id)))
         _mergesCollections = State(initialValue: draft.prefersMergedCollection)
@@ -54,9 +60,28 @@ struct MediaImportPreview: View {
     /// 当前被选中的视频数量。
     private var selectedCount: Int { selectedIDs.count }
 
+    /// 当前是否已经选中扫描结果中的全部条目。
+    private var allItemsSelected: Bool {
+        Set(draft.items.map(\.id)).isSubset(of: selectedIDs)
+    }
+
+    /// 顶部全局选择按钮的明确文案。
+    private var allSelectionTitle: String {
+        allItemsSelected ? "取消全选全部" : "全选全部"
+    }
+
+    @ViewBuilder
     var body: some View {
-        NavigationStack {
-            List {
+        if usesParentNavigation {
+            content
+        } else {
+            NavigationStack { content }
+        }
+    }
+
+    /// 构建可由 iOS 弹窗和 tvOS 全屏导航共同复用的导入确认列表。
+    private var content: some View {
+        List {
                 Section {
                     KanataRowLabel(
                         title: "已识别 \(draft.items.count) 个视频",
@@ -64,14 +89,37 @@ struct MediaImportPreview: View {
                         symbol: "checklist"
                     )
                     if groups.count > 1 {
-                        Toggle("合并为一个合集", isOn: $mergesCollections)
+                        Button {
+                            toggleAll()
+                        } label: {
+                            Label(
+                                allSelectionTitle,
+                                systemImage: allItemsSelected ? "checkmark.circle.fill" : "circle"
+                            )
+                        }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        Toggle("把所有目录合并为一个合集", isOn: $mergesCollections)
                         if mergesCollections {
                             TextField("合集名称", text: $mergedTitle)
                         }
+                        Text(mergesCollections
+                            ? "按季度、目录和真实集数重新排序后合并。"
+                            : "保留原目录结构，每个目录建立一个独立合集。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 ForEach(groups) { group in
                     Section {
+                        Button {
+                            toggleGroup(group.items)
+                        } label: {
+                            Label(
+                                selectionTitle(for: group.items),
+                                systemImage: groupItemsSelected(group.items) ? "checkmark.circle.fill" : "circle"
+                            )
+                        }
+                        .buttonStyle(KanataSecondaryButtonStyle())
                         ForEach(group.items) { item in
                             Button {
                                 toggleSelection(item.id)
@@ -82,38 +130,40 @@ struct MediaImportPreview: View {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(item.episodeLabel ?? item.displayName)
                                             .foregroundStyle(.primary)
+                                            #if os(tvOS)
+                                            .font(.title3.weight(.semibold))
+                                            #endif
                                         Text(item.displayName)
+                                            #if os(tvOS)
+                                            .font(.body)
+                                            #else
                                             .font(.caption)
+                                            #endif
                                             .foregroundStyle(.secondary)
                                             .lineLimit(1)
                                     }
+                                    Spacer(minLength: 8)
                                 }
+                                .frame(minHeight: importRowHeight)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .kanataTVFocus(cornerRadius: 12)
                         }
-                    } header: {
-                        HStack {
-                            Text(group.title)
-                            Spacer()
-                            Button(selectionTitle(for: group.items)) {
-                                toggleGroup(group.items)
-                            }
-                            .font(.caption)
-                        }
-                    }
+                    } header: { Text(group.title) }
                 }
+        }
+        .navigationTitle("确认导入")
+        .kanataInlineNavigationTitle()
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("取消") { dismiss() }
+                    .kanataToolbarTextButton()
             }
-            .navigationTitle("确认导入")
-            .kanataInlineNavigationTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("加入 \(selectedCount) 项") { confirmImport() }
-                        .disabled(selectedIDs.isEmpty)
-                }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("加入 \(selectedCount) 项") { confirmImport() }
+                    .kanataToolbarTextButton()
+                    .disabled(selectedIDs.isEmpty)
             }
         }
         .tint(KanataTheme.accent)
@@ -126,6 +176,16 @@ struct MediaImportPreview: View {
             selectedIDs.remove(id)
         } else {
             selectedIDs.insert(id)
+        }
+    }
+
+    /// 切换本次扫描结果中的全部条目，不影响后续重新打开的导入任务。
+    private func toggleAll() {
+        let ids = Set(draft.items.map(\.id))
+        if ids.isSubset(of: selectedIDs) {
+            selectedIDs.subtract(ids)
+        } else {
+            selectedIDs.formUnion(ids)
         }
     }
 
@@ -142,9 +202,27 @@ struct MediaImportPreview: View {
 
     /// 返回分组标题区域的全选操作文案。
     /// - Parameter items: 分组内条目。
-    /// - Returns: 已全选时为“取消全选”，否则为“全选”。
+    /// - Returns: 明确标注只影响当前目录列表的操作文案。
     private func selectionTitle(for items: [LibraryItem]) -> String {
-        Set(items.map(\.id)).isSubset(of: selectedIDs) ? "取消全选" : "全选"
+        groupItemsSelected(items)
+            ? "取消全选当前列表"
+            : "全选当前列表"
+    }
+
+    /// 判断当前目录列表中的条目是否已经全部选中。
+    /// - Parameter items: 当前目录条目。
+    /// - Returns: 全部已选中时返回 true。
+    private func groupItemsSelected(_ items: [LibraryItem]) -> Bool {
+        Set(items.map(\.id)).isSubset(of: selectedIDs)
+    }
+
+    /// 返回适合电视观看距离的导入条目高度。
+    private var importRowHeight: CGFloat {
+        #if os(tvOS)
+        72
+        #else
+        44
+        #endif
     }
 
     /// 整理选中条目的合集与集数后提交。
@@ -156,7 +234,7 @@ struct MediaImportPreview: View {
             let resolvedTitle = title.isEmpty ? draft.title : title
             let collectionID = "merged:\(draft.id.uuidString)"
             result = selected
-                .sorted(by: LibraryItem.collectionOrder)
+                .sorted(by: LibraryItem.mergedCollectionOrder)
                 .enumerated()
                 .map { offset, item in
                     item.assigningCollection(id: collectionID, title: resolvedTitle, index: offset + 1)
@@ -175,7 +253,7 @@ struct MediaImportPreview: View {
                 }
             }
         }
-        onConfirm(result.sorted(by: LibraryItem.collectionOrder))
+        onConfirm(result.sorted(by: LibraryItem.groupedCollectionOrder))
         dismiss()
     }
 }

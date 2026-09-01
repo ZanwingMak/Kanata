@@ -1258,6 +1258,7 @@ private struct PlaylistPicker: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
+                        .kanataToolbarTextButton()
                 }
             }
         }
@@ -1327,7 +1328,7 @@ struct CandidatePicker: View {
                         Button("搜索") {
                             Task { await viewModel.search(keyword: keyword) }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(KanataPrimaryButtonStyle())
                         .disabled(keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSearchingCandidates)
                         Text("搜索不会再强制使用文件名推断的集号；选择正确分集后会记住，下次自动加载。")
                             .font(.caption)
@@ -1375,6 +1376,7 @@ struct CandidatePicker: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
+                        .kanataToolbarTextButton()
                 }
             }
             .onAppear { keyword = viewModel.parsed?.title ?? "" }
@@ -1598,6 +1600,7 @@ struct PlaybackOptionsPanel: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
+                        .kanataToolbarTextButton()
                 }
             }
         }

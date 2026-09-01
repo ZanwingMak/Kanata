@@ -220,15 +220,12 @@ struct BilibiliQRCodeLoginSheet: View {
                             openURL(loginSession.url)
                         } label: {
                             Label("在浏览器中登录", systemImage: "safari")
-                                .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
+                        .buttonStyle(KanataPrimaryButtonStyle())
                         ShareLink(item: loginSession.url) {
                             Label("发送到其他设备", systemImage: "square.and.arrow.up")
-                                .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(KanataSecondaryButtonStyle())
                     }
                     Text("浏览器显示登录成功后，请返回 Kanata；本页会继续自动确认登录状态，无需复制 Cookie。")
                         .font(.footnote)
@@ -254,7 +251,7 @@ struct BilibiliQRCodeLoginSheet: View {
                             self.errorText = nil
                             Task { await beginLogin() }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(KanataPrimaryButtonStyle())
                     }
                 }
                 Spacer(minLength: 0)
@@ -268,6 +265,7 @@ struct BilibiliQRCodeLoginSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
+                        .kanataToolbarTextButton()
                 }
             }
             .task { await beginLogin() }
