@@ -622,6 +622,30 @@ actor PlexAccountClient {
         return nil
     }
 
+    /// 为账号下每台 Plex 服务器选择一条最优可访问线路。
+    /// - Parameter connections: 服务器的全部局域网、远程和中继地址。
+    /// - Returns: 每台服务器最多一条连接，按局域网和直连优先排序。
+    func recommendedServerConnections(
+        in connections: [PlexDiscoveredConnection]
+    ) async -> [PlexDiscoveredConnection] {
+        let grouped = Dictionary(grouping: connections, by: \.serverName)
+        var results: [PlexDiscoveredConnection] = []
+        for serverName in grouped.keys.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }) {
+            guard let values = grouped[serverName] else { continue }
+            if let reachable = await bestReachableConnection(in: values) {
+                results.append(reachable)
+            } else if let fallback = values.first {
+                results.append(fallback)
+            }
+        }
+        return results.sorted { left, right in
+            let leftScore = (left.isRelay ? 4 : 0) + (left.isLocal ? 0 : 1)
+            let rightScore = (right.isRelay ? 4 : 0) + (right.isLocal ? 0 : 1)
+            if leftScore != rightScore { return leftScore < rightScore }
+            return left.serverName.localizedStandardCompare(right.serverName) == .orderedAscending
+        }
+    }
+
     /// 拉取 Plex 账号可访问的 Media Server 与连接地址。
     /// - Parameter accountToken: PIN 授权得到的账号令牌。
     /// - Returns: 已过滤 HTTP(S) 地址的服务器连接。

@@ -3,6 +3,33 @@ import Foundation
 import KanataCore
 import Observation
 
+/// 当前媒体集数与弹幕来源集数的对应状态。
+enum DanmakuEpisodeAlignment: Equatable {
+    case unavailable
+    case unverified(local: Int?)
+    case matched(local: Int, remote: Int)
+    case mismatched(local: Int, remote: Int)
+
+    var title: String {
+        switch self {
+        case .unavailable: "尚未绑定弹幕分集"
+        case .unverified(let local):
+            local.map { "当前第 \($0) 集 · 弹幕源未提供集号" } ?? "弹幕集数待确认"
+        case .matched(let local, _): "集数一致 · 第 \(local) 集"
+        case .mismatched(let local, let remote): "集数不一致 · 视频第 \(local) 集 / 弹幕第 \(remote) 集"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .unavailable: "link.badge.plus"
+        case .unverified: "questionmark.circle"
+        case .matched: "checkmark.circle.fill"
+        case .mismatched: "exclamationmark.triangle.fill"
+        }
+    }
+}
+
 /// 播放页状态机：打开文件 → 识别 → 匹配弹幕 → 播放。
 /// M0 只覆盖本地文件与 AVPlayer 内核，VLCKit 兜底在 M1 接入（FR-PLY-001）。
 @MainActor
@@ -85,6 +112,27 @@ final class PlayerViewModel {
 
     /// 当前视频是否已关联本地弹幕文件。
     var hasLocalDanmaku: Bool { !localItems.isEmpty }
+
+    /// 当前绑定与本地解析集数的对应结果。
+    var episodeAlignment: DanmakuEpisodeAlignment {
+        guard let currentBinding else { return .unavailable }
+        return episodeAlignment(for: currentBinding)
+    }
+
+    /// 比较一个候选弹幕分集与当前视频的集数。
+    /// - Parameter candidate: 待比较的弹幕候选。
+    /// - Returns: 明确一致、不一致或无法确认。
+    func episodeAlignment(for candidate: ProviderCandidate) -> DanmakuEpisodeAlignment {
+        let localEpisode = parsed?.episode
+        let remoteEpisode = Self.episodeNumber(
+            from: [candidate.episodeTitle, candidate.title].compactMap { $0 }.joined(separator: " ")
+        )
+        guard let localEpisode else { return .unverified(local: nil) }
+        guard let remoteEpisode else { return .unverified(local: localEpisode) }
+        return localEpisode == remoteEpisode
+            ? .matched(local: localEpisode, remote: remoteEpisode)
+            : .mismatched(local: localEpisode, remote: remoteEpisode)
+    }
 
     /// 应用偏移后的弹幕，供渲染层使用
     var shiftedItems: [DanmakuItem] {
@@ -440,7 +488,7 @@ final class PlayerViewModel {
             ? "\(items.count) 条"
             : "\(items.count) 条在线 + \(localItems.count) 条本地"
         let sourceName = candidate.sourceInstanceName ?? candidate.source.displayName
-        danmakuStats = "\(count) · \(sourceName) · \(elapsedMs)ms\(fallbackText)\(hint)"
+        danmakuStats = "\(count) · \(sourceName) · \(episodeAlignment(for: candidate).title) · \(elapsedMs)ms\(fallbackText)\(hint)"
     }
 
     /// 导入本地弹幕并按当前视频指纹持久化。
@@ -591,6 +639,23 @@ final class PlayerViewModel {
         isShowingCandidates = false
         isSearchingCandidates = false
         onItemsChanged?([])
+    }
+
+    /// 从平台分集标题中提取“第 N 集”、EP N 或开头数字。
+    /// - Parameter value: 来源标题与分集标题组合文本。
+    /// - Returns: 无明确数字时返回 nil。
+    private static func episodeNumber(from value: String) -> Int? {
+        let patterns = [#"第\s*(\d+)\s*[集话]"#, #"\b(?:EP|E)\s*0*(\d+)\b"#, #"^\s*0*(\d+)\b"#]
+        for pattern in patterns {
+            guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let range = NSRange(value.startIndex..<value.endIndex, in: value)
+            guard let match = expression.firstMatch(in: value, range: range),
+                  match.numberOfRanges > 1,
+                  let numberRange = Range(match.range(at: 1), in: value),
+                  let number = Int(value[numberRange]) else { continue }
+            return number
+        }
+        return nil
     }
 
     // MARK: - 播放控制

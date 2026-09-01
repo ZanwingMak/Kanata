@@ -56,6 +56,7 @@ struct MediaSourceSheet: View {
     @State private var profiles = MediaSourceProfileStore.load()
     @State private var isImportingFolder = false
     @State private var importError: String?
+    @State private var pendingImport: MediaImportDraft?
 
     /// 创建媒体源入口；Apple TV 可复用首页导航栈以获得完整页面式流程。
     /// - Parameters:
@@ -142,6 +143,7 @@ struct MediaSourceSheet: View {
                         .foregroundStyle(.secondary)
                 }
         }
+        .kanataFormBackground()
         .navigationTitle("添加媒体源")
         .kanataInlineNavigationTitle()
         .toolbar {
@@ -168,6 +170,9 @@ struct MediaSourceSheet: View {
         } message: {
             Text(importError ?? "")
         }
+        .sheet(item: $pendingImport) { draft in
+            MediaImportPreview(draft: draft, onConfirm: finish)
+        }
     }
 
     /// 生成带说明的媒体来源列表标签。
@@ -177,14 +182,7 @@ struct MediaSourceSheet: View {
     ///   - symbol: SF Symbol 名称。
     /// - Returns: 统一样式的标签视图。
     private func sourceLabel(_ title: String, detail: String, symbol: String) -> some View {
-        Label {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-        } icon: {
-            Image(systemName: symbol).foregroundStyle(.cyan)
-        }
+        KanataRowLabel(title: title, detail: detail, symbol: symbol)
     }
 
     /// 返回媒体源在添加列表中的能力说明。
@@ -214,7 +212,7 @@ struct MediaSourceSheet: View {
         onSourcesChanged()
     }
 
-    /// 递归读取系统文件选择器返回的目录并建立一个有序播放合集。
+    /// 递归读取系统文件选择器返回的目录并生成按第一层子目录分组的导入预览。
     /// - Parameter result: 目录选择结果；已连接的 SMB 会由系统文件提供器暴露。
     private func importFolder(_ result: Result<[URL], Error>) {
         do {
@@ -240,21 +238,33 @@ struct MediaSourceSheet: View {
                 importError = "该目录中没有找到支持的视频文件"
                 return
             }
-            let collectionID = "folder:\(root.standardizedFileURL.absoluteString)"
             let title = root.lastPathComponent.removingPercentEncoding ?? root.lastPathComponent
-            let items = videos.enumerated().compactMap { offset, url in
-                LibraryItem(
-                    url: url,
-                    collectionID: collectionID,
-                    collectionTitle: title,
-                    collectionIndex: offset + 1
-                )
+            let grouped = Dictionary(grouping: videos) { url in
+                Self.relativeGroupName(for: url, root: root) ?? title
+            }
+            let items = grouped.keys.sorted(by: { $0.localizedStandardCompare($1) == .orderedAscending }).flatMap { groupTitle in
+                let groupVideos = (grouped[groupTitle] ?? []).sorted {
+                    $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+                }
+                let collectionID = "folder:\(root.standardizedFileURL.absoluteString)#\(groupTitle)"
+                return groupVideos.enumerated().compactMap { offset, url in
+                    LibraryItem(
+                        url: url,
+                        collectionID: collectionID,
+                        collectionTitle: groupTitle,
+                        collectionIndex: offset + 1
+                    )
+                }
             }
             guard !items.isEmpty else {
                 importError = "系统没有授予该目录的持久访问权限，请重新选择"
                 return
             }
-            finish(items)
+            pendingImport = MediaImportDraft(
+                title: title,
+                items: items,
+                prefersMergedCollection: grouped.count == 1
+            )
         } catch {
             importError = error.localizedDescription
         }
@@ -266,6 +276,18 @@ struct MediaSourceSheet: View {
     private static func isVideoFile(_ url: URL) -> Bool {
         ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "flv"]
             .contains(url.pathExtension.lowercased())
+    }
+
+    /// 返回视频相对所选根目录的第一层分组名称。
+    /// - Parameters:
+    ///   - url: 扫描到的视频文件。
+    ///   - root: 用户选择的根目录。
+    /// - Returns: 第一层子目录名；根目录直放文件时返回 nil。
+    private static func relativeGroupName(for url: URL, root: URL) -> String? {
+        let rootCount = root.standardizedFileURL.pathComponents.count
+        let relative = Array(url.standardizedFileURL.pathComponents.dropFirst(rootCount))
+        guard relative.count > 1 else { return nil }
+        return relative[0].removingPercentEncoding ?? relative[0]
     }
 }
 
@@ -288,9 +310,15 @@ private struct DirectMediaSourceView: View {
                     Text(errorMessage).font(.caption).foregroundStyle(.red)
                 }
             }
-            Button("添加并播放") { addVideo() }
+            Button {
+                addVideo()
+            } label: {
+                Label("加入媒体库", systemImage: "plus.circle.fill")
+            }
+                .buttonStyle(KanataPrimaryButtonStyle())
                 .disabled(urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
+        .kanataFormBackground()
         .navigationTitle("网络直链")
         .kanataInlineNavigationTitle()
     }
@@ -322,6 +350,22 @@ private struct MediaSourceConnectionView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var isShowingPlexAuthorization = false
+    @State private var plexLoginMode = PlexLoginMode.account
+
+    /// Plex 支持的两种登录入口。
+    private enum PlexLoginMode: String, CaseIterable, Identifiable {
+        case account
+        case token
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .account: "Plex 账号"
+            case .token: "地址与 Token"
+            }
+        }
+    }
 
     var body: some View {
         Group {
@@ -350,64 +394,88 @@ private struct MediaSourceConnectionView: View {
         }
     }
 
-    /// 根据媒体源类型生成登录表单。
+    /// 根据媒体源类型生成分步骤登录表单。
     private var connectionForm: some View {
         Form {
-            Section("服务器") {
-                TextField("频道名称（可选）", text: $name)
-                TextField(kind.defaultPortHint, text: $server)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                if kind == .webDAV {
-                    TextField("起始路径，例如 /Movies", text: $rootPath)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+            if kind == .plex {
+                Section("连接方式") {
+                    Picker("登录模式", selection: $plexLoginMode) {
+                        ForEach(PlexLoginMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(plexLoginMode == .account
+                        ? "登录 Plex 账号后自动发现服务器、测试连接并选择最快线路。"
+                        : "仅在你已经知道服务器地址和 X-Plex-Token 时使用。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            Section("登录") {
-                if kind == .plex {
+
+            if kind != .plex || plexLoginMode == .token {
+                Section("服务器") {
+                    TextField("频道名称（可选）", text: $name)
+                    TextField(kind.defaultPortHint, text: $server)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    if kind == .webDAV {
+                        TextField("起始路径，例如 /Movies", text: $rootPath)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                }
+            }
+
+            if kind == .plex, plexLoginMode == .account {
+                Section {
                     Button {
                         isShowingPlexAuthorization = true
                     } label: {
-                        Label("使用 Plex 账号网页登录", systemImage: "safari")
+                        Label("登录并自动发现服务器", systemImage: "person.crop.circle.badge.checkmark")
                     }
-                    .buttonStyle(.borderedProminent)
-                    Text("登录后自动发现账号下的服务器，不需要查找或粘贴 Token。")
+                    .buttonStyle(KanataPrimaryButtonStyle())
+                    Text("Kanata 会优先测试局域网直连，其次远程直连，最后才使用 Plex Relay。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Divider()
-                    SecureField("X-Plex-Token", text: $plexToken)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Text("也可以手动填写服务器地址与 X-Plex-Token；Token 只保存在 Keychain。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    TextField(kind == .webDAV ? "用户名（可选）" : "用户名", text: $username)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField(kind == .webDAV ? "密码（可选）" : "密码", text: $password)
-                    if kind == .synology {
-                        TextField("两步验证码（如已开启）", text: $otp)
-                            .textContentType(.oneTimeCode)
-                            .keyboardType(.numberPad)
+                }
+            } else {
+                Section("登录") {
+                    if kind == .plex {
+                        SecureField("X-Plex-Token", text: $plexToken)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } else {
+                        TextField(kind == .webDAV ? "用户名（可选）" : "用户名", text: $username)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        SecureField(kind == .webDAV ? "密码（可选）" : "密码", text: $password)
+                        if kind == .synology {
+                            TextField("两步验证码（如已开启）", text: $otp)
+                                .textContentType(.oneTimeCode)
+                                .keyboardType(.numberPad)
+                        }
                     }
                 }
-            }
-            Button {
-                Task { await connect() }
-            } label: {
-                HStack {
-                    Label("连接并浏览", systemImage: "network")
-                    if isLoading { Spacer(); ProgressView() }
+                Section {
+                    Button {
+                        Task { await connect() }
+                    } label: {
+                        HStack {
+                            Label("测试连接并保存", systemImage: "network.badge.shield.half.filled")
+                            if isLoading { Spacer(); ProgressView() }
+                        }
+                    }
+                    .buttonStyle(KanataPrimaryButtonStyle())
+                    .disabled(server.isEmpty || isLoading || (kind == .plex && plexToken.isEmpty))
                 }
             }
-            .disabled(server.isEmpty || isLoading || (kind == .plex && plexToken.isEmpty))
             if let errorMessage {
                 Text(errorMessage).foregroundStyle(.red).font(.caption)
             }
         }
+        .kanataFormBackground()
     }
 
     /// 校验服务器和凭证，保存历史记录并进入频道浏览器。
@@ -592,12 +660,17 @@ private struct PlexAuthorizationView: View {
                                                 .font(.caption2.weight(.semibold))
                                                 .padding(.horizontal, 7)
                                                 .padding(.vertical, 3)
-                                                .background(.cyan.opacity(0.18), in: Capsule())
+                                                .background(KanataTheme.accent.opacity(0.18), in: Capsule())
                                         }
                                     }
                                     Text(connection.detail)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    if index == 0 {
+                                        Text("已完成连通性测试，优先使用此线路")
+                                            .font(.caption2)
+                                            .foregroundStyle(KanataTheme.success)
+                                    }
                                 }
                             }
                         }
@@ -648,13 +721,14 @@ private struct PlexAuthorizationView: View {
             for _ in 0..<150 where !Task.isCancelled {
                 if let values = try await client.check(value) {
                     statusText = "登录成功，正在测试最快连接…"
-                    if let recommended = await client.bestReachableConnection(in: values) {
+                    let recommendedServers = await client.recommendedServerConnections(in: values)
+                    if recommendedServers.count == 1, let recommended = recommendedServers.first {
                         statusText = "已自动选择 \(recommended.serverName)"
                         onSelect(recommended)
                         return
                     }
-                    connections = values
-                    statusText = "自动检测失败，请选择标记为推荐的连接"
+                    connections = recommendedServers.isEmpty ? values : recommendedServers
+                    statusText = "请选择要加入首页的 Plex 服务器"
                     return
                 }
                 try await Task.sleep(for: .seconds(2))
@@ -696,6 +770,7 @@ private struct WebDAVChannelView: View {
     @State private var entries: [WebDAVEntry] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var pendingImport: MediaImportDraft?
     private let client: WebDAVClient
 
     /// 从历史记录创建带认证信息的 WebDAV 浏览器。
@@ -744,13 +819,16 @@ private struct WebDAVChannelView: View {
                 } label: {
                     Label("添加当前目录", systemImage: "rectangle.stack.badge.plus")
                 }
-                .disabled(entries.allSatisfy(\.isDirectory))
+                .disabled(entries.isEmpty || isLoading)
                 if directoryStack.count > 1 {
                     Button("上一级") { Task { await goBack() } }
                 }
             }
         }
         .task { await loadInitialDirectory() }
+        .sheet(item: $pendingImport) { draft in
+            MediaImportPreview(draft: draft, onConfirm: onAdd)
+        }
     }
 
     /// 读取配置中的 WebDAV 起始目录。
@@ -765,22 +843,25 @@ private struct WebDAVChannelView: View {
         await load(url)
     }
 
-    /// 进入目录或把单个视频加入媒体库并开始播放。
+    /// 进入目录，或把单个视频交给导入预览确认。
     /// - Parameter entry: 用户选择的 WebDAV 项。
     private func select(_ entry: WebDAVEntry) async {
         if entry.isDirectory {
             directoryStack.append((entry.url, entry.name))
             await load(entry.url)
         } else {
-            onAdd([makeItem(entry: entry, collectionID: nil, collectionTitle: nil, index: nil)])
+            pendingImport = MediaImportDraft(
+                title: entry.name,
+                items: [makeItem(entry: entry, collectionID: nil, collectionTitle: nil, index: nil)],
+                prefersMergedCollection: false
+            )
         }
     }
 
     /// 把当前目录中所有直接视频作为一个有序合集加入媒体库。
     private func addCurrentDirectory() {
         guard let current = directoryStack.last else { return }
-        let videos = entries.filter { !$0.isDirectory }
-        addEntries(videos, directoryURL: current.url, title: current.name)
+        Task { await prepareDirectoryImport(url: current.url, title: current.name, prefersMerged: false) }
     }
 
     /// 读取子目录并把其中的直接视频作为合集加入媒体库。
@@ -788,16 +869,7 @@ private struct WebDAVChannelView: View {
     ///   - url: 子目录地址。
     ///   - title: 合集标题。
     private func addDirectory(url: URL, title: String) async {
-        do {
-            let videos = try await client.list(directory: url).filter { !$0.isDirectory }
-            guard !videos.isEmpty else {
-                errorMessage = "\(title) 中没有可直接播放的视频"
-                return
-            }
-            addEntries(videos, directoryURL: url, title: title)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await prepareDirectoryImport(url: url, title: title, prefersMerged: true)
     }
 
     /// 创建带合集 ID 和自然顺序的 WebDAV 媒体库条目。
@@ -817,6 +889,75 @@ private struct WebDAVChannelView: View {
             )
         }
         onAdd(items)
+    }
+
+    /// 扫描目录并按第一层子目录生成可合并或分组的导入预览。
+    /// - Parameters:
+    ///   - url: 用户选择的目录地址。
+    ///   - title: 目录显示名称。
+    ///   - prefersMerged: 是否默认合并为一个合集。
+    private func prepareDirectoryImport(url: URL, title: String, prefersMerged: Bool) async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            let firstLevel = try await client.list(directory: url)
+            var groups: [(id: String, title: String, videos: [WebDAVEntry])] = []
+            let directVideos = firstLevel.filter { !$0.isDirectory }
+            if !directVideos.isEmpty {
+                groups.append((url.absoluteString, title, directVideos))
+            }
+            for directory in firstLevel where directory.isDirectory {
+                guard groups.reduce(0, { $0 + $1.videos.count }) < 500 else { break }
+                let videos = try await collectWebDAVVideos(url: directory.url, depth: 0)
+                if !videos.isEmpty {
+                    groups.append((directory.url.absoluteString, directory.name, videos))
+                }
+            }
+            if groups.isEmpty {
+                let videos = try await collectWebDAVVideos(url: url, depth: 0)
+                if !videos.isEmpty { groups = [(url.absoluteString, title, videos)] }
+            }
+            let items = groups.flatMap { group in
+                group.videos.prefix(500).enumerated().map { offset, entry in
+                    makeItem(
+                        entry: entry,
+                        collectionID: "webdav:\(profile.id):\(group.id)",
+                        collectionTitle: group.title,
+                        index: offset + 1
+                    )
+                }
+            }
+            guard !items.isEmpty else {
+                errorMessage = "\(title) 中没有找到可播放视频"
+                return
+            }
+            pendingImport = MediaImportDraft(
+                title: title,
+                items: items,
+                prefersMergedCollection: prefersMerged || groups.count == 1
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 递归收集 WebDAV 子目录视频并限制扫描规模。
+    /// - Parameters:
+    ///   - url: 当前目录。
+    ///   - depth: 当前递归深度。
+    /// - Returns: 最多 500 个自然排序的视频条目。
+    private func collectWebDAVVideos(url: URL, depth: Int) async throws -> [WebDAVEntry] {
+        guard depth <= 5 else { return [] }
+        let values = try await client.list(directory: url)
+        var result = values.filter { !$0.isDirectory }
+        for directory in values where directory.isDirectory {
+            guard result.count < 500 else { break }
+            result.append(contentsOf: try await collectWebDAVVideos(url: directory.url, depth: depth + 1))
+        }
+        return Array(result.prefix(500)).sorted {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
     }
 
     /// 把 WebDAV 文件转换为可播放媒体库条目。
@@ -894,6 +1035,7 @@ private struct MediaServerChannelView: View {
     @State private var searchText = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var pendingImport: MediaImportDraft?
     private let mediaBrowserClient = MediaBrowserClient()
     private let plexClient = PlexClient()
 
@@ -979,6 +1121,9 @@ private struct MediaServerChannelView: View {
             }
         }
         .task { await loadInitialContent() }
+        .sheet(item: $pendingImport) { draft in
+            MediaImportPreview(draft: draft, onConfirm: onAdd)
+        }
     }
 
     /// 首次进入频道时读取根媒体库。
@@ -988,14 +1133,18 @@ private struct MediaServerChannelView: View {
         await load(key: nil)
     }
 
-    /// 打开文件夹，或把单个视频加入媒体库并播放。
+    /// 打开文件夹，或把单个视频交给导入预览确认。
     /// - Parameter entry: 当前媒体服务器条目。
     private func select(_ entry: MediaSourceEntry) async {
         if entry.isDirectory, let key = entry.navigationKey {
             stack.append((key, entry.name))
             await load(key: key)
         } else if let item = await makeItem(entry: entry, collectionID: nil, collectionTitle: nil, index: nil) {
-            onAdd([item])
+            pendingImport = MediaImportDraft(
+                title: entry.name,
+                items: [item],
+                prefersMergedCollection: false
+            )
         }
     }
 
@@ -1003,42 +1152,69 @@ private struct MediaServerChannelView: View {
     /// - Parameter entry: 用户点击合集按钮的目录。
     private func addDirectory(_ entry: MediaSourceEntry) async {
         guard let key = entry.navigationKey else { return }
-        await addCollection(key: key, title: entry.name)
+        await addCollection(key: key, title: entry.name, prefersMerged: true)
     }
 
     /// 把当前频道目录的全部可播放项目添加为合集。
     private func addCurrentDirectory() async {
-        await addCollection(key: stack.last?.key, title: stack.last?.name ?? profile.name)
+        await addCollection(
+            key: stack.last?.key,
+            title: stack.last?.name ?? profile.name,
+            prefersMerged: false
+        )
     }
 
     /// 收集目录下最多 500 个视频并生成有序媒体库合集。
     /// - Parameters:
     ///   - key: MediaBrowser 项目 ID 或 Plex API 路径。
     ///   - title: 合集显示名称。
-    private func addCollection(key: String?, title: String) async {
+    private func addCollection(key: String?, title: String, prefersMerged: Bool) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let playable = try await collectPlayable(key: key, depth: 0)
-            guard !playable.isEmpty else {
+            let firstLevel = try await fetchEntries(key: key)
+            var groups: [(key: String, title: String, entries: [MediaSourceEntry])] = []
+            let directPlayable = firstLevel.filter(\.isPlayable)
+            if !directPlayable.isEmpty {
+                groups.append((key ?? "root", title, directPlayable))
+            }
+            for directory in firstLevel where directory.isDirectory {
+                guard groups.reduce(0, { $0 + $1.entries.count }) < 500,
+                      let childKey = directory.navigationKey else { continue }
+                let playable = try await collectPlayable(key: childKey, depth: 0)
+                if !playable.isEmpty {
+                    groups.append((childKey, directory.name, playable))
+                }
+            }
+            if groups.isEmpty {
+                let playable = try await collectPlayable(key: key, depth: 0)
+                if !playable.isEmpty { groups = [(key ?? "root", title, playable)] }
+            }
+            guard !groups.isEmpty else {
                 errorMessage = "\(title) 中没有可播放视频"
                 return
             }
-            let collectionID = "\(profile.kind.rawValue):\(profile.id):\(key ?? "root")"
             var items: [LibraryItem] = []
-            for (offset, entry) in playable.prefix(500).enumerated() {
-                if let item = await makeItem(
-                    entry: entry,
-                    collectionID: collectionID,
-                    collectionTitle: title,
-                    index: entry.index ?? offset + 1
-                ) {
-                    items.append(item)
+            for group in groups {
+                let collectionID = "\(profile.kind.rawValue):\(profile.id):\(group.key)"
+                for (offset, entry) in group.entries.enumerated() where items.count < 500 {
+                    if let item = await makeItem(
+                        entry: entry,
+                        collectionID: collectionID,
+                        collectionTitle: group.title,
+                        index: entry.index ?? offset + 1
+                    ) {
+                        items.append(item)
+                    }
                 }
             }
             guard !items.isEmpty else { throw MediaSourceError.invalidResponse }
-            onAdd(items)
+            pendingImport = MediaImportDraft(
+                title: title,
+                items: items,
+                prefersMergedCollection: prefersMerged || groups.count == 1
+            )
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1188,7 +1364,7 @@ private struct MediaServerArtworkView: View {
                     .scaledToFill()
             } else {
                 Image(systemName: fallbackSymbol)
-                    .foregroundStyle(.cyan)
+                    .foregroundStyle(KanataTheme.accent)
             }
         }
         .frame(width: 54, height: 72)

@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     let usesParentNavigation: Bool
     @Environment(AppSettings.self) private var settings
+    @Environment(CloudSyncStore.self) private var cloudSync
     @Environment(\.dismiss) private var dismiss
     @State private var testResult: String?
     @State private var isTesting = false
@@ -60,6 +61,7 @@ struct SettingsView: View {
     /// 构建可由弹窗和 Apple TV 独立页面共同复用的设置表单。
     private var content: some View {
         @Bindable var settings = settings
+        @Bindable var cloudSync = cloudSync
         return Form {
                 Section("开箱即用弹幕") {
                     Toggle(isOn: $settings.builtInBilibiliEnabled) {
@@ -91,6 +93,7 @@ struct SettingsView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .buttonStyle(KanataSecondaryButtonStyle())
                     .disabled(
                         (
                             !settings.builtInBilibiliEnabled
@@ -129,6 +132,7 @@ struct SettingsView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .buttonStyle(KanataSecondaryButtonStyle())
                     .disabled(isTesting)
                     if let testResult {
                         Text(testResult).font(.caption).foregroundStyle(.secondary)
@@ -154,23 +158,13 @@ struct SettingsView: View {
                     Button {
                         isShowingBilibiliQRCode = true
                     } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "qrcode.viewfinder")
-                                .font(.title2)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(settings.hasBilibiliCredential ? "重新登录 B 站" : "扫码或浏览器登录")
-                                    .font(.headline)
-                                Text("无需复制 Cookie，登录后自动返回确认")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 6)
+                        KanataRowLabel(
+                            title: settings.hasBilibiliCredential ? "重新登录 B 站" : "扫码或浏览器登录",
+                            detail: "无需复制 Cookie，登录后自动返回确认",
+                            symbol: "qrcode.viewfinder"
+                        )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(KanataSecondaryButtonStyle())
                     #if os(tvOS)
                     SecureField("Cookie 备用登录", text: $bilibiliCookieInput)
                         .textInputAutocapitalization(.never)
@@ -190,6 +184,7 @@ struct SettingsView: View {
                             if isVerifyingBilibili { Spacer(); ProgressView() }
                         }
                     }
+                    .buttonStyle(KanataSecondaryButtonStyle())
                     .disabled(
                         isVerifyingBilibili
                         || (bilibiliCookieInput.isEmpty && !settings.hasBilibiliCredential)
@@ -204,6 +199,38 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("iCloud 同步") {
+                    Toggle(isOn: $cloudSync.isEnabled) {
+                        settingsLabel("跨设备同步", symbol: "icloud")
+                    }
+                    if cloudSync.isEnabled {
+                        Button {
+                            Task { await cloudSync.syncNow() }
+                        } label: {
+                            HStack {
+                                Label("立即同步", systemImage: "arrow.triangle.2.circlepath.icloud")
+                                if cloudSync.isSyncing { Spacer(); ProgressView() }
+                            }
+                        }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        .disabled(cloudSync.isSyncing)
+                        if let lastSyncAt = cloudSync.lastSyncAt {
+                            LabeledContent("最近同步") {
+                                Text(lastSyncAt.formatted(date: .abbreviated, time: .shortened))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if let statusMessage = cloudSync.statusMessage {
+                            Text(statusMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("同步播放进度、收藏、剧集排序与忽略、弹幕偏移和显示偏好。媒体源密码、令牌与本地文件不会上传。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 storageSection
 
                 Section {
@@ -212,6 +239,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .kanataFormBackground()
             .navigationTitle("设置")
             .kanataInlineNavigationTitle()
             .toolbar {
@@ -265,7 +293,7 @@ struct SettingsView: View {
         } icon: {
             Image(systemName: symbol)
                 .frame(width: 24)
-                .foregroundStyle(.cyan)
+                .foregroundStyle(KanataTheme.accent)
         }
     }
 

@@ -561,12 +561,18 @@ struct PlayerScreen: View {
                 .buttonStyle(PlayerControlButtonStyle())
                 .accessibilityLabel(isFullscreenBackAction ? "退出横屏全屏" : "返回媒体库")
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(activeItem.collectionTitle ?? viewModel.parsed?.title ?? activeItem.displayName)
+                    Text(playerDisplayTitle)
                         .font(.headline).lineLimit(1)
+                    if viewModel.currentBinding != nil {
+                        Label(viewModel.episodeAlignment.title, systemImage: viewModel.episodeAlignment.symbol)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(episodeAlignmentColor)
+                            .lineLimit(1)
+                    }
                     Text(viewModel.danmakuStats)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.72))
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
                 Spacer()
                 #if os(iOS)
@@ -773,6 +779,15 @@ struct PlayerScreen: View {
             .contentShape(Circle())
     }
 
+    /// 当前集数对应状态使用的高对比度提示色。
+    private var episodeAlignmentColor: Color {
+        switch viewModel.episodeAlignment {
+        case .matched: KanataTheme.success
+        case .mismatched: KanataTheme.warning
+        case .unavailable, .unverified: .white.opacity(0.72)
+        }
+    }
+
     /// 把 ViewModel 的数据与时间回调接到渲染层
     private func wireCallbacks() {
         let bridge = canvasBridge
@@ -887,6 +902,13 @@ struct PlayerScreen: View {
         }
         let episode = activeItem.episode ?? activeItem.collectionIndex
         return episode.map { "\(collectionTitle) E\($0)" } ?? collectionTitle
+    }
+
+    /// 播放器顶部同时显示作品名和当前集数。
+    private var playerDisplayTitle: String {
+        let title = activeItem.collectionTitle ?? viewModel.parsed?.title ?? activeItem.displayName
+        guard let episodeLabel = activeItem.episodeLabel else { return title }
+        return "\(title) · \(episodeLabel)"
     }
 
     /// 修改当前合集的一项跳过位置并立即持久化。
@@ -1199,7 +1221,7 @@ private struct PlaylistPicker: View {
                             Spacer()
                             if item.id == currentItemID {
                                 Image(systemName: "speaker.wave.2.fill")
-                                    .foregroundStyle(.cyan)
+                                    .foregroundStyle(KanataTheme.accent)
                             }
                         }
                     }
@@ -1238,6 +1260,9 @@ struct CandidatePicker: View {
                             }
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            Label(viewModel.episodeAlignment.title, systemImage: viewModel.episodeAlignment.symbol)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(bindingAlignmentColor)
                         }
                         Button("解除绑定", role: .destructive) {
                             viewModel.removeCurrentBinding()
@@ -1308,6 +1333,12 @@ struct CandidatePicker: View {
                                 }
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                Label(
+                                    viewModel.episodeAlignment(for: candidate).title,
+                                    systemImage: viewModel.episodeAlignment(for: candidate).symbol
+                                )
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(candidateAlignmentColor(candidate))
                             }
                         }
                     }
@@ -1350,6 +1381,26 @@ struct CandidatePicker: View {
         let number = String(trimmed[match])
         let remainder = trimmed[match.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
         return remainder.isEmpty ? "第 \(number) 集" : "第 \(number) 集 · \(remainder)"
+    }
+
+    /// 返回当前绑定集数对应状态的提示色。
+    private var bindingAlignmentColor: Color {
+        switch viewModel.episodeAlignment {
+        case .matched: KanataTheme.success
+        case .mismatched: KanataTheme.warning
+        case .unavailable, .unverified: .secondary
+        }
+    }
+
+    /// 返回候选分集对应状态的提示色。
+    /// - Parameter candidate: 当前候选。
+    /// - Returns: 一致为绿色，不一致为橙色，其余为次级文字色。
+    private func candidateAlignmentColor(_ candidate: ProviderCandidate) -> Color {
+        switch viewModel.episodeAlignment(for: candidate) {
+        case .matched: KanataTheme.success
+        case .mismatched: KanataTheme.warning
+        case .unavailable, .unverified: .secondary
+        }
     }
 }
 

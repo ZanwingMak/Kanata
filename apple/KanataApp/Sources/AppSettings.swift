@@ -4,7 +4,7 @@ import KanataRender
 import Observation
 import Security
 
-/// 应用级设置。M0 用 UserDefaults 持久化，后续接入 iCloud 同步（FR-SET-004）。
+/// 应用级设置。使用 UserDefaults 持久化，非敏感播放偏好可通过 CloudSyncStore 同步。
 @Observable
 final class AppSettings {
     /// 网关地址，例如 http://192.168.1.7:9321
@@ -141,14 +141,14 @@ final class AppSettings {
             config.blockRules.blockRepeated = repeated
         }
         config.blockRules.keywords = defaults.stringArray(forKey: Keys.blockKeywords) ?? []
-        let requiresVisualMigration = defaults.integer(forKey: Keys.visualStyleVersion) < 3
+        let requiresVisualMigration = defaults.integer(forKey: Keys.visualStyleVersion) < 4
         if requiresVisualMigration {
-            config.fontScale = 0.75
-            config.opacity = 0.94
+            config.fontScale = 0.9
+            config.opacity = 0.98
             config.scrollDuration = 9
-            config.lineSpacing = 8
+            config.lineSpacing = 7
             config.bold = false
-            config.strokeWidth = 0.6
+            config.strokeWidth = 0.9
             config.densityLimit = 100
         }
         self.danmakuConfig = config
@@ -158,7 +158,7 @@ final class AppSettings {
             defaults.removeObject(forKey: Keys.gatewayToken)
         }
         if requiresVisualMigration {
-            defaults.set(3, forKey: Keys.visualStyleVersion)
+            defaults.set(4, forKey: Keys.visualStyleVersion)
             persistDanmakuConfig()
         }
     }
@@ -272,6 +272,7 @@ final class AppSettings {
         defaults.set(danmakuConfig.blockRules.blockColorful, forKey: Keys.blockColorful)
         defaults.set(danmakuConfig.blockRules.blockRepeated, forKey: Keys.blockRepeated)
         defaults.set(danmakuConfig.blockRules.keywords, forKey: Keys.blockKeywords)
+        Task { @MainActor in CloudSyncStore.shared.noteLocalChange() }
     }
 
     /// 把 B 站会话字段编码后写入 Keychain；SESSDATA 为空时删除记录。
@@ -365,6 +366,22 @@ enum OffsetStore {
     static func save(offset: Double, seasonKey: String) {
         var map = UserDefaults.standard.dictionary(forKey: key) as? [String: Double] ?? [:]
         map[seasonKey] = offset
+        UserDefaults.standard.set(map, forKey: key)
+        Task { @MainActor in CloudSyncStore.shared.noteLocalChange() }
+    }
+
+    /// 导出所有剧集弹幕偏移。
+    /// - Returns: JSON 编码失败时返回 nil。
+    static func exportData() -> Data? {
+        let map = UserDefaults.standard.dictionary(forKey: key) as? [String: Double] ?? [:]
+        return try? JSONEncoder().encode(map)
+    }
+
+    /// 从 iCloud 快照替换弹幕偏移。
+    /// - Parameter data: JSON 编码的偏移字典。
+    static func importData(_ data: Data?) {
+        guard let data,
+              let map = try? JSONDecoder().decode([String: Double].self, from: data) else { return }
         UserDefaults.standard.set(map, forKey: key)
     }
 }

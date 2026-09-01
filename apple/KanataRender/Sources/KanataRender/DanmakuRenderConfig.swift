@@ -22,7 +22,7 @@ public enum DanmakuDisplayArea: String, Codable, Sendable, CaseIterable {
 }
 
 /// 屏蔽规则（FR-DMK-105）
-public struct DanmakuBlockRules: Sendable, Equatable {
+public struct DanmakuBlockRules: Codable, Sendable, Equatable {
     /// 关键词，命中即屏蔽
     public var keywords: [String] = []
     /// 正则表达式源串，非法表达式会被忽略
@@ -38,13 +38,13 @@ public struct DanmakuBlockRules: Sendable, Equatable {
 }
 
 /// 渲染配置。所有可调项都能在播放中实时生效（FR-DMK-103 等）。
-public struct DanmakuRenderConfig: Sendable, Equatable {
+public struct DanmakuRenderConfig: Codable, Sendable, Equatable {
     /// 弹幕总开关（FR-DMK-107）
     public var enabled = true
     /// 字号缩放，0.5–2.0，对应 UI 上的 50%–200%（FR-DMK-103）
-    public var fontScale: Double = 0.75
+    public var fontScale: Double = 0.9
     /// 不透明度 0.1–1.0（FR-DMK-110）
-    public var opacity: Double = 0.94
+    public var opacity: Double = 0.98
     /// 显示区域（FR-DMK-111）
     public var displayArea: DanmakuDisplayArea = .half
     /// 滚动弹幕穿屏时长，3–15 秒（FR-DMK-112）
@@ -54,12 +54,12 @@ public struct DanmakuRenderConfig: Sendable, Equatable {
     /// 轨道数上限，0 表示按显示区域自动计算
     public var maxTracks = 0
     /// 轨道行距
-    public var lineSpacing: Double = 8
+    public var lineSpacing: Double = 7
     /// 自定义字体名，nil 表示系统字体（FR-DMK-113）
     public var fontName: String?
     public var bold = false
     /// 描边宽度，默认使用轻描边与柔和阴影，避免遮挡字形。
-    public var strokeWidth: Double = 0.6
+    public var strokeWidth: Double = 0.9
     /// 同屏弹幕上限，超出按权重丢弃（FR-DMK-104）
     public var densityLimit = 100
     /// 合并重复弹幕并显示 ×N（FR-DMK-114）
@@ -77,8 +77,8 @@ public struct DanmakuRenderConfig: Sendable, Equatable {
     ///   - itemFontSize: 弹幕自带的平台字号
     ///   - viewWidth: 渲染视图宽度（点）
     func resolvedFontSize(itemFontSize: Double, viewWidth: Double) -> Double {
-        let normalizedSize = min(max(itemFontSize, 18), 36)
+        let normalizedSize = min(max(itemFontSize, 20), 32)
         let largeScreenRatio = min(max(viewWidth / 1920.0, 1.0), 1.2)
-        return normalizedSize * fontScale * largeScreenRatio
+        return max(16, normalizedSize * fontScale * largeScreenRatio)
     }
 }

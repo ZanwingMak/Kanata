@@ -170,6 +170,19 @@ struct DanmakuSettingsPanel: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("清晰样式") {
+                    Button {
+                        applyReadableDanmakuStyle()
+                    } label: {
+                        KanataRowLabel(
+                            title: "应用清晰细描边样式",
+                            detail: "常规字重、白字、细黑边与柔和阴影",
+                            symbol: "textformat"
+                        )
+                    }
+                    .buttonStyle(KanataSecondaryButtonStyle())
+                }
+
                 Section("字体大小") {
                     #if os(tvOS)
                     TVValueAdjuster(
@@ -188,9 +201,9 @@ struct DanmakuSettingsPanel: View {
                     #endif
                     Picker("快捷档位", selection: $config.fontScale) {
                         Text("小").tag(0.75)
-                        Text("中").tag(1.0)
+                        Text("清晰").tag(0.9)
+                        Text("中").tag(1.1)
                         Text("大").tag(1.35)
-                        Text("超大").tag(1.7)
                     }
                     .pickerStyle(.segmented)
                 }
@@ -352,6 +365,7 @@ struct DanmakuSettingsPanel: View {
                     }
                 }
             }
+            .kanataFormBackground()
             .navigationTitle("弹幕设置")
             .kanataInlineNavigationTitle()
             .kanataFileImporter(
@@ -380,6 +394,16 @@ struct DanmakuSettingsPanel: View {
             get: { config.fontName ?? "" },
             set: { config.fontName = $0.isEmpty ? nil : $0 }
         )
+    }
+
+    /// 应用参考主流视频网站观感的常规字重、细描边和柔和阴影配置。
+    private func applyReadableDanmakuStyle() {
+        config.fontName = nil
+        config.fontScale = 0.9
+        config.opacity = 0.98
+        config.lineSpacing = 7
+        config.bold = false
+        config.strokeWidth = 0.9
     }
 
     /// 返回字体文件选择器允许显示的类型。

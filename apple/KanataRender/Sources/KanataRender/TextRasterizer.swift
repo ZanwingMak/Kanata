@@ -42,7 +42,7 @@ final class TextRasterizer {
         } else if let fontName, let custom = UIFont(name: fontName, size: fontSize) {
             baseFont = custom
         } else {
-            baseFont = UIFont.systemFont(ofSize: fontSize, weight: bold ? .semibold : .medium)
+            baseFont = UIFont.systemFont(ofSize: fontSize, weight: bold ? .semibold : .regular)
         }
         let font = bold && fontName != nil
             ? UIFont(
@@ -54,16 +54,21 @@ final class TextRasterizer {
         // NSAttributedString 的描边值是字号百分比，先把视觉点数换算为百分比。
         let strokePercent = fontSize > 0 ? strokeWidth / fontSize * 100 : 0
         let foregroundColor = Self.readableColor(from: color)
+        let shadow = NSShadow()
+        shadow.shadowColor = UIColor.black.withAlphaComponent(0.52)
+        shadow.shadowOffset = CGSize(width: 0, height: max(0.5, fontSize * 0.035))
+        shadow.shadowBlurRadius = max(0.8, fontSize * 0.045)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: foregroundColor,
             .strokeColor: Self.outlineColor(for: foregroundColor),
             .strokeWidth: -strokePercent,
+            .shadow: shadow,
         ]
         let attributed = NSAttributedString(string: text, attributes: attributes)
         let size = attributed.size()
         // 留出描边溢出的边距
-        let inset = CGFloat(strokeWidth) + 4
+        let inset = CGFloat(strokeWidth) + max(4, CGFloat(fontSize) * 0.10)
         let canvasSize = CGSize(width: ceil(size.width) + inset * 2, height: ceil(size.height) + inset * 2)
 
         let renderer = UIGraphicsImageRenderer(size: canvasSize)
@@ -108,7 +113,7 @@ final class TextRasterizer {
     /// - Returns: 与文字形成对比、但不过度抢眼的描边颜色。
     private static func outlineColor(for color: UIColor) -> UIColor {
         _ = color
-        return UIColor.black.withAlphaComponent(0.82)
+        return UIColor.black.withAlphaComponent(0.92)
     }
 }
 #endif

@@ -27,9 +27,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.kanata.app
         DEVELOPMENT_TEAM: 2Q2LMV7BR6
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Sources/Kanata.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "6"
+        CURRENT_PROJECT_VERSION: "7"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
@@ -40,6 +41,11 @@ targets:
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "用于连接局域网内的弹幕网关与 NAS 媒体源"
         INFOPLIST_KEY_UIBackgroundModes: audio
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: Kanata iOS App Store iCloud
     info:
       path: Sources/Info.plist
       properties:
@@ -66,9 +72,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.kanata.app
         DEVELOPMENT_TEAM: 2Q2LMV7BR6
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: Sources/Kanata.entitlements
         PRODUCT_NAME: Kanata
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "6"
+        CURRENT_PROJECT_VERSION: "7"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "3"
         GENERATE_INFOPLIST_FILE: YES
@@ -78,7 +85,7 @@ targets:
         Release:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: Apple Distribution
-          PROVISIONING_PROFILE_SPECIFIER: Kanata tvOS App Store
+          PROVISIONING_PROFILE_SPECIFIER: Kanata tvOS App Store iCloud
     info:
       path: Sources/Info-tvOS.plist
       properties:

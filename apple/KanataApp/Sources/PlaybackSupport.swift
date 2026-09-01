@@ -159,6 +159,20 @@ enum PlaybackProgressStore {
         persist(entries)
     }
 
+    /// 导出 iCloud 同步使用的播放进度数据。
+    /// - Returns: 当前进度字典的 JSON 数据；没有记录时也返回有效空字典。
+    static func exportData() -> Data? {
+        try? JSONEncoder().encode(loadEntries())
+    }
+
+    /// 用 iCloud 快照替换本地播放进度。
+    /// - Parameter data: JSON 编码的播放进度字典。
+    static func importData(_ data: Data?) {
+        guard let data,
+              let entries = try? JSONDecoder().decode([String: Entry].self, from: data) else { return }
+        persist(entries, schedulesCloudPush: false)
+    }
+
     /// 从 UserDefaults 解码全部进度记录。
     /// - Returns: 解码失败时返回空字典。
     private static func loadEntries() -> [String: Entry] {
@@ -171,9 +185,15 @@ enum PlaybackProgressStore {
 
     /// 编码并写入全部进度记录。
     /// - Parameter entries: 最新记录。
-    private static func persist(_ entries: [String: Entry]) {
+    private static func persist(
+        _ entries: [String: Entry],
+        schedulesCloudPush: Bool = true
+    ) {
         guard let data = try? JSONEncoder().encode(entries) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
+        if schedulesCloudPush {
+            Task { @MainActor in CloudSyncStore.shared.noteLocalChange() }
+        }
     }
 }
 

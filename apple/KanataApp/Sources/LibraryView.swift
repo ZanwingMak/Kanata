@@ -59,6 +59,9 @@ struct LibraryView: View {
     @State private var filterMode = LibraryFilterMode.all
     @State private var sortMode = LibrarySortMode.added
     @State private var favoriteIDs = LibraryFavoriteStore.load()
+    @State private var selectedCollectionID: String?
+    @State private var libraryNotice: String?
+    @State private var pendingLocalImport: MediaImportDraft?
 
     #if os(tvOS)
     private let columns = [GridItem(.adaptive(minimum: 300, maximum: 480), spacing: 36)]
@@ -80,7 +83,10 @@ struct LibraryView: View {
             let matchesQuery = query.isEmpty
                 || item.displayName.localizedCaseInsensitiveContains(query)
                 || item.subtitle.localizedCaseInsensitiveContains(query)
-            return matchesFilter && matchesQuery
+            let hidesEpisodeFromDefaultGrid = query.isEmpty
+                && filterMode != .collection
+                && item.collectionID != nil
+            return matchesFilter && matchesQuery && !hidesEpisodeFromDefaultGrid
         }
         switch sortMode {
         case .added:
@@ -117,9 +123,15 @@ struct LibraryView: View {
             item.collectionID == nil ? nil : item
         }, by: { $0.collectionID ?? "" })
         return grouped.compactMap { id, values in
-            guard !id.isEmpty, let first = values.first else { return nil }
-            let sorted = values.sorted(by: LibraryItem.collectionOrder)
-            let resumable = sorted.compactMap { item -> (LibraryItem, Date)? in
+            guard !id.isEmpty else { return nil }
+            let allSorted = CollectionLayoutStore.ordered(
+                values,
+                collectionID: id,
+                includesIgnored: true
+            )
+            let active = CollectionLayoutStore.ordered(values, collectionID: id)
+            guard let first = allSorted.first else { return nil }
+            let resumable = active.compactMap { item -> (LibraryItem, Date)? in
                 guard let key = item.mediaKey,
                       let snapshot = PlaybackProgressStore.snapshot(for: key) else { return nil }
                 return (item, snapshot.updatedAt)
@@ -128,8 +140,8 @@ struct LibraryView: View {
             return MediaCollection(
                 id: id,
                 title: first.collectionTitle ?? first.title,
-                items: sorted,
-                nextItem: resumable ?? sorted.first ?? first
+                items: allSorted,
+                nextItem: resumable ?? active.first ?? first
             )
         }
         .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
@@ -139,7 +151,7 @@ struct LibraryView: View {
         NavigationStack {
             ZStack {
                 LinearGradient(
-                    colors: [Color.black, Color(red: 0.035, green: 0.055, blue: 0.11)],
+                    colors: [Color.black, KanataTheme.background],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -178,7 +190,7 @@ struct LibraryView: View {
                                 collectionSection
                             }
                             HStack(alignment: .firstTextBaseline) {
-                                Text("全部视频")
+                                Text(searchText.isEmpty && filterMode != .collection ? "单个视频" : "视频项目")
                                     .font(.title2.bold())
                                 Spacer()
                                 Text("\(filteredItems.count) 个项目")
@@ -272,6 +284,17 @@ struct LibraryView: View {
             } message: {
                 Text(importError ?? "")
             }
+            .alert(
+                "媒体库已更新",
+                isPresented: Binding(
+                    get: { libraryNotice != nil },
+                    set: { if !$0 { libraryNotice = nil } }
+                )
+            ) {
+                Button("好", role: .cancel) { libraryNotice = nil }
+            } message: {
+                Text(libraryNotice ?? "")
+            }
             .fullScreenCover(item: $playing, onDismiss: {
                 progressRevision += 1
             }) { queue in
@@ -284,6 +307,9 @@ struct LibraryView: View {
                         description: Text("文件可能已被移动或删除，请重新导入")
                     )
                 }
+            }
+            .sheet(item: $pendingLocalImport) { draft in
+                MediaImportPreview(draft: draft, onConfirm: addMediaItems)
             }
             #if os(tvOS)
             .sheet(isPresented: $isSearching) {
@@ -330,12 +356,34 @@ struct LibraryView: View {
                 }
             }
             #endif
+            .navigationDestination(
+                isPresented: Binding(
+                    get: { selectedCollectionID != nil },
+                    set: { if !$0 { selectedCollectionID = nil } }
+                )
+            ) {
+                if let collectionID = selectedCollectionID,
+                   let collection = mediaCollections.first(where: { $0.id == collectionID }) {
+                    CollectionDetailView(
+                        collection: collection,
+                        onPlay: { queueItems, item in
+                            playing = PlaybackQueue(items: queueItems, initialItemID: item.id)
+                        },
+                        onRemove: removeItem,
+                        onChanged: { progressRevision += 1 }
+                    )
+                }
+            }
             .task {
                 reloadMediaSources()
                 await scanDocuments()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .kanataCloudDataDidChange)) { _ in
+                favoriteIDs = LibraryFavoriteStore.load()
+                progressRevision += 1
+            }
         }
-        .tint(.cyan)
+        .tint(KanataTheme.accent)
     }
 
     /// 首页“继续观看”横向列表，按最后播放时间排序。
@@ -352,7 +400,7 @@ struct LibraryView: View {
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(continueWatchingItems) { item in
-                        mediaCard(item)
+                        mediaCard(item, showsHistoryContext: true)
                             .frame(width: 260)
                     }
                 }
@@ -393,15 +441,12 @@ struct LibraryView: View {
                 HStack(spacing: 14) {
                     ForEach(mediaCollections) { collection in
                         Button {
-                            playing = PlaybackQueue(
-                                items: collection.items,
-                                initialItemID: collection.nextItem.id
-                            )
+                            selectedCollectionID = collection.id
                         } label: {
                             VStack(alignment: .leading, spacing: 10) {
                                 ZStack {
                                     LinearGradient(
-                                        colors: [.indigo.opacity(0.9), .cyan.opacity(0.42)],
+                                        colors: [KanataTheme.accentStrong.opacity(0.95), KanataTheme.accent.opacity(0.38)],
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
                                     )
@@ -423,7 +468,7 @@ struct LibraryView: View {
                                     .font(.headline)
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
-                                Text("接着播放 · \(collection.nextItem.displayName)")
+                                Text("接着播放 · \(collection.nextItem.episodeLabel ?? collection.nextItem.displayName)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
@@ -458,7 +503,7 @@ struct LibraryView: View {
                                 Image(systemName: profile.kind.symbol)
                                     .font(.title2)
                                     .frame(width: 44, height: 44)
-                                    .background(.cyan.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
+                                    .background(KanataTheme.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(profile.name)
                                         .font(.headline)
@@ -544,7 +589,7 @@ struct LibraryView: View {
     /// 创建一个带视频缩略图、来源与删除菜单的媒体卡片。
     /// - Parameter item: 媒体库条目。
     /// - Returns: 可点击播放的卡片视图。
-    private func mediaCard(_ item: LibraryItem) -> some View {
+    private func mediaCard(_ item: LibraryItem, showsHistoryContext: Bool = false) -> some View {
         let progress = item.mediaKey.flatMap { PlaybackProgressStore.snapshot(for: $0) }
         return Button {
             play(item)
@@ -568,17 +613,17 @@ struct LibraryView: View {
                         if let progress {
                             ProgressView(value: progress.fraction)
                                 .progressViewStyle(.linear)
-                                .tint(.cyan)
+                                .tint(KanataTheme.accent)
                                 .scaleEffect(x: 1, y: 1.6, anchor: .center)
                                 .padding(.horizontal, 10)
                                 .padding(.bottom, 4)
                         }
                     }
-                Text(item.displayName)
+                Text(showsHistoryContext ? item.libraryTitle : (item.collectionID == nil ? item.displayName : item.libraryTitle))
                     .font(.headline)
                     .foregroundStyle(.primary)
                     .lineLimit(2)
-                Text(item.subtitle)
+                Text(showsHistoryContext ? item.historySubtitle : item.subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -610,9 +655,10 @@ struct LibraryView: View {
     private func play(_ item: LibraryItem) {
         let queueItems: [LibraryItem]
         if let collectionID = item.collectionID {
-            queueItems = items
-                .filter { $0.collectionID == collectionID }
-                .sorted(by: LibraryItem.collectionOrder)
+            queueItems = CollectionLayoutStore.ordered(
+                items.filter { $0.collectionID == collectionID },
+                collectionID: collectionID
+            )
         } else {
             queueItems = [item]
         }
@@ -630,7 +676,7 @@ struct LibraryView: View {
         LibraryFavoriteStore.save(favoriteIDs)
     }
 
-    /// 合并新选择的单文件或合集，持久化后从第一集开始播放。
+    /// 合并新选择的单文件或合集并返回媒体库，不自动开始播放。
     /// - Parameter newItems: 网络媒体源浏览器生成的条目。
     private func addMediaItems(_ newItems: [LibraryItem]) {
         guard !newItems.isEmpty else { return }
@@ -646,8 +692,18 @@ struct LibraryView: View {
             }
         }
         LibraryStore.save(items)
-        browsingSource = nil
-        play(newItems.sorted(by: LibraryItem.collectionOrder)[0])
+        for collectionID in Set(newItems.compactMap(\.collectionID)) {
+            let collectionItems = items.filter { $0.collectionID == collectionID }
+            CollectionLayoutStore.saveOrder(
+                collectionItems.sorted(by: LibraryItem.collectionOrder),
+                collectionID: collectionID
+            )
+        }
+        progressRevision += 1
+        let collectionCount = Set(newItems.compactMap(\.collectionID)).count
+        libraryNotice = collectionCount > 0
+            ? "已加入 \(collectionCount) 个合集、共 \(newItems.count) 个视频。你可以在“剧集与合集”中检查顺序后播放。"
+            : "已加入 \(newItems.count) 个视频。"
     }
 
     /// 从历史存储刷新首页媒体源频道。
@@ -674,6 +730,7 @@ struct LibraryView: View {
         accounts.forEach { KeychainStore.remove(account: $0) }
         items.removeAll { $0.collectionID == collectionID }
         LibraryStore.save(items)
+        CollectionLayoutStore.remove(collectionID: collectionID)
     }
 
     /// 扫描 App 的 Documents 目录，收录通过文件共享或 AirDrop 放进来的视频（FR-IMP-002）
@@ -714,14 +771,34 @@ struct LibraryView: View {
                 return
             }
 
+            var importedItems: [LibraryItem] = []
             for url in videoURLs {
                 guard let item = LibraryItem(url: url) else {
                     importError = "无法为 \(url.lastPathComponent) 创建访问书签"
                     continue
                 }
-                if !items.contains(where: { $0.id == item.id }) {
-                    items.append(item)
+                importedItems.append(item)
+            }
+            guard !importedItems.isEmpty else { return }
+            if selectedDanmakuURLs.isEmpty {
+                let grouped = Dictionary(grouping: importedItems) { $0.title }
+                let prepared = grouped.flatMap { title, values -> [LibraryItem] in
+                    let sorted = values.sorted(by: LibraryItem.collectionOrder)
+                    guard sorted.count > 1 else { return sorted }
+                    let collectionID = "local-selection:\(UUID().uuidString):\(title)"
+                    return sorted.enumerated().map { offset, item in
+                        item.assigningCollection(id: collectionID, title: title, index: offset + 1)
+                    }
                 }
+                pendingLocalImport = MediaImportDraft(
+                    title: importedItems.count == 1 ? importedItems[0].libraryTitle : "本地视频",
+                    items: prepared,
+                    prefersMergedCollection: grouped.count == 1 && importedItems.count > 1
+                )
+                return
+            }
+            for item in importedItems {
+                if !items.contains(where: { $0.id == item.id }) { items.append(item) }
             }
             LibraryStore.save(items)
 
@@ -963,9 +1040,9 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// 视频所属的持久化媒体源，用于从 Keychain 动态生成播放请求头。
     let sourceProfileID: String?
     /// 同一目录、季度或剧集共享的播放合集标识。
-    let collectionID: String?
-    let collectionTitle: String?
-    let collectionIndex: Int?
+    var collectionID: String?
+    var collectionTitle: String?
+    var collectionIndex: Int?
     let title: String
     let season: Int?
     let episode: Int?
@@ -984,7 +1061,7 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         guard let bookmark = try? url.bookmarkData(options: .minimalBookmark) else { return nil }
         let parsed = TitleParser.parse(url.lastPathComponent)
-        self.id = url.lastPathComponent
+        self.id = "local:\(url.standardizedFileURL.absoluteString)"
         self.displayName = url.lastPathComponent
         self.bookmark = bookmark
         self.remoteURLString = nil
@@ -1052,6 +1129,46 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         return parts.joined(separator: " · ")
     }
 
+    /// 首页和历史记录使用的作品标题；合集条目不再直接展示冗长文件名。
+    var libraryTitle: String {
+        let collection = collectionTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !collection.isEmpty { return collection }
+        let parsedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return parsedTitle.isEmpty ? displayName : parsedTitle
+    }
+
+    /// 返回用户可读的季集标识，无法识别时返回 nil。
+    var episodeLabel: String? {
+        guard let value = episode ?? collectionIndex else { return nil }
+        if let season, season > 1 { return "第 \(season) 季 · 第 \(value) 集" }
+        return "第 \(value) 集"
+    }
+
+    /// 历史记录副标题，明确显示当前集数与原始文件名。
+    var historySubtitle: String {
+        var values: [String] = []
+        if let episodeLabel { values.append(episodeLabel) }
+        if displayName.caseInsensitiveCompare(libraryTitle) != .orderedSame {
+            values.append(displayName)
+        }
+        if let sourceName { values.append(sourceName) }
+        return values.isEmpty ? subtitle : values.joined(separator: " · ")
+    }
+
+    /// 复制条目并替换合集归属，供导入预览的“合并为一个合集”使用。
+    /// - Parameters:
+    ///   - id: 新合集稳定标识。
+    ///   - title: 新合集显示标题。
+    ///   - index: 条目在新合集中的顺序。
+    /// - Returns: 保留播放地址与认证信息的新条目。
+    func assigningCollection(id: String?, title: String?, index: Int?) -> LibraryItem {
+        var value = self
+        value.collectionID = id
+        value.collectionTitle = title
+        value.collectionIndex = index
+        return value
+    }
+
     /// 解析书签取回文件地址，文件已失效时返回 nil
     func resolveURL() -> URL? {
         if let remoteURLString {
@@ -1116,6 +1233,186 @@ private struct MediaCollection: Identifiable {
     let nextItem: LibraryItem
 }
 
+/// 合集详情与剧集编排页面，播放前让用户确认顺序和忽略项。
+private struct CollectionDetailView: View {
+    let collection: MediaCollection
+    let onPlay: ([LibraryItem], LibraryItem) -> Void
+    let onRemove: (LibraryItem) -> Void
+    let onChanged: () -> Void
+    @State private var orderedItems: [LibraryItem]
+    @State private var ignoredIDs: Set<String>
+
+    /// 使用已保存顺序初始化合集详情。
+    /// - Parameters:
+    ///   - collection: 当前合集。
+    ///   - onPlay: 播放队列回调。
+    ///   - onRemove: 从媒体库移除单集的回调。
+    ///   - onChanged: 编排变化通知。
+    init(
+        collection: MediaCollection,
+        onPlay: @escaping ([LibraryItem], LibraryItem) -> Void,
+        onRemove: @escaping (LibraryItem) -> Void,
+        onChanged: @escaping () -> Void
+    ) {
+        self.collection = collection
+        self.onPlay = onPlay
+        self.onRemove = onRemove
+        self.onChanged = onChanged
+        let values = CollectionLayoutStore.ordered(
+            collection.items,
+            collectionID: collection.id,
+            includesIgnored: true
+        )
+        _orderedItems = State(initialValue: values)
+        _ignoredIDs = State(initialValue: CollectionLayoutStore.layout(for: collection.id).ignoredItemIDs)
+    }
+
+    /// 当前自动连播会使用的剧集队列。
+    private var activeItems: [LibraryItem] {
+        orderedItems.filter { !ignoredIDs.contains($0.id) }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 14) {
+                        Image(systemName: "rectangle.stack.fill")
+                            .font(.title)
+                            .foregroundStyle(KanataTheme.accent)
+                            .frame(width: 54, height: 54)
+                            .background(KanataTheme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 14))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(collection.title)
+                                .font(.title3.bold())
+                            Text("\(activeItems.count) 集参与连播 · \(ignoredIDs.count) 集已忽略")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Button {
+                        guard let item = activeItems.first(where: { $0.id == collection.nextItem.id }) ?? activeItems.first else { return }
+                        onPlay(activeItems, item)
+                    } label: {
+                        Label("继续播放", systemImage: "play.fill")
+                    }
+                    .buttonStyle(KanataPrimaryButtonStyle())
+                    .disabled(activeItems.isEmpty)
+                }
+                .padding(.vertical, 8)
+            }
+
+            Section("剧集顺序") {
+                ForEach(Array(orderedItems.enumerated()), id: \.element.id) { index, item in
+                    Button {
+                        let queue = ignoredIDs.contains(item.id) ? [item] : activeItems
+                        onPlay(queue, item)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Text("\(index + 1)")
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 30)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.episodeLabel ?? item.displayName)
+                                    .foregroundStyle(ignoredIDs.contains(item.id) ? .secondary : .primary)
+                                Text(item.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            if ignoredIDs.contains(item.id) {
+                                Text("已忽略")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(KanataTheme.warning)
+                            }
+                            Menu {
+                                Button("上移", systemImage: "arrow.up") { move(itemID: item.id, delta: -1) }
+                                    .disabled(index == 0)
+                                Button("下移", systemImage: "arrow.down") { move(itemID: item.id, delta: 1) }
+                                    .disabled(index == orderedItems.count - 1)
+                                Button(
+                                    ignoredIDs.contains(item.id) ? "恢复连播" : "从连播忽略",
+                                    systemImage: ignoredIDs.contains(item.id) ? "eye" : "eye.slash"
+                                ) {
+                                    toggleIgnored(item)
+                                }
+                                Button("从媒体库移除", systemImage: "trash", role: .destructive) {
+                                    remove(item)
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .frame(width: 44, height: 44)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .onMove(perform: move)
+            }
+        }
+        .navigationTitle(collection.title)
+        .kanataInlineNavigationTitle()
+        .toolbar {
+            #if !os(tvOS)
+            ToolbarItem(placement: .topBarTrailing) { EditButton() }
+            #endif
+        }
+    }
+
+    /// 响应系统编辑模式拖动并保存新顺序。
+    /// - Parameters:
+    ///   - source: 被移动条目的索引集合。
+    ///   - destination: 目标索引。
+    private func move(from source: IndexSet, to destination: Int) {
+        orderedItems.move(fromOffsets: source, toOffset: destination)
+        persistOrder()
+    }
+
+    /// 通过菜单把指定剧集上移或下移一位。
+    /// - Parameters:
+    ///   - itemID: 剧集 ID。
+    ///   - delta: -1 上移，1 下移。
+    private func move(itemID: String, delta: Int) {
+        guard let index = orderedItems.firstIndex(where: { $0.id == itemID }) else { return }
+        let target = min(max(index + delta, 0), orderedItems.count - 1)
+        guard target != index else { return }
+        let item = orderedItems.remove(at: index)
+        orderedItems.insert(item, at: target)
+        persistOrder()
+    }
+
+    /// 切换一集是否参与自动连播。
+    /// - Parameter item: 用户操作的剧集。
+    private func toggleIgnored(_ item: LibraryItem) {
+        CollectionLayoutStore.toggleIgnored(itemID: item.id, collectionID: collection.id)
+        ignoredIDs = CollectionLayoutStore.layout(for: collection.id).ignoredItemIDs
+        onChanged()
+    }
+
+    /// 从媒体库移除一集并保持剩余顺序。
+    /// - Parameter item: 要移除的条目。
+    private func remove(_ item: LibraryItem) {
+        orderedItems.removeAll { $0.id == item.id }
+        ignoredIDs.remove(item.id)
+        CollectionLayoutStore.toggleIgnoredIfNeeded(
+            itemID: item.id,
+            collectionID: collection.id,
+            shouldIgnore: false
+        )
+        persistOrder()
+        onRemove(item)
+    }
+
+    /// 持久化当前剧集顺序并通知首页刷新。
+    private func persistOrder() {
+        CollectionLayoutStore.saveOrder(orderedItems, collectionID: collection.id)
+        onChanged()
+    }
+}
+
 /// 首页媒体源频道的轻量连通性状态。
 private enum MediaSourceHealth: Equatable {
     case checking
@@ -1175,6 +1472,13 @@ enum LibraryFavoriteStore {
     /// 保存全部收藏条目 ID。
     /// - Parameter ids: 当前收藏集合。
     static func save(_ ids: Set<String>) {
+        UserDefaults.standard.set(Array(ids).sorted(), forKey: key)
+        Task { @MainActor in CloudSyncStore.shared.noteLocalChange() }
+    }
+
+    /// 从 iCloud 快照替换收藏集合，不触发反向上传。
+    /// - Parameter ids: 云端收藏条目 ID。
+    static func applyCloudValue(_ ids: Set<String>) {
         UserDefaults.standard.set(Array(ids).sorted(), forKey: key)
     }
 }
