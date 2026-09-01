@@ -4,18 +4,61 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
 
+/// 媒体库首页可用的快速筛选条件。
+private enum LibraryFilterMode: String, CaseIterable, Identifiable {
+    case all
+    case local
+    case network
+    case collection
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .local: "本地"
+        case .network: "网络"
+        case .collection: "剧集合集"
+        }
+    }
+}
+
+/// 媒体库首页可用的排序方式。
+private enum LibrarySortMode: String, CaseIterable, Identifiable {
+    case added
+    case title
+    case episode
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .added: "添加顺序"
+        case .title: "名称"
+        case .episode: "剧集顺序"
+        }
+    }
+}
+
 /// 媒体库首页，统一管理本地文件、网络直链、WebDAV 与媒体服务器条目。
 struct LibraryView: View {
     @Environment(AppSettings.self) private var settings
     @State private var isImporting = false
     @State private var isShowingSettings = false
     @State private var items: [LibraryItem] = LibraryStore.load()
-    @State private var playing: LibraryItem?
+    @State private var playing: PlaybackQueue?
     @State private var importError: String?
     @State private var isProcessingImport = false
     @State private var isAddingMediaSource = false
     @State private var searchText = ""
     @State private var isSearching = false
+    @State private var mediaSources = MediaSourceProfileStore.load()
+    @State private var browsingSource: MediaSourceProfile?
+    @State private var progressRevision = 0
+    @State private var sourceHealth: [String: MediaSourceHealth] = [:]
+    @State private var filterMode = LibraryFilterMode.all
+    @State private var sortMode = LibrarySortMode.added
+    @State private var favoriteIDs = LibraryFavoriteStore.load()
 
     #if os(tvOS)
     private let columns = [GridItem(.adaptive(minimum: 300, maximum: 480), spacing: 36)]
@@ -25,12 +68,71 @@ struct LibraryView: View {
 
     /// 按标题与解析信息过滤媒体库。
     private var filteredItems: [LibraryItem] {
+        _ = progressRevision
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return items }
-        return items.filter {
-            $0.displayName.localizedCaseInsensitiveContains(query)
-                || $0.subtitle.localizedCaseInsensitiveContains(query)
+        let filtered = items.filter { item in
+            let matchesFilter: Bool = switch filterMode {
+            case .all: true
+            case .local: item.remoteURLString == nil
+            case .network: item.remoteURLString != nil
+            case .collection: item.collectionID != nil
+            }
+            let matchesQuery = query.isEmpty
+                || item.displayName.localizedCaseInsensitiveContains(query)
+                || item.subtitle.localizedCaseInsensitiveContains(query)
+            return matchesFilter && matchesQuery
         }
+        switch sortMode {
+        case .added:
+            return filtered
+        case .title:
+            return filtered.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        case .episode:
+            return filtered.sorted(by: LibraryItem.collectionOrder)
+        }
+    }
+
+    /// 按最近播放时间返回仍有有效断点的媒体条目。
+    private var continueWatchingItems: [LibraryItem] {
+        _ = progressRevision
+        return items.compactMap { item -> (LibraryItem, PlaybackProgressStore.Snapshot)? in
+            guard let key = item.mediaKey,
+                  let snapshot = PlaybackProgressStore.snapshot(for: key) else { return nil }
+            return (item, snapshot)
+        }
+        .sorted { $0.1.updatedAt > $1.1.updatedAt }
+        .prefix(12)
+        .map(\.0)
+    }
+
+    /// 返回仍存在于媒体库中的收藏条目。
+    private var favoriteItems: [LibraryItem] {
+        items.filter { favoriteIDs.contains($0.id) }
+    }
+
+    /// 把媒体库中带合集标识的条目聚合为剧集卡片。
+    private var mediaCollections: [MediaCollection] {
+        _ = progressRevision
+        let grouped = Dictionary(grouping: items.compactMap { item -> LibraryItem? in
+            item.collectionID == nil ? nil : item
+        }, by: { $0.collectionID ?? "" })
+        return grouped.compactMap { id, values in
+            guard !id.isEmpty, let first = values.first else { return nil }
+            let sorted = values.sorted(by: LibraryItem.collectionOrder)
+            let resumable = sorted.compactMap { item -> (LibraryItem, Date)? in
+                guard let key = item.mediaKey,
+                      let snapshot = PlaybackProgressStore.snapshot(for: key) else { return nil }
+                return (item, snapshot.updatedAt)
+            }
+            .max { $0.1 < $1.1 }?.0
+            return MediaCollection(
+                id: id,
+                title: first.collectionTitle ?? first.title,
+                items: sorted,
+                nextItem: resumable ?? sorted.first ?? first
+            )
+        }
+        .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
     var body: some View {
@@ -42,7 +144,7 @@ struct LibraryView: View {
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
-                if items.isEmpty {
+                if items.isEmpty && mediaSources.isEmpty {
                     ContentUnavailableView {
                         Label("开始建立你的媒体库", systemImage: "play.rectangle.on.rectangle")
                     } description: {
@@ -63,6 +165,18 @@ struct LibraryView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
+                            if !mediaSources.isEmpty {
+                                sourceChannels
+                            }
+                            if !continueWatchingItems.isEmpty {
+                                continueWatchingSection
+                            }
+                            if !favoriteItems.isEmpty && searchText.isEmpty {
+                                favoritesSection
+                            }
+                            if !mediaCollections.isEmpty && searchText.isEmpty {
+                                collectionSection
+                            }
                             HStack(alignment: .firstTextBaseline) {
                                 Text("全部视频")
                                     .font(.title2.bold())
@@ -99,6 +213,23 @@ struct LibraryView: View {
                     .accessibilityLabel("搜索媒体库")
                 }
                 #endif
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("筛选", selection: $filterMode) {
+                            ForEach(LibraryFilterMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                        Picker("排序", selection: $sortMode) {
+                            ForEach(LibrarySortMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: filterMode == .all ? "arrow.up.arrow.down" : "line.3.horizontal.decrease.circle.fill")
+                    }
+                    .accessibilityLabel("筛选和排序")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     if isProcessingImport {
                         ProgressView()
@@ -141,9 +272,11 @@ struct LibraryView: View {
             } message: {
                 Text(importError ?? "")
             }
-            .fullScreenCover(item: $playing) { item in
-                if let url = item.resolveURL() {
-                    PlayerScreen(url: url, requestHeaders: item.requestHeaders())
+            .fullScreenCover(item: $playing, onDismiss: {
+                progressRevision += 1
+            }) { queue in
+                if queue.items.contains(where: { $0.resolveURL() != nil }) {
+                    PlayerScreen(items: queue.items, initialItemID: queue.initialItemID)
                 } else {
                     ContentUnavailableView(
                         "无法访问该文件",
@@ -152,40 +285,269 @@ struct LibraryView: View {
                     )
                 }
             }
-            .sheet(isPresented: $isShowingSettings) {
-                SettingsView()
-            }
             #if os(tvOS)
             .sheet(isPresented: $isSearching) {
                 TVLibrarySearchSheet(searchText: $searchText)
             }
-            #endif
-            .sheet(isPresented: $isAddingMediaSource) {
-                MediaSourceSheet { item in
-                    if let index = items.firstIndex(where: { $0.id == item.id }) {
-                        if let oldAccount = items[index].credentialAccount,
-                           oldAccount != item.credentialAccount {
-                            KeychainStore.remove(account: oldAccount)
-                        }
-                        items[index] = item
-                    } else {
-                        items.append(item)
-                    }
-                    LibraryStore.save(items)
-                    playing = item
+            .navigationDestination(isPresented: $isShowingSettings) {
+                SettingsView(usesParentNavigation: true)
+            }
+            .navigationDestination(isPresented: $isAddingMediaSource) {
+                MediaSourceSheet(
+                    onAdd: addMediaItems,
+                    onSourcesChanged: reloadMediaSources,
+                    usesParentNavigation: true
+                )
+            }
+            .navigationDestination(
+                isPresented: Binding(
+                    get: { browsingSource != nil },
+                    set: { if !$0 { browsingSource = nil } }
+                )
+            ) {
+                if let profile = browsingSource {
+                    MediaSourceChannelView(profile: profile, onAdd: addMediaItems)
                 }
             }
-            .task { await scanDocuments() }
+            #else
+            .sheet(isPresented: $isShowingSettings) {
+                SettingsView()
+            }
+            .sheet(isPresented: $isAddingMediaSource) {
+                MediaSourceSheet(
+                    onAdd: addMediaItems,
+                    onSourcesChanged: reloadMediaSources
+                )
+            }
+            .sheet(item: $browsingSource) { profile in
+                NavigationStack {
+                    MediaSourceChannelView(profile: profile, onAdd: addMediaItems)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("关闭") { browsingSource = nil }
+                            }
+                        }
+                }
+            }
+            #endif
+            .task {
+                reloadMediaSources()
+                await scanDocuments()
+            }
         }
         .tint(.cyan)
+    }
+
+    /// 首页“继续观看”横向列表，按最后播放时间排序。
+    private var continueWatchingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("继续观看")
+                    .font(.title2.bold())
+                Spacer()
+                Text("自动保存播放位置")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(continueWatchingItems) { item in
+                        mediaCard(item)
+                            .frame(width: 260)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    /// 首页收藏横向列表，避免常看的单集或电影被大媒体库淹没。
+    private var favoritesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("我的收藏")
+                .font(.title2.bold())
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(favoriteItems) { item in
+                        mediaCard(item)
+                            .frame(width: 260)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    /// 首页剧集合集横向列表，点击后从最近断点或第一集进入。
+    private var collectionSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("剧集与合集")
+                    .font(.title2.bold())
+                Spacer()
+                Text("\(mediaCollections.count) 个合集")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ScrollView(.horizontal) {
+                HStack(spacing: 14) {
+                    ForEach(mediaCollections) { collection in
+                        Button {
+                            playing = PlaybackQueue(
+                                items: collection.items,
+                                initialItemID: collection.nextItem.id
+                            )
+                        } label: {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ZStack {
+                                    LinearGradient(
+                                        colors: [.indigo.opacity(0.9), .cyan.opacity(0.42)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                    Image(systemName: "rectangle.stack.fill")
+                                        .font(.system(size: 44, weight: .light))
+                                        .foregroundStyle(.white.opacity(0.88))
+                                }
+                                .frame(width: 250, height: 140)
+                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                .overlay(alignment: .bottomLeading) {
+                                    Text("共 \(collection.items.count) 集")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 9)
+                                        .padding(.vertical, 5)
+                                        .background(.black.opacity(0.62), in: Capsule())
+                                        .padding(10)
+                                }
+                                Text(collection.title)
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Text("接着播放 · \(collection.nextItem.displayName)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            .frame(width: 250, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    /// 首页的媒体服务器频道区域，保留用户已登录的入口。
+    private var sourceChannels: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("媒体源")
+                    .font(.title2.bold())
+                Spacer()
+                Button("管理") { isAddingMediaSource = true }
+                    .font(.callout)
+            }
+            ScrollView(.horizontal) {
+                HStack(spacing: 12) {
+                    ForEach(mediaSources) { profile in
+                        Button {
+                            browsingSource = profile
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: profile.kind.symbol)
+                                    .font(.title2)
+                                    .frame(width: 44, height: 44)
+                                    .background(.cyan.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(profile.name)
+                                        .font(.headline)
+                                        .lineLimit(1)
+                                    Text("\(profile.kind.title) · \(profile.subtitle)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                    Text("最近使用 \(profile.updatedAt.formatted(.relative(presentation: .named)))")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            .frame(width: 260, alignment: .leading)
+                            .padding(14)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("删除登录记录", systemImage: "trash", role: .destructive) {
+                                MediaSourceProfileStore.remove(profile)
+                                reloadMediaSources()
+                            }
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            sourceHealthBadge(sourceHealth[profile.id] ?? .checking)
+                                .padding(10)
+                        }
+                        .task(id: profile.updatedAt) { await checkSource(profile) }
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    /// 生成媒体源连接状态徽标。
+    /// - Parameter health: 最近一次探测状态。
+    /// - Returns: 频道卡片右上角的小型状态视图。
+    private func sourceHealthBadge(_ health: MediaSourceHealth) -> some View {
+        HStack(spacing: 5) {
+            if health == .checking {
+                ProgressView().controlSize(.mini)
+            } else {
+                Circle()
+                    .fill(health == .online ? Color.green : Color.red)
+                    .frame(width: 7, height: 7)
+            }
+            Text(health.title)
+                .font(.caption2.weight(.medium))
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.black.opacity(0.28), in: Capsule())
+    }
+
+    /// 读取媒体源根目录以验证连接与凭证是否仍有效。
+    /// - Parameter profile: 要探测的历史连接。
+    private func checkSource(_ profile: MediaSourceProfile) async {
+        sourceHealth[profile.id] = .checking
+        do {
+            switch profile.kind {
+            case .webDAV:
+                guard let server = profile.serverURL,
+                      let url = URL(
+                          string: profile.rootPath ?? "/",
+                          relativeTo: server.appendingPathComponent("")
+                      )?.absoluteURL else { throw MediaSourceError.invalidResponse }
+                _ = try await WebDAVClient(profile: profile).list(directory: url)
+            case .jellyfin, .emby:
+                _ = try await MediaBrowserClient().items(profile: profile, parentID: nil)
+            case .plex:
+                _ = try await PlexClient().items(profile: profile, navigationKey: nil)
+            case .synology:
+                _ = try await SynologyFileStationClient().items(profile: profile, parentPath: nil)
+            }
+            sourceHealth[profile.id] = .online
+        } catch {
+            sourceHealth[profile.id] = .offline
+        }
     }
 
     /// 创建一个带视频缩略图、来源与删除菜单的媒体卡片。
     /// - Parameter item: 媒体库条目。
     /// - Returns: 可点击播放的卡片视图。
     private func mediaCard(_ item: LibraryItem) -> some View {
-        Button {
-            playing = item
+        let progress = item.mediaKey.flatMap { PlaybackProgressStore.snapshot(for: $0) }
+        return Button {
+            play(item)
         } label: {
             VStack(alignment: .leading, spacing: 10) {
                 MediaArtworkView(item: item)
@@ -202,6 +564,16 @@ struct LibraryView: View {
                         .background(.black.opacity(0.62), in: Capsule())
                         .padding(10)
                     }
+                    .overlay(alignment: .bottom) {
+                        if let progress {
+                            ProgressView(value: progress.fraction)
+                                .progressViewStyle(.linear)
+                                .tint(.cyan)
+                                .scaleEffect(x: 1, y: 1.6, anchor: .center)
+                                .padding(.horizontal, 10)
+                                .padding(.bottom, 4)
+                        }
+                    }
                 Text(item.displayName)
                     .font(.headline)
                     .foregroundStyle(.primary)
@@ -215,11 +587,72 @@ struct LibraryView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button(
+                favoriteIDs.contains(item.id) ? "取消收藏" : "加入收藏",
+                systemImage: favoriteIDs.contains(item.id) ? "star.slash" : "star"
+            ) {
+                toggleFavorite(item)
+            }
             Button("从媒体库移除", systemImage: "trash", role: .destructive) {
                 removeItem(item)
             }
+            if let collectionID = item.collectionID {
+                Button("移除整个合集", systemImage: "rectangle.stack.badge.minus", role: .destructive) {
+                    removeCollection(collectionID)
+                }
+            }
         }
         .accessibilityLabel("播放 \(item.displayName)")
+    }
+
+    /// 从用户点击的条目构建单视频或同合集播放队列。
+    /// - Parameter item: 用户点击的媒体卡片。
+    private func play(_ item: LibraryItem) {
+        let queueItems: [LibraryItem]
+        if let collectionID = item.collectionID {
+            queueItems = items
+                .filter { $0.collectionID == collectionID }
+                .sorted(by: LibraryItem.collectionOrder)
+        } else {
+            queueItems = [item]
+        }
+        playing = PlaybackQueue(items: queueItems, initialItemID: item.id)
+    }
+
+    /// 切换媒体条目的收藏状态并立即持久化。
+    /// - Parameter item: 用户操作的媒体条目。
+    private func toggleFavorite(_ item: LibraryItem) {
+        if favoriteIDs.contains(item.id) {
+            favoriteIDs.remove(item.id)
+        } else {
+            favoriteIDs.insert(item.id)
+        }
+        LibraryFavoriteStore.save(favoriteIDs)
+    }
+
+    /// 合并新选择的单文件或合集，持久化后从第一集开始播放。
+    /// - Parameter newItems: 网络媒体源浏览器生成的条目。
+    private func addMediaItems(_ newItems: [LibraryItem]) {
+        guard !newItems.isEmpty else { return }
+        for item in newItems {
+            if let index = items.firstIndex(where: { $0.id == item.id }) {
+                if let oldAccount = items[index].credentialAccount,
+                   oldAccount != item.credentialAccount {
+                    KeychainStore.remove(account: oldAccount)
+                }
+                items[index] = item
+            } else {
+                items.append(item)
+            }
+        }
+        LibraryStore.save(items)
+        browsingSource = nil
+        play(newItems.sorted(by: LibraryItem.collectionOrder)[0])
+    }
+
+    /// 从历史存储刷新首页媒体源频道。
+    private func reloadMediaSources() {
+        mediaSources = MediaSourceProfileStore.load()
     }
 
     /// 从媒体库索引移除条目，不删除原始视频文件。
@@ -229,6 +662,17 @@ struct LibraryView: View {
             KeychainStore.remove(account: account)
         }
         items.removeAll { $0.id == item.id }
+        LibraryStore.save(items)
+    }
+
+    /// 从媒体库移除同一合集的全部索引项，不删除服务器上的文件。
+    /// - Parameter collectionID: 要移除的稳定合集标识。
+    private func removeCollection(_ collectionID: String) {
+        let accounts = items
+            .filter { $0.collectionID == collectionID }
+            .compactMap(\.credentialAccount)
+        accounts.forEach { KeychainStore.remove(account: $0) }
+        items.removeAll { $0.collectionID == collectionID }
         LibraryStore.save(items)
     }
 
@@ -449,7 +893,7 @@ private struct TVLibrarySearchSheet: View {
 }
 #endif
 
-/// 媒体卡片的异步视频缩略图；网络视频保持轻量占位，避免列表预加载整段流。
+/// 媒体卡片的异步视频缩略图；优先使用服务器海报，本地视频截取第一秒。
 private struct MediaArtworkView: View {
     let item: LibraryItem
     @State private var thumbnail: UIImage?
@@ -475,8 +919,20 @@ private struct MediaArtworkView: View {
         .task(id: item.id) { await loadThumbnail() }
     }
 
-    /// 从本地视频第一秒异步生成缩略图；失败时保留渐变占位。
+    /// 下载带认证头的服务器海报，或从本地视频第一秒生成缩略图。
     private func loadThumbnail() async {
+        if let rawURL = item.artworkURLString, let url = URL(string: rawURL) {
+            var request = URLRequest(url: url)
+            item.requestHeaders().forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+            request.cachePolicy = .returnCacheDataElseLoad
+            if let (data, response) = try? await URLSession.shared.data(for: request),
+               let http = response as? HTTPURLResponse,
+               (200..<300).contains(http.statusCode),
+               let image = UIImage(data: data) {
+                thumbnail = image
+            }
+            return
+        }
         guard item.remoteURLString == nil, let url = item.resolveURL() else { return }
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
@@ -500,14 +956,30 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     let remoteURLString: String?
     /// 媒体来源显示名称，例如 WebDAV 或 Jellyfin。
     let sourceName: String?
+    /// 媒体服务器提供的海报或剧集缩略图地址。
+    let artworkURLString: String?
     /// 存储在 Keychain 的请求头账号名，媒体库本身不保存密码或令牌。
     let credentialAccount: String?
+    /// 视频所属的持久化媒体源，用于从 Keychain 动态生成播放请求头。
+    let sourceProfileID: String?
+    /// 同一目录、季度或剧集共享的播放合集标识。
+    let collectionID: String?
+    let collectionTitle: String?
+    let collectionIndex: Int?
     let title: String
     let season: Int?
     let episode: Int?
 
+    /// 播放进度存储使用的稳定媒体标识。
+    var mediaKey: String? { resolveURL()?.absoluteString }
+
     /// 从文件选择器返回的地址创建条目，创建书签失败时返回 nil
-    init?(url: URL) {
+    init?(
+        url: URL,
+        collectionID: String? = nil,
+        collectionTitle: String? = nil,
+        collectionIndex: Int? = nil
+    ) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         guard let bookmark = try? url.bookmarkData(options: .minimalBookmark) else { return nil }
@@ -517,7 +989,12 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.bookmark = bookmark
         self.remoteURLString = nil
         self.sourceName = nil
+        self.artworkURLString = nil
         self.credentialAccount = nil
+        self.sourceProfileID = nil
+        self.collectionID = collectionID
+        self.collectionTitle = collectionTitle
+        self.collectionIndex = collectionIndex
         self.title = parsed.title
         self.season = parsed.season
         self.episode = parsed.episode
@@ -527,7 +1004,17 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// - Parameters:
     ///   - remoteURL: HTTP(S) 视频、HLS 或 NAS 直链。
     ///   - name: 用户提供的显示名称，空值时从 URL 推断。
-    init(remoteURL: URL, name: String, sourceName: String? = nil, credentialAccount: String? = nil) {
+    init(
+        remoteURL: URL,
+        name: String,
+        sourceName: String? = nil,
+        artworkURL: URL? = nil,
+        credentialAccount: String? = nil,
+        sourceProfileID: String? = nil,
+        collectionID: String? = nil,
+        collectionTitle: String? = nil,
+        collectionIndex: Int? = nil
+    ) {
         let inferredName = remoteURL.deletingPathExtension().lastPathComponent.removingPercentEncoding ?? ""
         let displayName = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? (!inferredName.isEmpty ? inferredName : (remoteURL.host ?? "网络视频"))
@@ -538,7 +1025,12 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.bookmark = nil
         self.remoteURLString = remoteURL.absoluteString
         self.sourceName = sourceName
+        self.artworkURLString = artworkURL?.absoluteString
         self.credentialAccount = credentialAccount
+        self.sourceProfileID = sourceProfileID
+        self.collectionID = collectionID
+        self.collectionTitle = collectionTitle
+        self.collectionIndex = collectionIndex
         self.title = parsed.title
         self.season = parsed.season
         self.episode = parsed.episode
@@ -554,12 +1046,28 @@ struct LibraryItem: Identifiable, Codable, Hashable {
             parts.append(host)
         }
         if let sourceName { parts.append(sourceName) }
+        if let collectionTitle, let collectionIndex {
+            parts.append("\(collectionTitle) · 第 \(collectionIndex) 集")
+        }
         return parts.joined(separator: " · ")
     }
 
     /// 解析书签取回文件地址，文件已失效时返回 nil
     func resolveURL() -> URL? {
-        if let remoteURLString { return URL(string: remoteURLString) }
+        if let remoteURLString {
+            guard var components = URLComponents(string: remoteURLString) else { return nil }
+            if let sourceProfileID,
+               let profile = MediaSourceProfileStore.profile(id: sourceProfileID),
+               profile.kind == .synology,
+               let sid = MediaSourceProfileStore.secret(for: profile)?.token,
+               !sid.isEmpty {
+                var queryItems = components.queryItems ?? []
+                queryItems.removeAll { $0.name == "_sid" }
+                queryItems.append(URLQueryItem(name: "_sid", value: sid))
+                components.queryItems = queryItems
+            }
+            return components.url
+        }
         guard let bookmark else { return nil }
         var isStale = false
         return try? URL(
@@ -573,6 +1081,10 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// 从 Keychain 读取网络媒体播放所需的请求头。
     /// - Returns: 没有凭证或凭证失效时返回空字典。
     func requestHeaders() -> [String: String] {
+        if let sourceProfileID,
+           let profile = MediaSourceProfileStore.profile(id: sourceProfileID) {
+            return MediaSourceProfileStore.playbackHeaders(for: profile)
+        }
         guard let credentialAccount,
               let data = KeychainStore.data(account: credentialAccount),
               let credential = try? JSONDecoder().decode(MediaRequestCredential.self, from: data) else {
@@ -580,6 +1092,51 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         }
         return credential.headers
     }
+
+    /// 按显式合集序号和自然文件名排序播放队列。
+    /// - Parameters:
+    ///   - left: 左侧媒体条目。
+    ///   - right: 右侧媒体条目。
+    /// - Returns: 左侧应先播放时返回 true。
+    static func collectionOrder(_ left: LibraryItem, _ right: LibraryItem) -> Bool {
+        if let leftIndex = left.collectionIndex,
+           let rightIndex = right.collectionIndex,
+           leftIndex != rightIndex {
+            return leftIndex < rightIndex
+        }
+        return left.displayName.localizedStandardCompare(right.displayName) == .orderedAscending
+    }
+}
+
+/// 首页用于展示同一目录、剧集或季度的聚合模型。
+private struct MediaCollection: Identifiable {
+    let id: String
+    let title: String
+    let items: [LibraryItem]
+    let nextItem: LibraryItem
+}
+
+/// 首页媒体源频道的轻量连通性状态。
+private enum MediaSourceHealth: Equatable {
+    case checking
+    case online
+    case offline
+
+    var title: String {
+        switch self {
+        case .checking: "检测中"
+        case .online: "在线"
+        case .offline: "不可用"
+        }
+    }
+}
+
+/// 播放器一次打开的单视频或合集队列。
+struct PlaybackQueue: Identifiable {
+    let items: [LibraryItem]
+    let initialItemID: String
+
+    var id: String { initialItemID }
 }
 
 /// 保存在 Keychain 中的媒体请求头，不参与媒体库 JSON 持久化。
@@ -602,5 +1159,22 @@ enum LibraryStore {
     static func save(_ items: [LibraryItem]) {
         guard let data = try? JSONEncoder().encode(items) else { return }
         UserDefaults.standard.set(data, forKey: key)
+    }
+}
+
+/// 媒体收藏的轻量本地存储，只保存条目 ID。
+enum LibraryFavoriteStore {
+    private static let key = "library.favorite-ids.v1"
+
+    /// 读取全部收藏条目 ID。
+    /// - Returns: 尚无收藏时返回空集合。
+    static func load() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+
+    /// 保存全部收藏条目 ID。
+    /// - Parameter ids: 当前收藏集合。
+    static func save(_ ids: Set<String>) {
+        UserDefaults.standard.set(Array(ids).sorted(), forKey: key)
     }
 }

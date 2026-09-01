@@ -1,44 +1,172 @@
 import Foundation
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 
-/// 统一的媒体源入口，提供直链、WebDAV 和 Jellyfin 三种可立即使用的方式。
+/// 媒体源表单的非敏感草稿；避免 Apple TV 误触返回后重复输入。
+private struct MediaSourceConnectionDraft: Codable {
+    var name = ""
+    var server = ""
+    var rootPath = "/"
+    var username = ""
+}
+
+/// 只持久化服务器等非敏感字段，密码、令牌与验证码绝不写入 UserDefaults。
+private enum MediaSourceDraftStore {
+    /// 读取指定类型上次未完成的连接草稿。
+    /// - Parameter kind: 媒体源类型。
+    /// - Returns: 已保存草稿；不存在时返回空草稿。
+    static func load(for kind: MediaSourceKind) -> MediaSourceConnectionDraft {
+        guard let data = UserDefaults.standard.data(forKey: key(for: kind)),
+              let value = try? JSONDecoder().decode(MediaSourceConnectionDraft.self, from: data) else {
+            return MediaSourceConnectionDraft()
+        }
+        return value
+    }
+
+    /// 保存指定类型的非敏感连接草稿。
+    /// - Parameters:
+    ///   - draft: 当前表单内容。
+    ///   - kind: 媒体源类型。
+    static func save(_ draft: MediaSourceConnectionDraft, for kind: MediaSourceKind) {
+        guard let data = try? JSONEncoder().encode(draft) else { return }
+        UserDefaults.standard.set(data, forKey: key(for: kind))
+    }
+
+    /// 连接成功后清除该类型草稿。
+    /// - Parameter kind: 媒体源类型。
+    static func clear(for kind: MediaSourceKind) {
+        UserDefaults.standard.removeObject(forKey: key(for: kind))
+    }
+
+    /// 返回媒体源类型隔离的存储键。
+    /// - Parameter kind: 媒体源类型。
+    /// - Returns: UserDefaults 键。
+    private static func key(for kind: MediaSourceKind) -> String {
+        "mediaSource.connectionDraft.\(kind.rawValue)"
+    }
+}
+
+/// 统一媒体源入口，展示历史连接并支持添加四类网络媒体源。
 struct MediaSourceSheet: View {
-    let onAdd: (LibraryItem) -> Void
+    let onAdd: ([LibraryItem]) -> Void
+    let onSourcesChanged: () -> Void
+    let usesParentNavigation: Bool
     @Environment(\.dismiss) private var dismiss
+    @State private var profiles = MediaSourceProfileStore.load()
+    @State private var isImportingFolder = false
+    @State private var importError: String?
 
+    /// 创建媒体源入口；Apple TV 可复用首页导航栈以获得完整页面式流程。
+    /// - Parameters:
+    ///   - onAdd: 选中视频或合集后的回调。
+    ///   - onSourcesChanged: 历史媒体源变化后的刷新回调。
+    ///   - usesParentNavigation: 是否由外层 NavigationStack 管理返回层级。
+    init(
+        onAdd: @escaping ([LibraryItem]) -> Void,
+        onSourcesChanged: @escaping () -> Void,
+        usesParentNavigation: Bool = false
+    ) {
+        self.onAdd = onAdd
+        self.onSourcesChanged = onSourcesChanged
+        self.usesParentNavigation = usesParentNavigation
+    }
+
+    @ViewBuilder
     var body: some View {
-        NavigationStack {
-            List {
+        if usesParentNavigation {
+            content
+        } else {
+            NavigationStack { content }
+        }
+    }
+
+    /// 构建可由弹窗或独立导航页面共同复用的媒体源列表。
+    private var content: some View {
+        List {
+                if !profiles.isEmpty {
+                    Section("最近使用") {
+                        ForEach(profiles) { profile in
+                            NavigationLink {
+                                MediaSourceChannelView(profile: profile, onAdd: finish)
+                            } label: {
+                                sourceLabel(
+                                    profile.name,
+                                    detail: "\(profile.kind.title) · \(profile.subtitle)",
+                                    symbol: profile.kind.symbol
+                                )
+                            }
+                            .contextMenu {
+                                Button("删除登录记录", systemImage: "trash", role: .destructive) {
+                                    MediaSourceProfileStore.remove(profile)
+                                    reloadProfiles()
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Section("添加视频") {
                     NavigationLink {
-                        DirectMediaSourceView(onAdd: finish)
+                        DirectMediaSourceView { finish([$0]) }
                     } label: {
                         sourceLabel("网络直链 / HLS", detail: "HTTP、HTTPS、m3u8", symbol: "link")
                     }
-                    NavigationLink {
-                        WebDAVSourceView(onAdd: finish)
+                    #if !os(tvOS)
+                    Button {
+                        isImportingFolder = true
                     } label: {
-                        sourceLabel("WebDAV", detail: "浏览 NAS 与网盘目录", symbol: "externaldrive.connected.to.line.below")
+                        sourceLabel(
+                            "文件夹 / SMB",
+                            detail: "通过系统文件 App 选择本机、iCloud 或已连接的 SMB 目录",
+                            symbol: "folder.badge.plus"
+                        )
                     }
-                    NavigationLink {
-                        JellyfinSourceView(onAdd: finish)
-                    } label: {
-                        sourceLabel("Jellyfin", detail: "登录并浏览媒体库", symbol: "play.tv")
+                    #endif
+                    ForEach(MediaSourceKind.allCases) { kind in
+                        NavigationLink {
+                            MediaSourceConnectionView(
+                                kind: kind,
+                                onSaved: { _ in reloadProfiles() },
+                                onAdd: finish
+                            )
+                        } label: {
+                            sourceLabel(kind.title, detail: sourceDetail(kind), symbol: kind.symbol)
+                        }
                     }
                 }
+
                 Section {
-                    Text("WebDAV 密码和 Jellyfin 令牌只保存在本机 Keychain；选中的视频保存为媒体库条目。")
+                    Text("服务器、用户名和最近目录会保留为历史记录；密码与令牌只存放在本机 Keychain。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-            }
-            .navigationTitle("添加媒体源")
-            .kanataInlineNavigationTitle()
-            .toolbar {
+        }
+        .navigationTitle("添加媒体源")
+        .kanataInlineNavigationTitle()
+        .toolbar {
+            if !usesParentNavigation {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
                 }
             }
+        }
+        .kanataFileImporter(
+            isPresented: $isImportingFolder,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false,
+            onCompletion: importFolder
+        )
+        .alert(
+            "文件夹导入失败",
+            isPresented: Binding(
+                get: { importError != nil },
+                set: { if !$0 { importError = nil } }
+            )
+        ) {
+            Button("好") { importError = nil }
+        } message: {
+            Text(importError ?? "")
         }
     }
 
@@ -59,11 +187,85 @@ struct MediaSourceSheet: View {
         }
     }
 
-    /// 保存新媒体条目并关闭整个添加媒体源窗口。
-    /// - Parameter item: 用户选择的可播放视频。
-    private func finish(_ item: LibraryItem) {
-        onAdd(item)
+    /// 返回媒体源在添加列表中的能力说明。
+    /// - Parameter kind: 媒体源类型。
+    /// - Returns: 一行简短说明。
+    private func sourceDetail(_ kind: MediaSourceKind) -> String {
+        switch kind {
+        case .webDAV: "浏览目录、单文件或整目录合集"
+        case .jellyfin: "按媒体库、剧集与文件夹浏览"
+        case .emby: "按媒体库、剧集与文件夹浏览"
+        case .plex: "浏览电影、剧集和媒体库分区"
+        case .synology: "登录 DSM，浏览 File Station 视频"
+        }
+    }
+
+    /// 把选中的单个视频或合集交给首页并关闭添加窗口。
+    /// - Parameter items: 已带来源和合集信息的媒体条目。
+    private func finish(_ items: [LibraryItem]) {
+        guard !items.isEmpty else { return }
+        onAdd(items)
         dismiss()
+    }
+
+    /// 重新读取媒体源历史并通知首页刷新频道。
+    private func reloadProfiles() {
+        profiles = MediaSourceProfileStore.load()
+        onSourcesChanged()
+    }
+
+    /// 递归读取系统文件选择器返回的目录并建立一个有序播放合集。
+    /// - Parameter result: 目录选择结果；已连接的 SMB 会由系统文件提供器暴露。
+    private func importFolder(_ result: Result<[URL], Error>) {
+        do {
+            guard let root = try result.get().first else { return }
+            let accessing = root.startAccessingSecurityScopedResource()
+            defer { if accessing { root.stopAccessingSecurityScopedResource() } }
+            let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey]
+            guard let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: keys,
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else {
+                throw MediaSourceError.invalidResponse
+            }
+            let videos = enumerator.compactMap { value -> URL? in
+                guard let url = value as? URL,
+                      Self.isVideoFile(url) else { return nil }
+                return url
+            }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            .prefix(2_000)
+            guard !videos.isEmpty else {
+                importError = "该目录中没有找到支持的视频文件"
+                return
+            }
+            let collectionID = "folder:\(root.standardizedFileURL.absoluteString)"
+            let title = root.lastPathComponent.removingPercentEncoding ?? root.lastPathComponent
+            let items = videos.enumerated().compactMap { offset, url in
+                LibraryItem(
+                    url: url,
+                    collectionID: collectionID,
+                    collectionTitle: title,
+                    collectionIndex: offset + 1
+                )
+            }
+            guard !items.isEmpty else {
+                importError = "系统没有授予该目录的持久访问权限，请重新选择"
+                return
+            }
+            finish(items)
+        } catch {
+            importError = error.localizedDescription
+        }
+    }
+
+    /// 判断文件扩展名是否属于本地播放器支持范围。
+    /// - Parameter url: 文件提供器返回的文件 URL。
+    /// - Returns: 常见视频格式时返回 true。
+    private static func isVideoFile(_ url: URL) -> Bool {
+        ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "flv"]
+            .contains(url.pathExtension.lowercased())
     }
 }
 
@@ -104,589 +306,906 @@ private struct DirectMediaSourceView: View {
     }
 }
 
-/// WebDAV 中的一项文件或目录。
-private struct WebDAVEntry: Identifiable, Sendable {
-    let url: URL
-    let name: String
-    let isDirectory: Bool
-    let contentType: String?
-
-    var id: String { url.absoluteString }
-}
-
-/// WebDAV PROPFIND 客户端。
-private actor WebDAVClient {
-    let headers: [String: String]
-    private let session: URLSession
-
-    /// 创建 WebDAV 客户端，账号为空时使用匿名访问。
-    /// - Parameters:
-    ///   - username: WebDAV 用户名。
-    ///   - password: WebDAV 密码。
-    init(username: String, password: String) {
-        if username.isEmpty {
-            self.headers = [:]
-        } else {
-            let token = Data("\(username):\(password)".utf8).base64EncodedString()
-            self.headers = ["Authorization": "Basic \(token)"]
-        }
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 20
-        configuration.timeoutIntervalForResource = 45
-        self.session = URLSession(configuration: configuration)
-    }
-
-    /// 列出 WebDAV 目录的直接子项。
-    /// - Parameter directory: 要发送 Depth: 1 请求的目录。
-    /// - Returns: 已过滤为文件夹和常见视频格式的条目。
-    func list(directory: URL) async throws -> [WebDAVEntry] {
-        var request = URLRequest(url: directory)
-        request.httpMethod = "PROPFIND"
-        request.setValue("1", forHTTPHeaderField: "Depth")
-        request.setValue("application/xml; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-        request.httpBody = Data("""
-        <?xml version="1.0" encoding="utf-8" ?>
-        <d:propfind xmlns:d="DAV:"><d:prop><d:displayname/><d:resourcetype/><d:getcontenttype/></d:prop></d:propfind>
-        """.utf8)
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw MediaSourceError.invalidResponse }
-        guard http.statusCode == 207 || (200..<300).contains(http.statusCode) else {
-            throw MediaSourceError.http(http.statusCode)
-        }
-        let parserDelegate = WebDAVXMLDelegate(baseURL: directory)
-        let parser = XMLParser(data: data)
-        parser.shouldProcessNamespaces = true
-        parser.delegate = parserDelegate
-        guard parser.parse() else { throw MediaSourceError.invalidResponse }
-        let root = Self.normalizedPath(directory.path)
-        return parserDelegate.entries
-            .filter { Self.normalizedPath($0.url.path) != root }
-            .filter { $0.isDirectory || Self.isVideo($0.url) }
-            .sorted {
-                if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
-                return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-            }
-    }
-
-    /// 判断文件扩展名是否属于播放器支持的视频范围。
-    /// - Parameter url: WebDAV 文件地址。
-    /// - Returns: 常见视频或 HLS 扩展名时返回 true。
-    private static func isVideo(_ url: URL) -> Bool {
-        ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m3u8", "flv"]
-            .contains(url.pathExtension.lowercased())
-    }
-
-    /// 去掉目录路径末尾斜杠，便于排除 PROPFIND 返回的目录本身。
-    /// - Parameter value: URL 路径。
-    /// - Returns: 可比较的路径。
-    private static func normalizedPath(_ value: String) -> String {
-        value.count > 1 && value.hasSuffix("/") ? String(value.dropLast()) : value
-    }
-}
-
-/// 解析 WebDAV Multi-Status XML。
-private final class WebDAVXMLDelegate: NSObject, XMLParserDelegate {
-    private let baseURL: URL
-    private var href = ""
-    private var displayName = ""
-    private var contentType = ""
-    private var currentElement = ""
-    private var isDirectory = false
-    var entries: [WebDAVEntry] = []
-
-    /// 创建相对地址解析器。
-    /// - Parameter baseURL: 当前 PROPFIND 目录。
-    init(baseURL: URL) {
-        self.baseURL = baseURL
-    }
-
-    /// 进入 XML 元素并初始化单条 response 状态。
-    func parser(
-        _ parser: XMLParser,
-        didStartElement elementName: String,
-        namespaceURI: String?,
-        qualifiedName qName: String?,
-        attributes attributeDict: [String: String] = [:]
-    ) {
-        currentElement = elementName.lowercased()
-        if currentElement == "response" {
-            href = ""
-            displayName = ""
-            contentType = ""
-            isDirectory = false
-        } else if currentElement == "collection" {
-            isDirectory = true
-        }
-    }
-
-    /// 收集当前属性元素的文本。
-    func parser(_ parser: XMLParser, foundCharacters string: String) {
-        switch currentElement {
-        case "href": href += string
-        case "displayname": displayName += string
-        case "getcontenttype": contentType += string
-        default: break
-        }
-    }
-
-    /// 在 response 结束时生成统一目录项。
-    func parser(
-        _ parser: XMLParser,
-        didEndElement elementName: String,
-        namespaceURI: String?,
-        qualifiedName qName: String?
-    ) {
-        if elementName.lowercased() == "response",
-           let url = URL(string: href.trimmingCharacters(in: .whitespacesAndNewlines), relativeTo: baseURL)?.absoluteURL {
-            let fallback = url.lastPathComponent.removingPercentEncoding ?? url.lastPathComponent
-            let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            entries.append(WebDAVEntry(
-                url: url,
-                name: name.isEmpty ? fallback : name,
-                isDirectory: isDirectory,
-                contentType: contentType.isEmpty ? nil : contentType
-            ))
-        }
-        currentElement = ""
-    }
-}
-
-/// WebDAV 登录和目录浏览界面。
-private struct WebDAVSourceView: View {
-    let onAdd: (LibraryItem) -> Void
+/// 新媒体源登录界面；连接成功后直接切换到频道浏览器。
+private struct MediaSourceConnectionView: View {
+    let kind: MediaSourceKind
+    let onSaved: (MediaSourceProfile) -> Void
+    let onAdd: ([LibraryItem]) -> Void
+    @State private var name = ""
     @State private var server = ""
-    @State private var path = "/"
+    @State private var rootPath = "/"
     @State private var username = ""
     @State private var password = ""
-    @State private var client: WebDAVClient?
-    @State private var directoryStack: [URL] = []
-    @State private var entries: [WebDAVEntry] = []
+    @State private var otp = ""
+    @State private var plexToken = ""
+    @State private var profile: MediaSourceProfile?
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var isShowingPlexAuthorization = false
 
     var body: some View {
         Group {
-            if client == nil {
-                Form {
-                    Section("服务器") {
-                        TextField("http://nas.local:5005", text: $server)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                        TextField("起始路径，例如 /Movies", text: $path)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        TextField("用户名（可选）", text: $username)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        SecureField("密码（可选）", text: $password)
-                    }
-                    Button("连接并浏览") { Task { await connect() } }
-                        .disabled(server.isEmpty || isLoading)
-                    if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
-                }
+            if let profile {
+                MediaSourceChannelView(profile: profile, onAdd: onAdd)
             } else {
-                mediaList
+                connectionForm
             }
         }
-        .navigationTitle("WebDAV")
+        .navigationTitle(profile?.name ?? "添加 \(kind.title)")
         .kanataInlineNavigationTitle()
-        .toolbar {
-            if directoryStack.count > 1 {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("上一级") { Task { await goBack() } }
-                }
+        .onAppear { restoreDraft() }
+        .onChange(of: name) { _, _ in saveDraft() }
+        .onChange(of: server) { _, _ in saveDraft() }
+        .onChange(of: rootPath) { _, _ in saveDraft() }
+        .onChange(of: username) { _, _ in saveDraft() }
+        .sheet(isPresented: $isShowingPlexAuthorization) {
+            PlexAuthorizationView { connection in
+                let currentName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                name = currentName.isEmpty ? connection.serverName : currentName
+                server = connection.serverURL.absoluteString
+                plexToken = connection.token
+                isShowingPlexAuthorization = false
+                Task { await connect() }
             }
         }
     }
 
-    /// 当前 WebDAV 目录的可浏览列表。
-    private var mediaList: some View {
+    /// 根据媒体源类型生成登录表单。
+    private var connectionForm: some View {
+        Form {
+            Section("服务器") {
+                TextField("频道名称（可选）", text: $name)
+                TextField(kind.defaultPortHint, text: $server)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                if kind == .webDAV {
+                    TextField("起始路径，例如 /Movies", text: $rootPath)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+            }
+            Section("登录") {
+                if kind == .plex {
+                    Button {
+                        isShowingPlexAuthorization = true
+                    } label: {
+                        Label("使用 Plex 账号网页登录", systemImage: "safari")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Text("登录后自动发现账号下的服务器，不需要查找或粘贴 Token。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Divider()
+                    SecureField("X-Plex-Token", text: $plexToken)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Text("也可以手动填写服务器地址与 X-Plex-Token；Token 只保存在 Keychain。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    TextField(kind == .webDAV ? "用户名（可选）" : "用户名", text: $username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField(kind == .webDAV ? "密码（可选）" : "密码", text: $password)
+                    if kind == .synology {
+                        TextField("两步验证码（如已开启）", text: $otp)
+                            .textContentType(.oneTimeCode)
+                            .keyboardType(.numberPad)
+                    }
+                }
+            }
+            Button {
+                Task { await connect() }
+            } label: {
+                HStack {
+                    Label("连接并浏览", systemImage: "network")
+                    if isLoading { Spacer(); ProgressView() }
+                }
+            }
+            .disabled(server.isEmpty || isLoading || (kind == .plex && plexToken.isEmpty))
+            if let errorMessage {
+                Text(errorMessage).foregroundStyle(.red).font(.caption)
+            }
+        }
+    }
+
+    /// 校验服务器和凭证，保存历史记录并进入频道浏览器。
+    private func connect() async {
+        guard let serverURL = normalizedServerURL() else {
+            errorMessage = "请输入有效的 HTTP 或 HTTPS 服务器地址"
+            return
+        }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            let secret: MediaSourceSecret
+            switch kind {
+            case .webDAV:
+                let start = try webDAVStartURL(server: serverURL)
+                let client = WebDAVClient(username: username, password: password)
+                _ = try await client.list(directory: start)
+                secret = MediaSourceSecret(password: password, token: nil, userID: nil)
+            case .jellyfin, .emby:
+                secret = try await MediaBrowserClient().login(
+                    server: serverURL,
+                    username: username,
+                    password: password
+                )
+            case .plex:
+                _ = try await PlexClient().verify(server: serverURL, token: plexToken)
+                secret = MediaSourceSecret(password: nil, token: plexToken, userID: nil)
+            case .synology:
+                secret = try await SynologyFileStationClient().login(
+                    server: serverURL,
+                    username: username,
+                    password: password,
+                    otp: otp
+                )
+            }
+            let value = MediaSourceProfileStore.upsert(
+                kind: kind,
+                name: resolvedName(server: serverURL),
+                serverURL: serverURL,
+                username: username,
+                rootPath: kind == .webDAV ? normalizedRootPath : nil,
+                secret: secret
+            )
+            profile = value
+            MediaSourceDraftStore.clear(for: kind)
+            onSaved(value)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 恢复当前媒体源未完成的非敏感表单字段。
+    private func restoreDraft() {
+        guard profile == nil, name.isEmpty, server.isEmpty, username.isEmpty else { return }
+        let draft = MediaSourceDraftStore.load(for: kind)
+        name = draft.name
+        server = draft.server
+        rootPath = draft.rootPath
+        username = draft.username
+    }
+
+    /// 持久化当前媒体源的非敏感表单字段，供误触返回后恢复。
+    private func saveDraft() {
+        guard profile == nil else { return }
+        MediaSourceDraftStore.save(
+            MediaSourceConnectionDraft(
+                name: name,
+                server: server,
+                rootPath: rootPath,
+                username: username
+            ),
+            for: kind
+        )
+    }
+
+    /// 规范化用户输入的服务器根地址。
+    /// - Returns: 合法 HTTP(S) URL，非法时返回 nil。
+    private func normalizedServerURL() -> URL? {
+        let raw = server.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = raw.count > 1
+            ? raw.replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression)
+            : raw
+        guard let url = URL(string: normalized), ["http", "https"].contains(url.scheme?.lowercased()) else {
+            return nil
+        }
+        return url
+    }
+
+    /// 把 WebDAV 起始路径拼接到服务器根地址。
+    /// - Parameter server: WebDAV 根地址。
+    /// - Returns: 可用于 PROPFIND 的目录地址。
+    private func webDAVStartURL(server: URL) throws -> URL {
+        guard let url = URL(string: normalizedRootPath, relativeTo: server.appendingPathComponent(""))?.absoluteURL else {
+            throw MediaSourceError.invalidResponse
+        }
+        return url
+    }
+
+    /// 返回带前导斜杠的 WebDAV 起始路径。
+    private var normalizedRootPath: String {
+        let value = rootPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { return "/" }
+        return value.hasPrefix("/") ? value : "/\(value)"
+    }
+
+    /// 生成频道显示名称，用户未填写时使用类型和主机名。
+    /// - Parameter server: 已校验的服务器 URL。
+    /// - Returns: 首页频道标题。
+    private func resolvedName(server: URL) -> String {
+        let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "\(kind.title) · \(server.host ?? "服务器")" : value
+    }
+}
+
+/// Plex 官方网页登录与服务器选择界面。
+private struct PlexAuthorizationView: View {
+    let onSelect: (PlexDiscoveredConnection) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var pin: PlexAuthorizationPin?
+    @State private var connections: [PlexDiscoveredConnection] = []
+    @State private var statusText = "正在创建 Plex 登录会话…"
+    @State private var errorMessage: String?
+    @State private var didOpenBrowser = false
+    private let client = PlexAccountClient()
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let pin, connections.isEmpty, errorMessage == nil {
+                    Section("网页登录") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("授权码")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            #if os(tvOS)
+                            Text(pin.code)
+                                .font(.system(.largeTitle, design: .monospaced, weight: .bold))
+                            #else
+                            Text(pin.code)
+                                .font(.system(.largeTitle, design: .monospaced, weight: .bold))
+                                .textSelection(.enabled)
+                            #endif
+                            Label(statusText, systemImage: "person.badge.key")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                            #if !os(tvOS)
+                            Button {
+                                didOpenBrowser = true
+                                statusText = "登录成功后请返回 Kanata"
+                                openURL(pin.authorizationURL)
+                            } label: {
+                                Label("打开 Plex 官方登录页", systemImage: "safari")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            ShareLink(item: pin.authorizationURL) {
+                                Label("发送登录链接到其他设备", systemImage: "square.and.arrow.up")
+                            }
+                            #else
+                            Text("请在手机或电脑打开 plex.tv/link，登录同一账号并输入上方授权码。")
+                                .font(.callout)
+                            #endif
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+
+                if !connections.isEmpty {
+                    Section("选择服务器") {
+                        ForEach(Array(connections.enumerated()), id: \.element.id) { index, connection in
+                            Button {
+                                onSelect(connection)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack {
+                                        Text(connection.serverName)
+                                        if index == 0 {
+                                            Text("推荐")
+                                                .font(.caption2.weight(.semibold))
+                                                .padding(.horizontal, 7)
+                                                .padding(.vertical, 3)
+                                                .background(.cyan.opacity(0.18), in: Capsule())
+                                        }
+                                    }
+                                    Text(connection.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if errorMessage == nil && pin == nil {
+                    ProgressView(statusText)
+                }
+                if let errorMessage {
+                    Section {
+                        ContentUnavailableView {
+                            Label("Plex 登录失败", systemImage: "exclamationmark.triangle")
+                        } description: {
+                            Text(errorMessage)
+                        } actions: {
+                            Button("重新生成") { Task { await beginAuthorization() } }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("登录 Plex")
+            .kanataInlineNavigationTitle()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+            .task { await beginAuthorization() }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active, didOpenBrowser else { return }
+                statusText = "已返回 Kanata，正在发现服务器…"
+            }
+        }
+    }
+
+    /// 创建 PIN 并持续轮询，直到授权成功、失败或界面关闭。
+    private func beginAuthorization() async {
+        pin = nil
+        connections = []
+        errorMessage = nil
+        didOpenBrowser = false
+        statusText = "正在创建 Plex 登录会话…"
+        do {
+            let value = try await client.createPin()
+            pin = value
+            statusText = "等待在 Plex 官方页面授权"
+            for _ in 0..<150 where !Task.isCancelled {
+                if let values = try await client.check(value) {
+                    statusText = "登录成功，正在测试最快连接…"
+                    if let recommended = await client.bestReachableConnection(in: values) {
+                        statusText = "已自动选择 \(recommended.serverName)"
+                        onSelect(recommended)
+                        return
+                    }
+                    connections = values
+                    statusText = "自动检测失败，请选择标记为推荐的连接"
+                    return
+                }
+                try await Task.sleep(for: .seconds(2))
+            }
+            if !Task.isCancelled { errorMessage = "授权已超时，请重新生成" }
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+/// 已保存媒体源的统一频道入口。
+struct MediaSourceChannelView: View {
+    let profile: MediaSourceProfile
+    let onAdd: ([LibraryItem]) -> Void
+
+    var body: some View {
+        Group {
+            switch profile.kind {
+            case .webDAV:
+                WebDAVChannelView(profile: profile, onAdd: onAdd)
+            case .jellyfin, .emby, .plex, .synology:
+                MediaServerChannelView(profile: profile, onAdd: onAdd)
+            }
+        }
+        .navigationTitle(profile.name)
+        .kanataInlineNavigationTitle()
+        .task { MediaSourceProfileStore.touch(profile) }
+    }
+}
+
+/// WebDAV 频道浏览器，支持单文件、当前目录或子目录合集。
+private struct WebDAVChannelView: View {
+    let profile: MediaSourceProfile
+    let onAdd: ([LibraryItem]) -> Void
+    @State private var directoryStack: [(url: URL, name: String)] = []
+    @State private var entries: [WebDAVEntry] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    private let client: WebDAVClient
+
+    /// 从历史记录创建带认证信息的 WebDAV 浏览器。
+    /// - Parameters:
+    ///   - profile: WebDAV 媒体源。
+    ///   - onAdd: 选择媒体后的回调。
+    init(profile: MediaSourceProfile, onAdd: @escaping ([LibraryItem]) -> Void) {
+        self.profile = profile
+        self.onAdd = onAdd
+        self.client = WebDAVClient(profile: profile)
+    }
+
+    var body: some View {
         List {
             if isLoading { ProgressView("正在读取目录…") }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
             ForEach(entries) { entry in
-                Button {
-                    Task { await select(entry) }
-                } label: {
-                    Label(entry.name, systemImage: entry.isDirectory ? "folder.fill" : "play.rectangle")
+                HStack(spacing: 12) {
+                    Button {
+                        Task { await select(entry) }
+                    } label: {
+                        Label(entry.name, systemImage: entry.isDirectory ? "folder.fill" : "play.rectangle")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    if entry.isDirectory {
+                        Button {
+                            Task { await addDirectory(url: entry.url, title: entry.name) }
+                        } label: {
+                            Image(systemName: "rectangle.stack.badge.plus")
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("把 \(entry.name) 添加为合集")
+                    }
                 }
             }
             if !isLoading && entries.isEmpty && errorMessage == nil {
                 ContentUnavailableView("没有视频", systemImage: "film", description: Text("该目录没有支持的视频文件"))
             }
         }
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    addCurrentDirectory()
+                } label: {
+                    Label("添加当前目录", systemImage: "rectangle.stack.badge.plus")
+                }
+                .disabled(entries.allSatisfy(\.isDirectory))
+                if directoryStack.count > 1 {
+                    Button("上一级") { Task { await goBack() } }
+                }
+            }
+        }
+        .task { await loadInitialDirectory() }
     }
 
-    /// 校验服务器地址并读取首个目录。
-    private func connect() async {
-        guard var base = URL(string: server.trimmingCharacters(in: .whitespacesAndNewlines)),
-              ["http", "https"].contains(base.scheme?.lowercased()) else {
-            errorMessage = "请输入有效的 HTTP 或 HTTPS WebDAV 地址"
-            return
-        }
-        if !base.absoluteString.hasSuffix("/") { base.appendPathComponent("") }
-        guard let start = URL(string: path.isEmpty ? "/" : path, relativeTo: base)?.absoluteURL else {
-            errorMessage = "起始路径无效"
-            return
-        }
-        let value = WebDAVClient(username: username, password: password)
-        client = value
-        directoryStack = [start]
-        await load(start, client: value)
+    /// 读取配置中的 WebDAV 起始目录。
+    private func loadInitialDirectory() async {
+        guard directoryStack.isEmpty,
+              let server = profile.serverURL,
+              let url = URL(
+                  string: profile.rootPath ?? "/",
+                  relativeTo: server.appendingPathComponent("")
+              )?.absoluteURL else { return }
+        directoryStack = [(url, profile.name)]
+        await load(url)
     }
 
-    /// 打开目录，或把视频及其认证请求头保存到媒体库。
+    /// 进入目录或把单个视频加入媒体库并开始播放。
     /// - Parameter entry: 用户选择的 WebDAV 项。
     private func select(_ entry: WebDAVEntry) async {
-        guard let client else { return }
         if entry.isDirectory {
-            directoryStack.append(entry.url)
-            await load(entry.url, client: client)
+            directoryStack.append((entry.url, entry.name))
+            await load(entry.url)
         } else {
-            let headers = client.headers
-            let account = MediaCredentialStore.save(headers: headers, prefix: "webdav")
-            onAdd(LibraryItem(
-                remoteURL: entry.url,
-                name: entry.name,
-                sourceName: "WebDAV",
-                credentialAccount: account
-            ))
+            onAdd([makeItem(entry: entry, collectionID: nil, collectionTitle: nil, index: nil)])
         }
     }
 
-    /// 返回 WebDAV 上一级目录并重新加载。
+    /// 把当前目录中所有直接视频作为一个有序合集加入媒体库。
+    private func addCurrentDirectory() {
+        guard let current = directoryStack.last else { return }
+        let videos = entries.filter { !$0.isDirectory }
+        addEntries(videos, directoryURL: current.url, title: current.name)
+    }
+
+    /// 读取子目录并把其中的直接视频作为合集加入媒体库。
+    /// - Parameters:
+    ///   - url: 子目录地址。
+    ///   - title: 合集标题。
+    private func addDirectory(url: URL, title: String) async {
+        do {
+            let videos = try await client.list(directory: url).filter { !$0.isDirectory }
+            guard !videos.isEmpty else {
+                errorMessage = "\(title) 中没有可直接播放的视频"
+                return
+            }
+            addEntries(videos, directoryURL: url, title: title)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// 创建带合集 ID 和自然顺序的 WebDAV 媒体库条目。
+    /// - Parameters:
+    ///   - videos: 当前目录的直接视频。
+    ///   - directoryURL: 用于生成稳定合集 ID 的目录。
+    ///   - title: 合集标题。
+    private func addEntries(_ videos: [WebDAVEntry], directoryURL: URL, title: String) {
+        guard !videos.isEmpty else { return }
+        let collectionID = "webdav:\(profile.id):\(directoryURL.absoluteString)"
+        let items = videos.enumerated().map { offset, entry in
+            makeItem(
+                entry: entry,
+                collectionID: collectionID,
+                collectionTitle: title,
+                index: offset + 1
+            )
+        }
+        onAdd(items)
+    }
+
+    /// 把 WebDAV 文件转换为可播放媒体库条目。
+    /// - Parameters:
+    ///   - entry: 视频文件。
+    ///   - collectionID: 可选合集标识。
+    ///   - collectionTitle: 可选合集名称。
+    ///   - index: 合集内顺序。
+    /// - Returns: 不在条目中保存明文密码的网络视频。
+    private func makeItem(
+        entry: WebDAVEntry,
+        collectionID: String?,
+        collectionTitle: String?,
+        index: Int?
+    ) -> LibraryItem {
+        LibraryItem(
+            remoteURL: entry.url,
+            name: entry.name,
+            sourceName: profile.kind.title,
+            sourceProfileID: profile.id,
+            collectionID: collectionID,
+            collectionTitle: collectionTitle,
+            collectionIndex: index
+        )
+    }
+
+    /// 返回上一级 WebDAV 目录并重新加载。
     private func goBack() async {
-        guard directoryStack.count > 1, let client else { return }
+        guard directoryStack.count > 1 else { return }
         directoryStack.removeLast()
-        if let directory = directoryStack.last { await load(directory, client: client) }
+        if let directory = directoryStack.last?.url { await load(directory) }
     }
 
     /// 读取并显示指定 WebDAV 目录。
-    /// - Parameters:
-    ///   - directory: 当前目录。
-    ///   - client: 已认证客户端。
-    private func load(_ directory: URL, client: WebDAVClient) async {
+    /// - Parameter directory: 当前目录。
+    private func load(_ directory: URL) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
             entries = try await client.list(directory: directory)
         } catch {
-            errorMessage = error.localizedDescription
             entries = []
+            errorMessage = error.localizedDescription
         }
     }
 }
 
-/// 已登录的 Jellyfin 会话。
-private struct JellyfinSession: Sendable {
-    let server: URL
-    let userID: String
-    let token: String
-}
+/// 媒体服务器频道的分类方式。
+private enum MediaChannelFilter: String, CaseIterable, Identifiable {
+    case all
+    case movies
+    case episodes
+    case folders
 
-/// Jellyfin 媒体库的一项。
-private struct JellyfinEntry: Identifiable, Sendable {
-    let id: String
-    let name: String
-    let type: String
+    var id: String { rawValue }
 
-    var isDirectory: Bool {
-        ["CollectionFolder", "Folder", "Series", "Season", "BoxSet"].contains(type)
-    }
-}
-
-/// Jellyfin 官方 REST API 的最小客户端。
-private actor JellyfinClient {
-    private let session: URLSession
-
-    /// 创建短超时、无持久 Cookie 的 Jellyfin 客户端。
-    init() {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 20
-        configuration.timeoutIntervalForResource = 45
-        self.session = URLSession(configuration: configuration)
-    }
-
-    /// 使用用户名密码登录 Jellyfin。
-    /// - Parameters:
-    ///   - server: Jellyfin 服务器根地址。
-    ///   - username: 用户名。
-    ///   - password: 密码。
-    /// - Returns: 用户 ID 与访问令牌。
-    func login(server: URL, username: String, password: String) async throws -> JellyfinSession {
-        let url = server.appendingPathComponent("Users/AuthenticateByName")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(Self.authorizationHeader(), forHTTPHeaderField: "X-Emby-Authorization")
-        request.httpBody = try JSONEncoder().encode(LoginRequest(Username: username, Pw: password))
-        let (data, response) = try await session.data(for: request)
-        try Self.validate(response)
-        let value = try JSONDecoder().decode(LoginResponse.self, from: data)
-        guard !value.AccessToken.isEmpty, !value.User.Id.isEmpty else { throw MediaSourceError.invalidResponse }
-        return JellyfinSession(server: server, userID: value.User.Id, token: value.AccessToken)
-    }
-
-    /// 读取 Jellyfin 根媒体库或指定文件夹的直接子项。
-    /// - Parameters:
-    ///   - login: 已登录会话。
-    ///   - parentID: nil 读取用户媒体库视图，否则读取该条目的子项。
-    /// - Returns: 文件夹、剧集与电影列表。
-    func items(login: JellyfinSession, parentID: String?) async throws -> [JellyfinEntry] {
-        let endpoint: URL
-        if let parentID {
-            var components = URLComponents(
-                url: login.server.appendingPathComponent("Users/\(login.userID)/Items"),
-                resolvingAgainstBaseURL: false
-            )
-            components?.queryItems = [
-                URLQueryItem(name: "ParentId", value: parentID),
-                URLQueryItem(name: "SortBy", value: "SortName"),
-                URLQueryItem(name: "SortOrder", value: "Ascending"),
-                URLQueryItem(name: "Fields", value: "MediaSources"),
-            ]
-            guard let value = components?.url else { throw MediaSourceError.invalidResponse }
-            endpoint = value
-        } else {
-            endpoint = login.server.appendingPathComponent("Users/\(login.userID)/Views")
-        }
-        var request = URLRequest(url: endpoint)
-        request.setValue(login.token, forHTTPHeaderField: "X-Emby-Token")
-        request.setValue(Self.authorizationHeader(token: login.token), forHTTPHeaderField: "X-Emby-Authorization")
-        let (data, response) = try await session.data(for: request)
-        try Self.validate(response)
-        let value = try JSONDecoder().decode(ItemsResponse.self, from: data)
-        return value.Items
-            .filter { $0.isFolder == true || ["Movie", "Episode", "Video", "MusicVideo"].contains($0.type) }
-            .map { JellyfinEntry(id: $0.id, name: $0.name, type: $0.type) }
-    }
-
-    /// 构建 Jellyfin 静态原文件播放地址。
-    /// - Parameters:
-    ///   - login: 已登录会话。
-    ///   - itemID: 电影或剧集 ID。
-    /// - Returns: 不含明文令牌的播放 URL。
-    func streamURL(login: JellyfinSession, itemID: String) -> URL {
-        var components = URLComponents(
-            url: login.server.appendingPathComponent("Videos/\(itemID)/stream"),
-            resolvingAgainstBaseURL: false
-        )!
-        components.queryItems = [URLQueryItem(name: "static", value: "true")]
-        return components.url!
-    }
-
-    /// 生成 Jellyfin 识别客户端所需的授权头。
-    /// - Parameter token: 可选访问令牌。
-    /// - Returns: MediaBrowser 格式的授权值。
-    private static func authorizationHeader(token: String? = nil) -> String {
-        var value = "MediaBrowser Client=\"Kanata\", Device=\"Apple\", DeviceId=\"kanata-apple\", Version=\"0.1.0\""
-        if let token { value += ", Token=\"\(token)\"" }
-        return value
-    }
-
-    /// 校验 Jellyfin HTTP 响应并映射认证错误。
-    /// - Parameter response: URLSession 响应。
-    private static func validate(_ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else { throw MediaSourceError.invalidResponse }
-        if http.statusCode == 401 { throw MediaSourceError.authenticationFailed }
-        guard (200..<300).contains(http.statusCode) else { throw MediaSourceError.http(http.statusCode) }
-    }
-}
-
-/// Jellyfin 登录请求模型。
-private struct LoginRequest: Encodable {
-    let Username: String
-    let Pw: String
-}
-
-/// Jellyfin 登录响应模型。
-private struct LoginResponse: Decodable {
-    struct UserValue: Decodable { let Id: String }
-    let User: UserValue
-    let AccessToken: String
-}
-
-/// Jellyfin 媒体列表响应模型。
-private struct ItemsResponse: Decodable {
-    struct Item: Decodable {
-        let id: String
-        let name: String
-        let type: String
-        let isFolder: Bool?
-
-        private enum CodingKeys: String, CodingKey {
-            case id = "Id"
-            case name = "Name"
-            case type = "Type"
-            case isFolder = "IsFolder"
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .movies: "电影"
+        case .episodes: "剧集"
+        case .folders: "文件夹"
         }
     }
-    let Items: [Item]
 }
 
-/// Jellyfin 登录与媒体库浏览界面。
-private struct JellyfinSourceView: View {
-    let onAdd: (LibraryItem) -> Void
-    @State private var server = ""
-    @State private var username = ""
-    @State private var password = ""
-    @State private var login: JellyfinSession?
-    @State private var directoryStack: [(id: String?, name: String)] = []
-    @State private var entries: [JellyfinEntry] = []
+/// Jellyfin、Emby 与 Plex 共用的频道化浏览器。
+private struct MediaServerChannelView: View {
+    let profile: MediaSourceProfile
+    let onAdd: ([LibraryItem]) -> Void
+    @State private var stack: [(key: String?, name: String)] = []
+    @State private var entries: [MediaSourceEntry] = []
+    @State private var filter = MediaChannelFilter.all
+    @State private var searchText = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
-    private let client = JellyfinClient()
+    private let mediaBrowserClient = MediaBrowserClient()
+    private let plexClient = PlexClient()
 
-    var body: some View {
-        Group {
-            if login == nil {
-                Form {
-                    Section("Jellyfin 服务器") {
-                        TextField("http://nas.local:8096", text: $server)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                        TextField("用户名", text: $username)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        SecureField("密码", text: $password)
-                    }
-                    Button("登录并浏览") { Task { await connect() } }
-                        .disabled(server.isEmpty || username.isEmpty || isLoading)
-                    if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
-                }
-            } else {
-                mediaList
+    /// 按搜索关键词和内容类型过滤当前目录。
+    private var visibleEntries: [MediaSourceEntry] {
+        entries.filter { entry in
+            let matchesSearch = searchText.isEmpty
+                || entry.name.localizedCaseInsensitiveContains(searchText)
+            guard matchesSearch else { return false }
+            switch filter {
+            case .all: return true
+            case .movies: return ["Movie", "movie"].contains(entry.type)
+            case .episodes: return ["Series", "Season", "Episode", "show", "season", "episode"].contains(entry.type)
+            case .folders: return entry.isDirectory
             }
         }
-        .navigationTitle("Jellyfin")
-        .kanataInlineNavigationTitle()
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Picker("分类", selection: $filter) {
+                    ForEach(MediaChannelFilter.allCases) { value in
+                        Text(value.title).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            if isLoading { ProgressView("正在读取 \(profile.kind.title)…") }
+            if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
+            Section(stack.last?.name ?? profile.name) {
+                ForEach(visibleEntries) { entry in
+                    HStack(spacing: 12) {
+                        Button {
+                            Task { await select(entry) }
+                        } label: {
+                            HStack(spacing: 12) {
+                                MediaServerArtworkView(
+                                    url: artworkURL(for: entry),
+                                    headers: MediaSourceProfileStore.playbackHeaders(for: profile),
+                                    fallbackSymbol: symbol(for: entry)
+                                )
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(entry.name)
+                                        .lineLimit(2)
+                                    Text(entry.typeLabel)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        if entry.isDirectory {
+                            Button {
+                                Task { await addDirectory(entry) }
+                            } label: {
+                                Image(systemName: "rectangle.stack.badge.plus")
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("把 \(entry.name) 添加为合集")
+                        }
+                    }
+                }
+            }
+            if !isLoading && visibleEntries.isEmpty && errorMessage == nil {
+                ContentUnavailableView("没有匹配内容", systemImage: "film.stack", description: Text("切换分类或搜索其他名称"))
+            }
+        }
+        .searchable(text: $searchText, prompt: "搜索当前频道")
         .toolbar {
-            if directoryStack.count > 1 {
-                ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    Task { await addCurrentDirectory() }
+                } label: {
+                    Label("添加当前内容", systemImage: "rectangle.stack.badge.plus")
+                }
+                .disabled(entries.isEmpty)
+                if stack.count > 1 {
                     Button("上一级") { Task { await goBack() } }
                 }
             }
         }
+        .task { await loadInitialContent() }
     }
 
-    /// 当前 Jellyfin 目录列表。
-    private var mediaList: some View {
-        List {
-            if isLoading { ProgressView("正在读取媒体库…") }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
-            ForEach(entries) { entry in
-                Button { Task { await select(entry) } } label: {
-                    Label(entry.name, systemImage: entry.isDirectory ? "folder.fill" : "play.rectangle")
-                }
-            }
-            if !isLoading && entries.isEmpty && errorMessage == nil {
-                ContentUnavailableView("没有视频", systemImage: "film", description: Text("该目录没有可播放项目"))
-            }
+    /// 首次进入频道时读取根媒体库。
+    private func loadInitialContent() async {
+        guard stack.isEmpty else { return }
+        stack = [(nil, profile.name)]
+        await load(key: nil)
+    }
+
+    /// 打开文件夹，或把单个视频加入媒体库并播放。
+    /// - Parameter entry: 当前媒体服务器条目。
+    private func select(_ entry: MediaSourceEntry) async {
+        if entry.isDirectory, let key = entry.navigationKey {
+            stack.append((key, entry.name))
+            await load(key: key)
+        } else if let item = await makeItem(entry: entry, collectionID: nil, collectionTitle: nil, index: nil) {
+            onAdd([item])
         }
     }
 
-    /// 登录 Jellyfin 并读取用户媒体库视图。
-    private func connect() async {
-        let rawServer = server.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedServer = rawServer.count > 1
-            ? rawServer.replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression)
-            : rawServer
-        guard let url = URL(string: normalizedServer),
-              ["http", "https"].contains(url.scheme?.lowercased()) else {
-            errorMessage = "请输入有效的 Jellyfin 地址"
-            return
-        }
+    /// 递归读取一个剧集或文件夹，并把其中视频添加为合集。
+    /// - Parameter entry: 用户点击合集按钮的目录。
+    private func addDirectory(_ entry: MediaSourceEntry) async {
+        guard let key = entry.navigationKey else { return }
+        await addCollection(key: key, title: entry.name)
+    }
+
+    /// 把当前频道目录的全部可播放项目添加为合集。
+    private func addCurrentDirectory() async {
+        await addCollection(key: stack.last?.key, title: stack.last?.name ?? profile.name)
+    }
+
+    /// 收集目录下最多 500 个视频并生成有序媒体库合集。
+    /// - Parameters:
+    ///   - key: MediaBrowser 项目 ID 或 Plex API 路径。
+    ///   - title: 合集显示名称。
+    private func addCollection(key: String?, title: String) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let value = try await client.login(server: url, username: username, password: password)
-            login = value
-            directoryStack = [(nil, "媒体库")]
-            entries = try await client.items(login: value, parentID: nil)
+            let playable = try await collectPlayable(key: key, depth: 0)
+            guard !playable.isEmpty else {
+                errorMessage = "\(title) 中没有可播放视频"
+                return
+            }
+            let collectionID = "\(profile.kind.rawValue):\(profile.id):\(key ?? "root")"
+            var items: [LibraryItem] = []
+            for (offset, entry) in playable.prefix(500).enumerated() {
+                if let item = await makeItem(
+                    entry: entry,
+                    collectionID: collectionID,
+                    collectionTitle: title,
+                    index: entry.index ?? offset + 1
+                ) {
+                    items.append(item)
+                }
+            }
+            guard !items.isEmpty else { throw MediaSourceError.invalidResponse }
+            onAdd(items)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    /// 打开 Jellyfin 文件夹或添加可播放视频。
-    /// - Parameter entry: 用户选择的媒体项。
-    private func select(_ entry: JellyfinEntry) async {
-        guard let login else { return }
-        if entry.isDirectory {
-            directoryStack.append((entry.id, entry.name))
-            await load(parentID: entry.id, login: login)
-        } else {
-            let url = await client.streamURL(login: login, itemID: entry.id)
-            let headers = [
-                "X-Emby-Token": login.token,
-                "X-Emby-Authorization": "MediaBrowser Client=\"Kanata\", Device=\"Apple\", DeviceId=\"kanata-apple\", Version=\"0.1.0\", Token=\"\(login.token)\"",
-            ]
-            let account = MediaCredentialStore.save(headers: headers, prefix: "jellyfin")
-            onAdd(LibraryItem(
+    /// 递归收集剧集、季度或文件夹中的可播放条目。
+    /// - Parameters:
+    ///   - key: 当前目录标识。
+    ///   - depth: 递归深度，最多四层以避免扫描整台服务器。
+    /// - Returns: 按服务端顺序排列的可播放项目。
+    private func collectPlayable(key: String?, depth: Int) async throws -> [MediaSourceEntry] {
+        guard depth <= 4 else { return [] }
+        let values = try await fetchEntries(key: key)
+        var result = values.filter(\.isPlayable)
+        for directory in values where directory.isDirectory {
+            guard result.count < 500, let childKey = directory.navigationKey else { continue }
+            result.append(contentsOf: try await collectPlayable(key: childKey, depth: depth + 1))
+        }
+        return result
+    }
+
+    /// 把统一媒体条目转换为带认证引用的 LibraryItem。
+    /// - Parameters:
+    ///   - entry: 可播放媒体条目。
+    ///   - collectionID: 可选合集 ID。
+    ///   - collectionTitle: 可选合集名称。
+    ///   - index: 合集顺序。
+    /// - Returns: 地址无效时返回 nil。
+    private func makeItem(
+        entry: MediaSourceEntry,
+        collectionID: String?,
+        collectionTitle: String?,
+        index: Int?
+    ) async -> LibraryItem? {
+        guard let streamPath = entry.streamPath else { return nil }
+        do {
+            let url: URL
+            if profile.kind == .plex {
+                url = try await plexClient.streamURL(profile: profile, streamPath: streamPath)
+            } else if profile.kind == .synology {
+                url = try await SynologyFileStationClient().streamURL(
+                    profile: profile,
+                    path: streamPath
+                )
+            } else {
+                url = try await mediaBrowserClient.streamURL(profile: profile, itemID: streamPath)
+            }
+            return LibraryItem(
                 remoteURL: url,
                 name: entry.name,
-                sourceName: "Jellyfin",
-                credentialAccount: account
-            ))
+                sourceName: profile.kind.title,
+                artworkURL: artworkURL(for: entry),
+                sourceProfileID: profile.id,
+                collectionID: collectionID,
+                collectionTitle: collectionTitle,
+                collectionIndex: index
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
         }
     }
 
-    /// 返回 Jellyfin 上一级媒体目录。
-    private func goBack() async {
-        guard directoryStack.count > 1, let login else { return }
-        directoryStack.removeLast()
-        await load(parentID: directoryStack.last?.id, login: login)
+    /// 把媒体服务器返回的相对海报路径转换成完整 URL。
+    /// - Parameter entry: 当前媒体条目。
+    /// - Returns: 可带认证头下载的海报地址。
+    private func artworkURL(for entry: MediaSourceEntry) -> URL? {
+        guard let server = profile.serverURL,
+              let path = entry.artworkPath,
+              !path.isEmpty else { return nil }
+        return URL(string: path, relativeTo: server)?.absoluteURL
     }
 
-    /// 读取指定 Jellyfin 父项目的子项。
-    /// - Parameters:
-    ///   - parentID: 父项目 ID，nil 表示媒体库根视图。
-    ///   - login: 已登录会话。
-    private func load(parentID: String?, login: JellyfinSession) async {
+    /// 返回当前媒体类型适合的 SF Symbol。
+    /// - Parameter entry: 媒体服务器条目。
+    /// - Returns: 文件夹、剧集、电影或普通视频图标。
+    private func symbol(for entry: MediaSourceEntry) -> String {
+        if entry.isDirectory { return entry.type.lowercased().contains("series") || entry.type == "show" ? "tv" : "folder.fill" }
+        if entry.type.lowercased().contains("episode") { return "play.square" }
+        if entry.type.lowercased().contains("movie") { return "film" }
+        return "play.rectangle"
+    }
+
+    /// 返回上一级媒体服务器目录。
+    private func goBack() async {
+        guard stack.count > 1 else { return }
+        stack.removeLast()
+        await load(key: stack.last?.key)
+    }
+
+    /// 读取指定媒体服务器目录并更新界面。
+    /// - Parameter key: MediaBrowser 项目 ID 或 Plex API 路径。
+    private func load(key: String?) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
-            entries = try await client.items(login: login, parentID: parentID)
+            entries = try await fetchEntries(key: key)
         } catch {
             entries = []
             errorMessage = error.localizedDescription
         }
     }
-}
 
-/// 将媒体请求头安全保存到 Keychain。
-private enum MediaCredentialStore {
-    /// 保存认证请求头并返回媒体库可引用的账号名。
-    /// - Parameters:
-    ///   - headers: Authorization 或媒体服务器令牌请求头。
-    ///   - prefix: 来源短标识。
-    /// - Returns: 空请求头返回 nil，否则返回 Keychain 账号名。
-    static func save(headers: [String: String], prefix: String) -> String? {
-        guard !headers.isEmpty,
-              let data = try? JSONEncoder().encode(MediaRequestCredential(headers: headers)) else { return nil }
-        let account = "media.\(prefix).\(UUID().uuidString)"
-        KeychainStore.set(data, account: account)
-        return account
+    /// 根据媒体源类型调用 MediaBrowser JSON 或 Plex XML 客户端。
+    /// - Parameter key: 当前目录标识。
+    /// - Returns: 统一媒体条目列表。
+    private func fetchEntries(key: String?) async throws -> [MediaSourceEntry] {
+        if profile.kind == .plex {
+            return try await plexClient.items(profile: profile, navigationKey: key)
+        }
+        if profile.kind == .synology {
+            return try await SynologyFileStationClient().items(profile: profile, parentPath: key)
+        }
+        return try await mediaBrowserClient.items(profile: profile, parentID: key)
     }
 }
 
-/// 媒体源访问中的可执行错误提示。
-private enum MediaSourceError: LocalizedError {
-    case invalidResponse
-    case authenticationFailed
-    case http(Int)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidResponse: "服务器响应格式无效"
-        case .authenticationFailed: "账号或密码不正确"
-        case .http(let status): "服务器返回 HTTP \(status)"
+private extension MediaSourceEntry {
+    /// 把服务端类型转换成用户可读的中文分类。
+    var typeLabel: String {
+        switch type.lowercased() {
+        case "movie": "电影"
+        case "episode": "剧集"
+        case "series", "show": "电视剧 / 动画"
+        case "season": "季度"
+        case "collectionfolder", "userview": "媒体库"
+        default: isDirectory ? "文件夹" : "视频"
         }
+    }
+}
+
+/// 下载带媒体服务器认证头的频道海报。
+private struct MediaServerArtworkView: View {
+    let url: URL?
+    let headers: [String: String]
+    let fallbackSymbol: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(.secondary.opacity(0.12))
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: fallbackSymbol)
+                    .foregroundStyle(.cyan)
+            }
+        }
+        .frame(width: 54, height: 72)
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .task(id: url) { await load() }
+    }
+
+    /// 下载海报并校验 HTTP 与图片数据。
+    private func load() async {
+        guard let url else { return }
+        var request = URLRequest(url: url)
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        request.cachePolicy = .returnCacheDataElseLoad
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let value = UIImage(data: data) else { return }
+        image = value
     }
 }

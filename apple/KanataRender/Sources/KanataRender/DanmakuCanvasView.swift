@@ -198,7 +198,7 @@ public final class DanmakuCanvasView: UIView {
     /// 按显示区域与字号重新计算轨道数量
     private func rebuildTracks() {
         let fontSize = config.resolvedFontSize(itemFontSize: 25, viewWidth: bounds.width)
-        let lineHeight = fontSize * 1.25 + config.lineSpacing
+        let lineHeight = fontSize * 1.15 + config.lineSpacing
         let areaHeight = bounds.height * config.displayArea.heightRatio
         let count = config.maxTracks > 0
             ? config.maxTracks

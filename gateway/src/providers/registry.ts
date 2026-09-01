@@ -6,6 +6,7 @@
 import type { AppConfig } from '../config.js';
 import type { DanmakuSourceId, SourceStatus } from '../types.js';
 import { BilibiliProvider } from './bilibili/index.js';
+import { BahamutProvider } from './bahamut.js';
 import { CustomProvider } from './custom.js';
 import { DandanplayProvider } from './dandanplay.js';
 import { IqiyiProvider } from './iqiyi.js';
@@ -127,6 +128,7 @@ export function createRegistry(config: AppConfig): ProviderRegistry {
     }),
   );
   registry.register(new BilibiliProvider());
+  registry.register(new BahamutProvider());
   registry.register(new IqiyiProvider());
   registry.register(new QQProvider());
   if (config.customProviders.instances.some((instance) => instance.enabled)) {

@@ -128,9 +128,15 @@ final class PlayerViewModel {
     /// 打开一个本地或网络视频并尝试自动匹配弹幕。
     /// - Parameters:
     ///   - url: 视频文件地址，来自文件选择器
+    ///   - displayName: 媒体库保存的原始文件名或剧集名。
     ///   - settings: 应用设置，提供网关配置。
     ///   - requestHeaders: WebDAV 或媒体服务器播放所需的临时请求头。
-    func open(url: URL, settings: AppSettings, requestHeaders: [String: String] = [:]) async {
+    func open(
+        url: URL,
+        displayName: String,
+        settings: AppSettings,
+        requestHeaders: [String: String] = [:]
+    ) async {
         resetDanmakuState()
         state = .preparing("正在读取视频…")
         client = settings.makeClient()
@@ -174,13 +180,17 @@ final class PlayerViewModel {
             await self?.loadMediaOptions(asset: asset, item: item)
         }
         matchingTask = Task { [weak self] in
-            await self?.matchDanmaku(url: url)
+            await self?.matchDanmaku(url: url, displayName: displayName)
         }
     }
 
     /// 识别文件并向网关请求候选
-    private func matchDanmaku(url: URL) async {
-        let parsedTitle = TitleParser.parse(url.lastPathComponent)
+    /// - Parameters:
+    ///   - url: 用于指纹计算的实际播放地址。
+    ///   - displayName: 用户可见的原始名称，避免媒体服务器的 `/file` 路径污染关键词。
+    private func matchDanmaku(url: URL, displayName: String) async {
+        let keywordSource = Self.preferredMatchName(displayName: displayName, url: url)
+        let parsedTitle = TitleParser.parse(keywordSource)
         parsed = parsedTitle
         seasonKey = "\(parsedTitle.title)|S\(parsedTitle.season ?? 1)"
         offset = OffsetStore.offset(
@@ -247,6 +257,27 @@ final class PlayerViewModel {
         }
     }
 
+    /// 选择自动匹配弹幕使用的名称，过滤媒体服务器常见的无意义路径段。
+    /// - Parameters:
+    ///   - displayName: 媒体库保存的原始名称。
+    ///   - url: 实际播放地址。
+    /// - Returns: 可交给标题解析器的稳定名称。
+    private static func preferredMatchName(displayName: String, url: URL) -> String {
+        let visibleName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let genericNames: Set<String> = ["file", "stream", "download", "original", "video", "play"]
+        let visibleStem = URL(fileURLWithPath: visibleName).deletingPathExtension().lastPathComponent
+        if !visibleName.isEmpty, !genericNames.contains(visibleStem.lowercased()) { return visibleName }
+        if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let queryName = components.queryItems?.first(where: {
+               ["name", "title", "filename"].contains($0.name.lowercased())
+           })?.value,
+           !queryName.isEmpty {
+            return queryName
+        }
+        let urlName = url.deletingPathExtension().lastPathComponent.removingPercentEncoding ?? ""
+        return genericNames.contains(urlName.lowercased()) ? "未命名视频" : url.lastPathComponent
+    }
+
     /// 合并 App 内置来源与用户网关候选，任一来源失败都不会阻塞播放。
     /// - Parameter request: 标题、季集号、时长与可选指纹。
     /// - Returns: 候选列表与可展示的降级原因。
@@ -275,7 +306,7 @@ final class PlayerViewModel {
             let candidates = await builtInPublicClient.search(request)
             append(candidates)
             if candidates.isEmpty {
-                errors.append("爱奇艺、腾讯视频未找到匹配结果")
+                errors.append("爱奇艺、腾讯视频、巴哈姆特未找到匹配结果")
             }
         }
         if let client {
@@ -327,7 +358,7 @@ final class PlayerViewModel {
                 errors.append(error.localizedDescription)
             }
         }
-        if [.iqiyi, .qq].contains(candidate.source), let builtInPublicClient {
+        if [.iqiyi, .qq, .bahamut].contains(candidate.source), let builtInPublicClient {
             let startedAt = Date()
             do {
                 let items = try await builtInPublicClient.danmaku(for: candidate)
@@ -579,9 +610,9 @@ final class PlayerViewModel {
     }
 
     /// 设置播放倍速；播放中立即生效，暂停时只记住选择。
-    /// - Parameter rate: 0.5 到 2.0 的播放倍率。
+    /// - Parameter rate: 0.25 到 4.0 的播放倍率。
     func setPlaybackRate(_ rate: Double) {
-        playbackRate = min(max(rate, 0.5), 2)
+        playbackRate = min(max(rate, 0.25), 4)
         if player?.rate ?? 0 > 0 {
             player?.rate = Float(playbackRate)
         }

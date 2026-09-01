@@ -296,8 +296,8 @@ struct DanmakuSettingsPanel: View {
                     TVValueAdjuster(
                         title: "描边宽度",
                         value: String(format: "%.1f", config.strokeWidth),
-                        onDecrement: { config.strokeWidth = max(0, config.strokeWidth - 0.5) },
-                        onIncrement: { config.strokeWidth = min(5, config.strokeWidth + 0.5) }
+                        onDecrement: { config.strokeWidth = max(0, config.strokeWidth - 0.25) },
+                        onIncrement: { config.strokeWidth = min(3, config.strokeWidth + 0.25) }
                     )
                     TVValueAdjuster(
                         title: "同屏上限",
@@ -308,8 +308,8 @@ struct DanmakuSettingsPanel: View {
                     #else
                     HStack {
                         Text("描边")
-                        Slider(value: $config.strokeWidth, in: 0...5, step: 0.5)
-                        Text("\(config.strokeWidth, specifier: "%.1f")").monospacedDigit().frame(width: 36)
+                        Slider(value: $config.strokeWidth, in: 0...3, step: 0.25)
+                        Text("\(config.strokeWidth, specifier: "%.2g")").monospacedDigit().frame(width: 36)
                     }
                     HStack {
                         Text("同屏上限")

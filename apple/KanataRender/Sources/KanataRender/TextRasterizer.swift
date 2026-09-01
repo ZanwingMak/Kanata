@@ -42,7 +42,7 @@ final class TextRasterizer {
         } else if let fontName, let custom = UIFont(name: fontName, size: fontSize) {
             baseFont = custom
         } else {
-            baseFont = UIFont.systemFont(ofSize: fontSize, weight: bold ? .bold : .regular)
+            baseFont = UIFont.systemFont(ofSize: fontSize, weight: bold ? .semibold : .medium)
         }
         let font = bold && fontName != nil
             ? UIFont(
@@ -53,16 +53,17 @@ final class TextRasterizer {
 
         // NSAttributedString 的描边值是字号百分比，先把视觉点数换算为百分比。
         let strokePercent = fontSize > 0 ? strokeWidth / fontSize * 100 : 0
+        let foregroundColor = Self.readableColor(from: color)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: Self.uiColor(from: color),
-            .strokeColor: UIColor.black.withAlphaComponent(0.85),
-            .strokeWidth: -strokePercent
+            .foregroundColor: foregroundColor,
+            .strokeColor: Self.outlineColor(for: foregroundColor),
+            .strokeWidth: -strokePercent,
         ]
         let attributed = NSAttributedString(string: text, attributes: attributes)
         let size = attributed.size()
         // 留出描边溢出的边距
-        let inset = CGFloat(strokeWidth) + 2
+        let inset = CGFloat(strokeWidth) + 4
         let canvasSize = CGSize(width: ceil(size.width) + inset * 2, height: ceil(size.height) + inset * 2)
 
         let renderer = UIGraphicsImageRenderer(size: canvasSize)
@@ -86,6 +87,28 @@ final class TextRasterizer {
             blue: CGFloat(value & 0xFF) / 255.0,
             alpha: 1.0
         )
+    }
+
+    /// 把接近黑色的平台弹幕提升为白色，避免在暗色画面中完全不可读。
+    /// - Parameter value: RGB 十进制颜色。
+    /// - Returns: 保留彩色意图且满足基础可读性的前景色。
+    private static func readableColor(from value: Int) -> UIColor {
+        let color = uiColor(from: value)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        color.getRed(&red, green: &green, blue: &blue, alpha: nil)
+        let luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722
+        guard luminance >= 0.34 else { return .white }
+        return color
+    }
+
+    /// 使用统一深色细描边，避免彩色文字产生发白的双边缘。
+    /// - Parameter color: 已校正的文字颜色。
+    /// - Returns: 与文字形成对比、但不过度抢眼的描边颜色。
+    private static func outlineColor(for color: UIColor) -> UIColor {
+        _ = color
+        return UIColor.black.withAlphaComponent(0.82)
     }
 }
 #endif

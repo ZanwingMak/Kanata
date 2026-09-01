@@ -28,9 +28,24 @@ final class AppSettings {
         didSet { defaults.set(builtInBilibiliEnabled, forKey: Keys.builtInBilibiliEnabled) }
     }
 
-    /// 无需部署网关即可使用的爱奇艺与腾讯视频来源开关。
+    /// 无需部署网关即可使用的爱奇艺、腾讯视频与巴哈姆特来源开关。
     var builtInPublicSourcesEnabled: Bool {
         didSet { defaults.set(builtInPublicSourcesEnabled, forKey: Keys.builtInPublicSourcesEnabled) }
+    }
+
+    /// 独立启用爱奇艺内置弹幕来源。
+    var builtInIqiyiEnabled: Bool {
+        didSet { defaults.set(builtInIqiyiEnabled, forKey: Keys.builtInIqiyiEnabled) }
+    }
+
+    /// 独立启用腾讯视频内置弹幕来源。
+    var builtInQQEnabled: Bool {
+        didSet { defaults.set(builtInQQEnabled, forKey: Keys.builtInQQEnabled) }
+    }
+
+    /// 独立启用巴哈姆特动画疯内置弹幕来源。
+    var builtInBahamutEnabled: Bool {
+        didSet { defaults.set(builtInBahamutEnabled, forKey: Keys.builtInBahamutEnabled) }
     }
 
     /// 弹幕渲染配置，播放页直接读写
@@ -56,6 +71,8 @@ final class AppSettings {
         static let enabled = "danmaku.enabled"
         static let bold = "danmaku.bold"
         static let strokeWidth = "danmaku.strokeWidth"
+        static let lineSpacing = "danmaku.lineSpacing"
+        static let visualStyleVersion = "danmaku.visualStyleVersion"
         static let densityLimit = "danmaku.densityLimit"
         static let mergeDuplicates = "danmaku.mergeDuplicates"
         static let blockColorful = "danmaku.blockColorful"
@@ -64,6 +81,9 @@ final class AppSettings {
         static let onlineDanmakuCacheLimitMB = "danmaku.onlineCacheLimitMB"
         static let builtInBilibiliEnabled = "source.bilibili.builtInEnabled"
         static let builtInPublicSourcesEnabled = "source.public.builtInEnabled"
+        static let builtInIqiyiEnabled = "source.iqiyi.builtInEnabled"
+        static let builtInQQEnabled = "source.qq.builtInEnabled"
+        static let builtInBahamutEnabled = "source.bahamut.builtInEnabled"
     }
 
     private enum KeychainAccounts {
@@ -93,6 +113,9 @@ final class AppSettings {
         self.bilibiliBuvid3 = storedCredential?.buvid3 ?? ""
         self.builtInBilibiliEnabled = defaults.object(forKey: Keys.builtInBilibiliEnabled) as? Bool ?? true
         self.builtInPublicSourcesEnabled = defaults.object(forKey: Keys.builtInPublicSourcesEnabled) as? Bool ?? true
+        self.builtInIqiyiEnabled = defaults.object(forKey: Keys.builtInIqiyiEnabled) as? Bool ?? true
+        self.builtInQQEnabled = defaults.object(forKey: Keys.builtInQQEnabled) as? Bool ?? true
+        self.builtInBahamutEnabled = defaults.object(forKey: Keys.builtInBahamutEnabled) as? Bool ?? true
         self.onlineDanmakuCacheLimitMB = max(
             defaults.object(forKey: Keys.onlineDanmakuCacheLimitMB) as? Int ?? 250,
             50
@@ -108,6 +131,7 @@ final class AppSettings {
         if let enabled = defaults.object(forKey: Keys.enabled) as? Bool { config.enabled = enabled }
         if let bold = defaults.object(forKey: Keys.bold) as? Bool { config.bold = bold }
         if let stroke = defaults.object(forKey: Keys.strokeWidth) as? Double { config.strokeWidth = stroke }
+        if let spacing = defaults.object(forKey: Keys.lineSpacing) as? Double { config.lineSpacing = spacing }
         if let density = defaults.object(forKey: Keys.densityLimit) as? Int { config.densityLimit = density }
         if let merge = defaults.object(forKey: Keys.mergeDuplicates) as? Bool { config.mergeDuplicates = merge }
         if let colorful = defaults.object(forKey: Keys.blockColorful) as? Bool {
@@ -117,11 +141,25 @@ final class AppSettings {
             config.blockRules.blockRepeated = repeated
         }
         config.blockRules.keywords = defaults.stringArray(forKey: Keys.blockKeywords) ?? []
+        let requiresVisualMigration = defaults.integer(forKey: Keys.visualStyleVersion) < 3
+        if requiresVisualMigration {
+            config.fontScale = 0.75
+            config.opacity = 0.94
+            config.scrollDuration = 9
+            config.lineSpacing = 8
+            config.bold = false
+            config.strokeWidth = 0.6
+            config.densityLimit = 100
+        }
         self.danmakuConfig = config
 
         if let legacyGatewayToken {
             KeychainStore.setString(legacyGatewayToken, account: KeychainAccounts.gatewayToken)
             defaults.removeObject(forKey: Keys.gatewayToken)
+        }
+        if requiresVisualMigration {
+            defaults.set(3, forKey: Keys.visualStyleVersion)
+            persistDanmakuConfig()
         }
     }
 
@@ -160,11 +198,16 @@ final class AppSettings {
         return BuiltInBilibiliClient(cookie: bilibiliCookieHeader)
     }
 
-    /// 创建无需网关的爱奇艺与腾讯视频弹幕客户端。
+    /// 创建无需网关的爱奇艺、腾讯视频与巴哈姆特弹幕客户端。
     /// - Returns: 用户关闭内置公共来源时返回 nil。
     func makeBuiltInPublicDanmakuClient() -> BuiltInPublicDanmakuClient? {
         guard builtInPublicSourcesEnabled else { return nil }
-        return BuiltInPublicDanmakuClient()
+        var enabledSources = Set<DanmakuSourceId>()
+        if builtInIqiyiEnabled { enabledSources.insert(.iqiyi) }
+        if builtInQQEnabled { enabledSources.insert(.qq) }
+        if builtInBahamutEnabled { enabledSources.insert(.bahamut) }
+        guard !enabledSources.isEmpty else { return nil }
+        return BuiltInPublicDanmakuClient(enabledSources: enabledSources)
     }
 
     /// 组装供内置来源使用的 B 站 Cookie，请求日志不会输出该值。
@@ -223,6 +266,7 @@ final class AppSettings {
         defaults.set(danmakuConfig.enabled, forKey: Keys.enabled)
         defaults.set(danmakuConfig.bold, forKey: Keys.bold)
         defaults.set(danmakuConfig.strokeWidth, forKey: Keys.strokeWidth)
+        defaults.set(danmakuConfig.lineSpacing, forKey: Keys.lineSpacing)
         defaults.set(danmakuConfig.densityLimit, forKey: Keys.densityLimit)
         defaults.set(danmakuConfig.mergeDuplicates, forKey: Keys.mergeDuplicates)
         defaults.set(danmakuConfig.blockRules.blockColorful, forKey: Keys.blockColorful)

@@ -180,42 +180,67 @@ struct BilibiliQRCodeLoginSheet: View {
     let onLogin: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @State private var loginSession: BilibiliQRCodeSession?
+    @State private var renderedQRCode: UIImage?
     @State private var statusText = "正在生成二维码…"
     @State private var errorText: String?
+    @State private var didOpenBrowser = false
     private let client = BilibiliQRCodeClient()
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 22) {
-                if let loginSession,
-                   let image = Self.qrImage(from: loginSession.url.absoluteString) {
-                    Image(uiImage: image)
+            ScrollView {
+                VStack(spacing: 20) {
+                if let loginSession, let renderedQRCode {
+                    Image(uiImage: renderedQRCode)
                         .interpolation(.none)
                         .resizable()
                         .scaledToFit()
-                        .frame(maxWidth: 320, maxHeight: 320)
-                        .padding(16)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 18))
+                        .frame(width: 260, height: 260)
+                        .padding(18)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .shadow(color: .black.opacity(0.16), radius: 18, y: 8)
                         .accessibilityLabel("B 站登录二维码")
-                    Text(statusText)
-                        .font(.headline)
+                    Label(statusText, systemImage: statusSymbol)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(.secondary.opacity(0.12), in: Capsule())
                     Text("使用哔哩哔哩 App 扫码并在手机上确认。登录结果会自动保存到本机 Keychain。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     #if !os(tvOS)
-                    HStack {
-                        Button("在浏览器打开") {
+                    VStack(spacing: 12) {
+                        Button {
+                            didOpenBrowser = true
+                            statusText = "浏览器登录后请返回 Kanata"
                             openURL(loginSession.url)
+                        } label: {
+                            Label("在浏览器中登录", systemImage: "safari")
+                                .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                         ShareLink(item: loginSession.url) {
                             Label("发送到其他设备", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
                     }
+                    Text("浏览器显示登录成功后，请返回 Kanata；本页会继续自动确认登录状态，无需复制 Cookie。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                     #endif
+                } else if loginSession != nil, errorText == nil {
+                    ContentUnavailableView(
+                        "二维码生成失败",
+                        systemImage: "qrcode",
+                        description: Text("请重新生成，或改用浏览器登录")
+                    )
                 } else if errorText == nil {
                     ProgressView(statusText)
                 }
@@ -233,8 +258,11 @@ struct BilibiliQRCodeLoginSheet: View {
                     }
                 }
                 Spacer(minLength: 0)
+                }
+                .frame(maxWidth: 520)
+                .padding(24)
+                .frame(maxWidth: .infinity)
             }
-            .padding(24)
             .navigationTitle("扫码登录 B 站")
             .kanataInlineNavigationTitle()
             .toolbar {
@@ -243,15 +271,24 @@ struct BilibiliQRCodeLoginSheet: View {
                 }
             }
             .task { await beginLogin() }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active, didOpenBrowser else { return }
+                statusText = "已返回 Kanata，正在确认登录…"
+            }
         }
     }
 
     /// 创建新二维码并每两秒轮询一次，直到登录、过期或任务取消。
     private func beginLogin() async {
         do {
+            loginSession = nil
+            renderedQRCode = nil
+            errorText = nil
+            didOpenBrowser = false
             statusText = "正在生成二维码…"
             let value = try await client.generate()
             loginSession = value
+            renderedQRCode = Self.qrImage(from: value.url.absoluteString)
             statusText = "等待扫码"
             while !Task.isCancelled {
                 switch try await client.poll(key: value.key) {
@@ -283,10 +320,20 @@ struct BilibiliQRCodeLoginSheet: View {
     private static func qrImage(from value: String) -> UIImage? {
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(value.utf8)
-        filter.correctionLevel = "M"
-        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)) else {
+        filter.correctionLevel = "Q"
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)) else {
             return nil
         }
-        return UIImage(ciImage: output)
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        guard let image = context.createCGImage(output, from: output.extent) else { return nil }
+        return UIImage(cgImage: image)
+    }
+
+    /// 根据登录状态选择易懂的状态图标。
+    private var statusSymbol: String {
+        if statusText.contains("成功") { return "checkmark.circle.fill" }
+        if statusText.contains("确认") { return "iphone.radiowaves.left.and.right" }
+        if statusText.contains("浏览器") { return "arrow.uturn.backward.circle" }
+        return "qrcode.viewfinder"
     }
 }

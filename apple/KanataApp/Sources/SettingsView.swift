@@ -3,6 +3,7 @@ import SwiftUI
 
 /// 设置页：网关配置与源状态（FR-SET-001 / FR-SET-002）
 struct SettingsView: View {
+    let usesParentNavigation: Bool
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     @State private var testResult: String?
@@ -18,6 +19,12 @@ struct SettingsView: View {
     @State private var builtInSourceResult: String?
     @State private var isTestingBuiltInSource = false
     @State private var isShowingBilibiliQRCode = false
+
+    /// 创建设置界面；Apple TV 可沿用媒体库导航栈作为独立页面。
+    /// - Parameter usesParentNavigation: 是否由外层 NavigationStack 提供返回操作。
+    init(usesParentNavigation: Bool = false) {
+        self.usesParentNavigation = usesParentNavigation
+    }
 
     private enum ClearTarget {
         case onlineCache
@@ -41,14 +48,37 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
     var body: some View {
-        @Bindable var settings = settings
+        if usesParentNavigation {
+            content
+        } else {
+            NavigationStack { content }
+        }
+    }
 
-        NavigationStack {
-            Form {
+    /// 构建可由弹窗和 Apple TV 独立页面共同复用的设置表单。
+    private var content: some View {
+        @Bindable var settings = settings
+        return Form {
                 Section("开箱即用弹幕") {
-                    Toggle("内置哔哩哔哩来源", isOn: $settings.builtInBilibiliEnabled)
-                    Toggle("内置爱奇艺与腾讯视频来源", isOn: $settings.builtInPublicSourcesEnabled)
+                    Toggle(isOn: $settings.builtInBilibiliEnabled) {
+                        settingsLabel("哔哩哔哩", symbol: "play.rectangle.on.rectangle")
+                    }
+                    Toggle(isOn: $settings.builtInPublicSourcesEnabled) {
+                        settingsLabel("公共平台来源", symbol: "network")
+                    }
+                    if settings.builtInPublicSourcesEnabled {
+                        Toggle(isOn: $settings.builtInIqiyiEnabled) {
+                            settingsLabel("爱奇艺", symbol: "i.square")
+                        }
+                        Toggle(isOn: $settings.builtInQQEnabled) {
+                            settingsLabel("腾讯视频", symbol: "play.square")
+                        }
+                        Toggle(isOn: $settings.builtInBahamutEnabled) {
+                            settingsLabel("巴哈姆特动画疯", symbol: "sparkles.tv")
+                        }
+                    }
                     Text("无需服务器即可跨平台搜索作品、逐集选择并加载弹幕；网关不可用时仍可正常使用。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -56,12 +86,19 @@ struct SettingsView: View {
                         Task { await testBuiltInSource() }
                     } label: {
                         HStack {
-                            Text("测试全部内置来源")
+                            Label("测试全部内置来源", systemImage: "checkmark.circle")
                             if isTestingBuiltInSource { Spacer(); ProgressView() }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .disabled(
-                        (!settings.builtInBilibiliEnabled && !settings.builtInPublicSourcesEnabled)
+                        (
+                            !settings.builtInBilibiliEnabled
+                            && (!settings.builtInPublicSourcesEnabled
+                                || (!settings.builtInIqiyiEnabled
+                                    && !settings.builtInQQEnabled
+                                    && !settings.builtInBahamutEnabled))
+                        )
                         || isTestingBuiltInSource
                     )
                     if let builtInSourceResult {
@@ -70,26 +107,33 @@ struct SettingsView: View {
                 }
 
                 Section("扩展弹幕网关（可选）") {
-                    TextField("例如 http://192.168.1.7:9321", text: $settings.gatewayURLString)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    SecureField("访问令牌", text: $settings.gatewayToken)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    LabeledContent("网关地址") {
+                        TextField("http://192.168.1.7:9321", text: $settings.gatewayURLString)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                    }
+                    LabeledContent("访问令牌") {
+                        SecureField("可选", text: $settings.gatewayToken)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
                     Button {
                         Task { await testConnection() }
                     } label: {
                         HStack {
-                            Text("测试连接")
+                            Label("测试连接", systemImage: "bolt.horizontal.circle")
                             if isTesting { Spacer(); ProgressView() }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .disabled(isTesting)
                     if let testResult {
                         Text(testResult).font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("用于扩展弹弹play、自定义聚合接口及后续来源。未配置时不影响哔哩哔哩、爱奇艺和腾讯视频内置来源。")
+                    Text("用于扩展弹弹play、自定义聚合接口及后续来源。未配置时不影响哔哩哔哩、爱奇艺、腾讯视频和巴哈姆特内置来源。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -110,12 +154,23 @@ struct SettingsView: View {
                     Button {
                         isShowingBilibiliQRCode = true
                     } label: {
-                        Label(
-                            settings.hasBilibiliCredential ? "重新扫码登录" : "扫码登录",
-                            systemImage: "qrcode.viewfinder"
-                        )
+                        HStack(spacing: 12) {
+                            Image(systemName: "qrcode.viewfinder")
+                                .font(.title2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(settings.hasBilibiliCredential ? "重新登录 B 站" : "扫码或浏览器登录")
+                                    .font(.headline)
+                                Text("无需复制 Cookie，登录后自动返回确认")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 6)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.plain)
                     #if os(tvOS)
                     SecureField("Cookie 备用登录", text: $bilibiliCookieInput)
                         .textInputAutocapitalization(.never)
@@ -160,8 +215,11 @@ struct SettingsView: View {
             .navigationTitle("设置")
             .kanataInlineNavigationTitle()
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                if !usesParentNavigation {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { dismiss() }
+                            .buttonStyle(.plain)
+                    }
                 }
             }
             .task { await refreshStorageUsage() }
@@ -194,6 +252,20 @@ struct SettingsView: View {
             } message: {
                 Text(clearConfirmationMessage)
             }
+    }
+
+    /// 生成设置行统一的图标与文本标签，保证开关和按钮左缘一致。
+    /// - Parameters:
+    ///   - title: 设置项名称。
+    ///   - symbol: SF Symbol 名称。
+    /// - Returns: 使用固定图标宽度的标签。
+    private func settingsLabel(_ title: String, symbol: String) -> some View {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: symbol)
+                .frame(width: 24)
+                .foregroundStyle(.cyan)
         }
     }
 
@@ -284,7 +356,7 @@ struct SettingsView: View {
         }
     }
 
-    /// 检查无需网关的哔哩哔哩、爱奇艺与腾讯视频来源是否可访问。
+    /// 检查无需网关的哔哩哔哩、爱奇艺、腾讯视频与巴哈姆特来源是否可访问。
     private func testBuiltInSource() async {
         let bilibiliClient = settings.makeBuiltInBilibiliClient()
         let publicClient = settings.makeBuiltInPublicDanmakuClient()
@@ -301,8 +373,15 @@ struct SettingsView: View {
         }
         if let publicClient {
             let health = await publicClient.health()
-            statuses.append("爱奇艺\(health[.iqiyi] == true ? "可用" : "失败")")
-            statuses.append("腾讯视频\(health[.qq] == true ? "可用" : "失败")")
+            if settings.builtInIqiyiEnabled {
+                statuses.append("爱奇艺\(health[.iqiyi] == true ? "可用" : "失败")")
+            }
+            if settings.builtInQQEnabled {
+                statuses.append("腾讯视频\(health[.qq] == true ? "可用" : "失败")")
+            }
+            if settings.builtInBahamutEnabled {
+                statuses.append("巴哈姆特\(health[.bahamut] == true ? "可用" : "失败")")
+            }
         }
         let elapsed = Int(Date().timeIntervalSince(startedAt) * 1_000)
         builtInSourceResult = "\(statuses.joined(separator: " · ")) · \(elapsed)ms"

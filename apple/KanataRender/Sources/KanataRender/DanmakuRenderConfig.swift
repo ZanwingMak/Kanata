@@ -42,26 +42,26 @@ public struct DanmakuRenderConfig: Sendable, Equatable {
     /// 弹幕总开关（FR-DMK-107）
     public var enabled = true
     /// 字号缩放，0.5–2.0，对应 UI 上的 50%–200%（FR-DMK-103）
-    public var fontScale: Double = 1.0
+    public var fontScale: Double = 0.75
     /// 不透明度 0.1–1.0（FR-DMK-110）
-    public var opacity: Double = 1.0
+    public var opacity: Double = 0.94
     /// 显示区域（FR-DMK-111）
     public var displayArea: DanmakuDisplayArea = .half
     /// 滚动弹幕穿屏时长，3–15 秒（FR-DMK-112）
-    public var scrollDuration: Double = 8
+    public var scrollDuration: Double = 9
     /// 顶部/底部弹幕停留时长
     public var staticDuration: Double = 4
     /// 轨道数上限，0 表示按显示区域自动计算
     public var maxTracks = 0
     /// 轨道行距
-    public var lineSpacing: Double = 4
+    public var lineSpacing: Double = 8
     /// 自定义字体名，nil 表示系统字体（FR-DMK-113）
     public var fontName: String?
-    public var bold = true
-    /// 描边宽度，保证低对比画面下可读
-    public var strokeWidth: Double = 2.0
+    public var bold = false
+    /// 描边宽度，默认使用轻描边与柔和阴影，避免遮挡字形。
+    public var strokeWidth: Double = 0.6
     /// 同屏弹幕上限，超出按权重丢弃（FR-DMK-104）
-    public var densityLimit = 300
+    public var densityLimit = 100
     /// 合并重复弹幕并显示 ×N（FR-DMK-114）
     public var mergeDuplicates = false
     /// 允许显示的弹幕模式
@@ -77,8 +77,8 @@ public struct DanmakuRenderConfig: Sendable, Equatable {
     ///   - itemFontSize: 弹幕自带的平台字号
     ///   - viewWidth: 渲染视图宽度（点）
     func resolvedFontSize(itemFontSize: Double, viewWidth: Double) -> Double {
-        let normalizedSize = min(max(itemFontSize, 18), 42)
-        let largeScreenRatio = max(viewWidth / 1920.0, 1.0)
+        let normalizedSize = min(max(itemFontSize, 18), 36)
+        let largeScreenRatio = min(max(viewWidth / 1920.0, 1.0), 1.2)
         return normalizedSize * fontScale * largeScreenRatio
     }
 }
