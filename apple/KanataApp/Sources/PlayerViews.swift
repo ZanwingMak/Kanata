@@ -400,10 +400,10 @@ struct DanmakuSettingsPanel: View {
     private func applyReadableDanmakuStyle() {
         config.fontName = nil
         config.fontScale = 0.9
-        config.opacity = 0.98
+        config.opacity = 1
         config.lineSpacing = 7
         config.bold = false
-        config.strokeWidth = 0.9
+        config.strokeWidth = 0.6
     }
 
     /// 返回字体文件选择器允许显示的类型。

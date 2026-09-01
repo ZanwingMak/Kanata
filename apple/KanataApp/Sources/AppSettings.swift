@@ -141,14 +141,14 @@ final class AppSettings {
             config.blockRules.blockRepeated = repeated
         }
         config.blockRules.keywords = defaults.stringArray(forKey: Keys.blockKeywords) ?? []
-        let requiresVisualMigration = defaults.integer(forKey: Keys.visualStyleVersion) < 4
+        let requiresVisualMigration = defaults.integer(forKey: Keys.visualStyleVersion) < 5
         if requiresVisualMigration {
             config.fontScale = 0.9
-            config.opacity = 0.98
+            config.opacity = 1
             config.scrollDuration = 9
             config.lineSpacing = 7
             config.bold = false
-            config.strokeWidth = 0.9
+            config.strokeWidth = 0.6
             config.densityLimit = 100
         }
         self.danmakuConfig = config
@@ -158,7 +158,7 @@ final class AppSettings {
             defaults.removeObject(forKey: Keys.gatewayToken)
         }
         if requiresVisualMigration {
-            defaults.set(4, forKey: Keys.visualStyleVersion)
+            defaults.set(5, forKey: Keys.visualStyleVersion)
             persistDanmakuConfig()
         }
     }

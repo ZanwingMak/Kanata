@@ -42,7 +42,7 @@ final class TextRasterizer {
         } else if let fontName, let custom = UIFont(name: fontName, size: fontSize) {
             baseFont = custom
         } else {
-            baseFont = UIFont.systemFont(ofSize: fontSize, weight: bold ? .semibold : .regular)
+            baseFont = UIFont.systemFont(ofSize: fontSize, weight: bold ? .semibold : .medium)
         }
         let font = bold && fontName != nil
             ? UIFont(
@@ -54,26 +54,34 @@ final class TextRasterizer {
         // NSAttributedString 的描边值是字号百分比，先把视觉点数换算为百分比。
         let strokePercent = fontSize > 0 ? strokeWidth / fontSize * 100 : 0
         let foregroundColor = Self.readableColor(from: color)
-        let shadow = NSShadow()
-        shadow.shadowColor = UIColor.black.withAlphaComponent(0.52)
-        shadow.shadowOffset = CGSize(width: 0, height: max(0.5, fontSize * 0.035))
-        shadow.shadowBlurRadius = max(0.8, fontSize * 0.045)
-        let attributes: [NSAttributedString.Key: Any] = [
+        let fillAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: foregroundColor,
-            .strokeColor: Self.outlineColor(for: foregroundColor),
-            .strokeWidth: -strokePercent,
-            .shadow: shadow,
         ]
-        let attributed = NSAttributedString(string: text, attributes: attributes)
-        let size = attributed.size()
+        let fillText = NSAttributedString(string: text, attributes: fillAttributes)
+        let size = fillText.size()
         // 留出描边溢出的边距
         let inset = CGFloat(strokeWidth) + max(4, CGFloat(fontSize) * 0.10)
         let canvasSize = CGSize(width: ceil(size.width) + inset * 2, height: ceil(size.height) + inset * 2)
 
         let renderer = UIGraphicsImageRenderer(size: canvasSize)
         let image = renderer.image { _ in
-            attributed.draw(at: CGPoint(x: inset, y: inset))
+            let origin = CGPoint(x: inset, y: inset)
+            if strokePercent > 0 {
+                let shadow = NSShadow()
+                shadow.shadowColor = UIColor.black.withAlphaComponent(0.72)
+                shadow.shadowOffset = CGSize(width: 0, height: max(0.5, fontSize * 0.03))
+                shadow.shadowBlurRadius = max(0.6, fontSize * 0.035)
+                let outlineText = NSAttributedString(string: text, attributes: [
+                    .font: font,
+                    .strokeColor: Self.outlineColor(for: foregroundColor),
+                    .strokeWidth: strokePercent,
+                    .shadow: shadow,
+                ])
+                outlineText.draw(at: origin)
+            }
+            // 单独覆盖实色字面，避免描边在 Retina 缩放后侵蚀填充而形成空心字。
+            fillText.draw(at: origin)
         }
         cache.setObject(image, forKey: key)
         return image
@@ -94,18 +102,24 @@ final class TextRasterizer {
         )
     }
 
-    /// 把接近黑色的平台弹幕提升为白色，避免在暗色画面中完全不可读。
+    /// 把灰阶文字统一提升为白色，并提高彩色弹幕亮度以适配复杂画面。
     /// - Parameter value: RGB 十进制颜色。
     /// - Returns: 保留彩色意图且满足基础可读性的前景色。
     private static func readableColor(from value: Int) -> UIColor {
         let color = uiColor(from: value)
-        var red: CGFloat = 0
-        var green: CGFloat = 0
-        var blue: CGFloat = 0
-        color.getRed(&red, green: &green, blue: &blue, alpha: nil)
-        let luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722
-        guard luminance >= 0.34 else { return .white }
-        return color
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        guard color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: nil),
+              saturation >= 0.16 else {
+            return .white
+        }
+        return UIColor(
+            hue: hue,
+            saturation: min(saturation, 0.84),
+            brightness: max(brightness, 0.94),
+            alpha: 1
+        )
     }
 
     /// 使用统一深色细描边，避免彩色文字产生发白的双边缘。
@@ -113,7 +127,7 @@ final class TextRasterizer {
     /// - Returns: 与文字形成对比、但不过度抢眼的描边颜色。
     private static func outlineColor(for color: UIColor) -> UIColor {
         _ = color
-        return UIColor.black.withAlphaComponent(0.92)
+        return UIColor.black.withAlphaComponent(0.94)
     }
 }
 #endif

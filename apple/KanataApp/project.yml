@@ -30,7 +30,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Sources/Kanata.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "7"
+        CURRENT_PROJECT_VERSION: "8"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
@@ -75,7 +75,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Sources/Kanata.entitlements
         PRODUCT_NAME: Kanata
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "7"
+        CURRENT_PROJECT_VERSION: "8"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "3"
         GENERATE_INFOPLIST_FILE: YES

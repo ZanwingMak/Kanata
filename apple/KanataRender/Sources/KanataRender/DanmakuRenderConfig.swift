@@ -44,7 +44,7 @@ public struct DanmakuRenderConfig: Codable, Sendable, Equatable {
     /// 字号缩放，0.5–2.0，对应 UI 上的 50%–200%（FR-DMK-103）
     public var fontScale: Double = 0.9
     /// 不透明度 0.1–1.0（FR-DMK-110）
-    public var opacity: Double = 0.98
+    public var opacity: Double = 1
     /// 显示区域（FR-DMK-111）
     public var displayArea: DanmakuDisplayArea = .half
     /// 滚动弹幕穿屏时长，3–15 秒（FR-DMK-112）
@@ -59,7 +59,7 @@ public struct DanmakuRenderConfig: Codable, Sendable, Equatable {
     public var fontName: String?
     public var bold = false
     /// 描边宽度，默认使用轻描边与柔和阴影，避免遮挡字形。
-    public var strokeWidth: Double = 0.9
+    public var strokeWidth: Double = 0.6
     /// 同屏弹幕上限，超出按权重丢弃（FR-DMK-104）
     public var densityLimit = 100
     /// 合并重复弹幕并显示 ×N（FR-DMK-114）
