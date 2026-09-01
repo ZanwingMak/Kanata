@@ -48,6 +48,21 @@ final class AppSettings {
         didSet { defaults.set(builtInBahamutEnabled, forKey: Keys.builtInBahamutEnabled) }
     }
 
+    /// 低额度弹弹play开放平台备用来源，默认关闭以避免无意消耗配额。
+    var builtInDandanplayEnabled: Bool {
+        didSet { defaults.set(builtInDandanplayEnabled, forKey: Keys.builtInDandanplayEnabled) }
+    }
+
+    /// 全局强调色主题。
+    var accentTheme: KanataAccentTheme {
+        didSet { defaults.set(accentTheme.rawValue, forKey: Keys.accentTheme) }
+    }
+
+    /// 全局浅色、深色或跟随系统外观。
+    var appearance: KanataAppearance {
+        didSet { defaults.set(appearance.rawValue, forKey: Keys.appearance) }
+    }
+
     /// 弹幕渲染配置，播放页直接读写
     var danmakuConfig: DanmakuRenderConfig {
         didSet { persistDanmakuConfig() }
@@ -84,6 +99,9 @@ final class AppSettings {
         static let builtInIqiyiEnabled = "source.iqiyi.builtInEnabled"
         static let builtInQQEnabled = "source.qq.builtInEnabled"
         static let builtInBahamutEnabled = "source.bahamut.builtInEnabled"
+        static let builtInDandanplayEnabled = "source.dandanplay.builtInEnabled"
+        static let accentTheme = KanataTheme.accentStorageKey
+        static let appearance = "appearance.mode"
     }
 
     private enum KeychainAccounts {
@@ -116,6 +134,13 @@ final class AppSettings {
         self.builtInIqiyiEnabled = defaults.object(forKey: Keys.builtInIqiyiEnabled) as? Bool ?? true
         self.builtInQQEnabled = defaults.object(forKey: Keys.builtInQQEnabled) as? Bool ?? true
         self.builtInBahamutEnabled = defaults.object(forKey: Keys.builtInBahamutEnabled) as? Bool ?? true
+        self.builtInDandanplayEnabled = defaults.object(forKey: Keys.builtInDandanplayEnabled) as? Bool ?? false
+        self.accentTheme = KanataAccentTheme(
+            rawValue: defaults.string(forKey: Keys.accentTheme) ?? ""
+        ) ?? .galaxy
+        self.appearance = KanataAppearance(
+            rawValue: defaults.string(forKey: Keys.appearance) ?? ""
+        ) ?? .system
         self.onlineDanmakuCacheLimitMB = max(
             defaults.object(forKey: Keys.onlineDanmakuCacheLimitMB) as? Int ?? 250,
             50
@@ -209,6 +234,16 @@ final class AppSettings {
         guard !enabledSources.isEmpty else { return nil }
         return BuiltInPublicDanmakuClient(enabledSources: enabledSources)
     }
+
+    /// 创建低额度弹弹play备用客户端；未启用或构建未注入密钥时返回 nil。
+    /// - Returns: 已签名的开放平台客户端。
+    func makeBuiltInDandanplayClient() -> BuiltInDandanplayClient? {
+        guard builtInDandanplayEnabled else { return nil }
+        return BuiltInDandanplayClient.configured()
+    }
+
+    /// 当前 App 构建是否已注入弹弹play开放平台凭证。
+    var hasDandanplayConfiguration: Bool { BuiltInDandanplayClient.configured() != nil }
 
     /// 组装供内置来源使用的 B 站 Cookie，请求日志不会输出该值。
     private var bilibiliCookieHeader: String {

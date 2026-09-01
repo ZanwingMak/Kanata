@@ -2,10 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>destination</key>
-    <string>upload</string>
-    <key>method</key>
-    <string>app-store-connect</string>
+	<key>destination</key>
+	<string>upload</string>
+	<key>method</key>
+	<string>app-store-connect</string>
 	<key>signingStyle</key>
 	<string>manual</string>
 	<key>signingCertificate</key>
@@ -13,11 +13,11 @@
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>com.kanata.app</key>
-		<string>Kanata iOS App Store iCloud</string>
+		<string>Kanata tvOS App Store iCloud</string>
 	</dict>
-    <key>teamID</key>
-    <string>2Q2LMV7BR6</string>
-    <key>uploadSymbols</key>
-    <true/>
+	<key>teamID</key>
+	<string>2Q2LMV7BR6</string>
+	<key>uploadSymbols</key>
+	<true/>
 </dict>
 </plist>

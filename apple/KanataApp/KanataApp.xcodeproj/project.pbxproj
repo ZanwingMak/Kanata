@@ -29,10 +29,12 @@
 		78DF13F860AEC8C9703AEEFA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 24054567603F95C0EC6A1783 /* Assets.xcassets */; };
 		7BABBAFA45A953A94D11B684 /* DanmakuFontRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79CFC3DD18A4AF488CA99D5F /* DanmakuFontRegistry.swift */; };
 		7EB919629CBF538D13744899 /* ExternalSubtitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7990DD427BBFF8B9307E4A /* ExternalSubtitle.swift */; };
+		80AED691D95143C4710F5B6B /* TVMediaSourcePairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37E55F65469822874E6BDAA9 /* TVMediaSourcePairing.swift */; };
 		82DFFADB01CE775E444537D0 /* BuiltInBilibiliClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C02FED1707E8CA51052C220 /* BuiltInBilibiliClient.swift */; };
 		8755E5218B5A5740FA3A87C6 /* KanataRender in Frameworks */ = {isa = PBXBuildFile; productRef = 2B1BA21A40301952737E6088 /* KanataRender */; };
 		88300C6DD79D579CB79B8818 /* ExternalSubtitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7990DD427BBFF8B9307E4A /* ExternalSubtitle.swift */; };
 		8AA39BD8C8C9CAA30C61A0A8 /* MediaImportPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BBCB8E243EC8485344C868B /* MediaImportPreview.swift */; };
+		93741D09D56AC852830EBAFB /* BuiltInDandanplayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13CE79511657F295E2E694BF /* BuiltInDandanplayClient.swift */; };
 		93D4CF481CFCCB1EA52DFB6F /* PlatformFileImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA68DAA542BB5DD17707BE90 /* PlatformFileImporter.swift */; };
 		94A4EB0FDAEC4E23571FDBA1 /* KanataCore in Frameworks */ = {isa = PBXBuildFile; productRef = D0F19C87A69C96ACBF02E301 /* KanataCore */; };
 		98FF09C96A14EF8F76A085F3 /* MediaSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 766BAD1CEAB78E524FD68966 /* MediaSources.swift */; };
@@ -44,10 +46,12 @@
 		B8DD7D6499400A064B2CDA19 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E24DE0179BDBA88E26F4FB /* LibraryView.swift */; };
 		C024A5EADFCE8F9980FDE6B4 /* KanataApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F54CA6B81DF75A8D593DBB /* KanataApp.swift */; };
 		C368F0EAFAB10B17EA4CDF24 /* PlayerViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20B5DDBFFBFC71CD4E8BFF5 /* PlayerViews.swift */; };
+		C64DE25E0620A54593D09415 /* BuiltInDandanplayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13CE79511657F295E2E694BF /* BuiltInDandanplayClient.swift */; };
 		CD09FFF8465288029A3884CE /* PlaybackSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B906A631FA659E4B7B13B18 /* PlaybackSupport.swift */; };
 		CE9E35E870EB0641755C63C3 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BA5EDEB5BE98DBEE96E3EB /* SettingsView.swift */; };
 		CECEC02FE7F010C0FF6E7620 /* MediaSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 766BAD1CEAB78E524FD68966 /* MediaSources.swift */; };
 		CF17866599270F7C8DF7F77D /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054C1F753EBC3CAF4CAB9C4 /* AppSettings.swift */; };
+		D09C38639BA7F5F32195471D /* TVMediaSourcePairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37E55F65469822874E6BDAA9 /* TVMediaSourcePairing.swift */; };
 		D1DCDF1163EED827FB0FDE2F /* Info-tvOS.plist in Resources */ = {isa = PBXBuildFile; fileRef = 567CC9ADFBD1B18B4B7E3814 /* Info-tvOS.plist */; };
 		D91D166FFE00DB31CD4A283F /* MediaSourceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACC6304388980E26E4AA3D45 /* MediaSourceModels.swift */; };
 		E122D03D58273169B724230B /* MediaSourceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACC6304388980E26E4AA3D45 /* MediaSourceModels.swift */; };
@@ -60,12 +64,14 @@
 
 /* Begin PBXFileReference section */
 		122A9F73DB01780311C2EC77 /* KanataTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanataTheme.swift; sourceTree = "<group>"; };
+		13CE79511657F295E2E694BF /* BuiltInDandanplayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInDandanplayClient.swift; sourceTree = "<group>"; };
 		173FF4F5A52DB62F338388FD /* BilibiliQRCodeLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilibiliQRCodeLogin.swift; sourceTree = "<group>"; };
 		1D7990DD427BBFF8B9307E4A /* ExternalSubtitle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalSubtitle.swift; sourceTree = "<group>"; };
 		2054C1F753EBC3CAF4CAB9C4 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		24054567603F95C0EC6A1783 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2BBCB8E243EC8485344C868B /* MediaImportPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaImportPreview.swift; sourceTree = "<group>"; };
 		31AACC6D69D5478A2FD742B6 /* MediaSourceClients.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaSourceClients.swift; sourceTree = "<group>"; };
+		37E55F65469822874E6BDAA9 /* TVMediaSourcePairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TVMediaSourcePairing.swift; sourceTree = "<group>"; };
 		37FE9DC3DA20A78BD65CFCCC /* KanataTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KanataTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3C02FED1707E8CA51052C220 /* BuiltInBilibiliClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInBilibiliClient.swift; sourceTree = "<group>"; };
 		42B14A0149AA61453CC026E8 /* KanataApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KanataApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -128,6 +134,7 @@
 				24054567603F95C0EC6A1783 /* Assets.xcassets */,
 				173FF4F5A52DB62F338388FD /* BilibiliQRCodeLogin.swift */,
 				3C02FED1707E8CA51052C220 /* BuiltInBilibiliClient.swift */,
+				13CE79511657F295E2E694BF /* BuiltInDandanplayClient.swift */,
 				56BDD49AC5E6D599D5BC3190 /* BuiltInPublicDanmakuClient.swift */,
 				BF3E4337E15490DC1F7797AE /* CloudSyncStore.swift */,
 				626B84D50482A74A58387E4A /* CollectionLayoutStore.swift */,
@@ -149,6 +156,7 @@
 				54F8F7451DA189DC5B2969CB /* PlayerViewModel.swift */,
 				B20B5DDBFFBFC71CD4E8BFF5 /* PlayerViews.swift */,
 				89BA5EDEB5BE98DBEE96E3EB /* SettingsView.swift */,
+				37E55F65469822874E6BDAA9 /* TVMediaSourcePairing.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -285,6 +293,7 @@
 				143668390E7F4314EA2B50DA /* AppSettings.swift in Sources */,
 				3FE50A47C914B1D1537EB984 /* BilibiliQRCodeLogin.swift in Sources */,
 				B0323D941014DCB96707E7A9 /* BuiltInBilibiliClient.swift in Sources */,
+				C64DE25E0620A54593D09415 /* BuiltInDandanplayClient.swift in Sources */,
 				0EC14871CC22CAFCEF94E4E9 /* BuiltInPublicDanmakuClient.swift in Sources */,
 				F9AE73C15E1C075B327EC27F /* CloudSyncStore.swift in Sources */,
 				B14B37997AA8D1C64BD358E4 /* CollectionLayoutStore.swift in Sources */,
@@ -303,6 +312,7 @@
 				230F4EFC9749FD9CBA7B9A66 /* PlayerViewModel.swift in Sources */,
 				9F4DDDA0BF75D781CBE70B52 /* PlayerViews.swift in Sources */,
 				CE9E35E870EB0641755C63C3 /* SettingsView.swift in Sources */,
+				80AED691D95143C4710F5B6B /* TVMediaSourcePairing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -313,6 +323,7 @@
 				CF17866599270F7C8DF7F77D /* AppSettings.swift in Sources */,
 				5CDC6BDB53B6B8514F2DCD68 /* BilibiliQRCodeLogin.swift in Sources */,
 				82DFFADB01CE775E444537D0 /* BuiltInBilibiliClient.swift in Sources */,
+				93741D09D56AC852830EBAFB /* BuiltInDandanplayClient.swift in Sources */,
 				2F9F3B91E47C002B93622DF1 /* BuiltInPublicDanmakuClient.swift in Sources */,
 				3A6B2B76EE2E0D5C562321B9 /* CloudSyncStore.swift in Sources */,
 				EBF70D90069C1610147EE404 /* CollectionLayoutStore.swift in Sources */,
@@ -331,6 +342,7 @@
 				36C08EA5757A1AD39FD2C9F3 /* PlayerViewModel.swift in Sources */,
 				C368F0EAFAB10B17EA4CDF24 /* PlayerViews.swift in Sources */,
 				B7DC3F8CB5A7004442098AC1 /* SettingsView.swift in Sources */,
+				D09C38639BA7F5F32195471D /* TVMediaSourcePairing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -345,7 +357,9 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
+				DANDANPLAY_APP_ID = "";
+				DANDANPLAY_APP_SECRET = "";
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Sources/Info-tvOS.plist";
@@ -435,7 +449,9 @@
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
+				DANDANPLAY_APP_ID = "";
+				DANDANPLAY_APP_SECRET = "";
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Sources/Info-tvOS.plist";
@@ -458,11 +474,14 @@
 		840138A6437D4B3CC429A6EC /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconAurora AppIconSunset";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
+				DANDANPLAY_APP_ID = "";
+				DANDANPLAY_APP_SECRET = "";
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
@@ -543,11 +562,14 @@
 		DE95D8FF01B11E0BBF813F67 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconAurora AppIconSunset";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
+				DANDANPLAY_APP_ID = "";
+				DANDANPLAY_APP_SECRET = "";
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;

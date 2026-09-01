@@ -90,6 +90,7 @@ final class PlayerViewModel {
     private var client: GatewayClient?
     private var builtInClient: BuiltInBilibiliClient?
     private var builtInPublicClient: BuiltInPublicDanmakuClient?
+    private var builtInDandanplayClient: BuiltInDandanplayClient?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var timeControlObservation: NSKeyValueObservation?
@@ -190,6 +191,7 @@ final class PlayerViewModel {
         client = settings.makeClient()
         builtInClient = settings.makeBuiltInBilibiliClient()
         builtInPublicClient = settings.makeBuiltInPublicDanmakuClient()
+        builtInDandanplayClient = settings.makeBuiltInDandanplayClient()
         onlineCacheLimitBytes = Int64(settings.onlineDanmakuCacheLimitMB) * 1024 * 1024
         mediaKey = url.absoluteString
         mediaInfo.source = url.isFileURL ? "本地文件" : (url.host ?? "网络视频")
@@ -257,7 +259,10 @@ final class PlayerViewModel {
         let savedCandidate = fingerprint.flatMap { DanmakuBindingStore.candidate(for: $0) }
         currentBinding = savedCandidate
 
-        guard client != nil || builtInClient != nil || builtInPublicClient != nil else {
+        guard client != nil
+                || builtInClient != nil
+                || builtInPublicClient != nil
+                || builtInDandanplayClient != nil else {
             if let fingerprint, let savedCandidate,
                await restoreCachedDanmaku(for: savedCandidate, fingerprint: fingerprint) {
                 return
@@ -270,10 +275,10 @@ final class PlayerViewModel {
 
         if let fingerprint, let savedCandidate {
             danmakuStats = "正在加载已保存的弹幕匹配…"
-            if await loadDanmaku(for: savedCandidate, persistBinding: false) {
+            if await restoreCachedDanmaku(for: savedCandidate, fingerprint: fingerprint) {
                 return
             }
-            if await restoreCachedDanmaku(for: savedCandidate, fingerprint: fingerprint) {
+            if await loadDanmaku(for: savedCandidate, persistBinding: false) {
                 return
             }
             isShowingCandidates = false
@@ -357,6 +362,13 @@ final class PlayerViewModel {
                 errors.append("爱奇艺、腾讯视频、巴哈姆特未找到匹配结果")
             }
         }
+        if let builtInDandanplayClient {
+            do {
+                append(try await builtInDandanplayClient.resolve(request))
+            } catch {
+                errors.append("弹弹play备用：\(error.localizedDescription)")
+            }
+        }
         if let client {
             do {
                 let response = try await client.resolve(request)
@@ -421,6 +433,27 @@ final class PlayerViewModel {
                     return true
                 }
                 errors.append("内置\(candidate.source.displayName)来源返回空弹幕")
+            } catch {
+                errors.append(error.localizedDescription)
+            }
+        }
+        if candidate.source == .dandanplay, let builtInDandanplayClient {
+            let startedAt = Date()
+            do {
+                let items = try await builtInDandanplayClient.danmaku(
+                    platformEpisodeID: candidate.platformEpisodeId
+                )
+                if !items.isEmpty {
+                    await applyLoadedDanmaku(
+                        items,
+                        candidate: candidate,
+                        elapsedMs: Int(Date().timeIntervalSince(startedAt) * 1_000),
+                        fallback: false,
+                        persistBinding: persistBinding
+                    )
+                    return true
+                }
+                errors.append("弹弹play备用来源返回空弹幕")
             } catch {
                 errors.append(error.localizedDescription)
             }
@@ -543,7 +576,11 @@ final class PlayerViewModel {
     /// 手动搜索并刷新候选列表
     func search(keyword: String) async {
         let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty, client != nil || builtInClient != nil || builtInPublicClient != nil else {
+        guard !query.isEmpty,
+              client != nil
+                || builtInClient != nil
+                || builtInPublicClient != nil
+                || builtInDandanplayClient != nil else {
             danmakuStats = "没有启用可用的在线弹幕来源"
             return
         }

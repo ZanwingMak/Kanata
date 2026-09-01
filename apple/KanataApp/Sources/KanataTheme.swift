@@ -1,13 +1,97 @@
 import SwiftUI
+import UIKit
+
+/// 用户可切换的 Kanata 强调色主题。
+enum KanataAccentTheme: String, CaseIterable, Identifiable {
+    case galaxy
+    case aurora
+    case sunset
+    case amethyst
+    case gold
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .galaxy: "星河蓝"
+        case .aurora: "极光绿"
+        case .sunset: "落日红"
+        case .amethyst: "紫水晶"
+        case .gold: "影院金"
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .galaxy: Color(red: 0.18, green: 0.72, blue: 0.86)
+        case .aurora: Color(red: 0.16, green: 0.78, blue: 0.61)
+        case .sunset: Color(red: 1.00, green: 0.38, blue: 0.34)
+        case .amethyst: Color(red: 0.66, green: 0.48, blue: 0.96)
+        case .gold: Color(red: 0.94, green: 0.67, blue: 0.22)
+        }
+    }
+
+    var accentStrong: Color {
+        switch self {
+        case .galaxy: Color(red: 0.08, green: 0.58, blue: 0.76)
+        case .aurora: Color(red: 0.05, green: 0.59, blue: 0.45)
+        case .sunset: Color(red: 0.82, green: 0.16, blue: 0.30)
+        case .amethyst: Color(red: 0.43, green: 0.28, blue: 0.82)
+        case .gold: Color(red: 0.72, green: 0.42, blue: 0.08)
+        }
+    }
+}
+
+/// 应用外观模式，可跟随系统或固定为浅色、深色。
+enum KanataAppearance: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: "跟随系统"
+        case .light: "浅色"
+        case .dark: "深色"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
 
 /// Kanata 的统一影院视觉令牌，集中控制背景、表面与交互色。
 enum KanataTheme {
-    static let accent = Color(red: 0.18, green: 0.72, blue: 0.86)
-    static let accentStrong = Color(red: 0.08, green: 0.58, blue: 0.76)
-    static let background = Color(red: 0.025, green: 0.035, blue: 0.065)
-    static let surface = Color.white.opacity(0.075)
-    static let elevatedSurface = Color.white.opacity(0.11)
-    static let separator = Color.white.opacity(0.10)
+    static let accentStorageKey = "appearance.accentTheme"
+
+    /// 返回 UserDefaults 中当前选择的强调色主题。
+    private static var currentAccentTheme: KanataAccentTheme {
+        let raw = UserDefaults.standard.string(forKey: accentStorageKey) ?? KanataAccentTheme.galaxy.rawValue
+        return KanataAccentTheme(rawValue: raw) ?? .galaxy
+    }
+
+    static var accent: Color { currentAccentTheme.accent }
+    static var accentStrong: Color { currentAccentTheme.accentStrong }
+    static let backgroundTop = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .light
+            ? UIColor(red: 0.87, green: 0.92, blue: 0.97, alpha: 1)
+            : UIColor(red: 0.005, green: 0.01, blue: 0.025, alpha: 1)
+    })
+    static let background = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .light
+            ? UIColor(red: 0.95, green: 0.96, blue: 0.98, alpha: 1)
+            : UIColor(red: 0.025, green: 0.035, blue: 0.065, alpha: 1)
+    })
+    static let surface = Color.primary.opacity(0.07)
+    static let elevatedSurface = Color.primary.opacity(0.11)
+    static let separator = Color.primary.opacity(0.10)
     static let success = Color(red: 0.28, green: 0.78, blue: 0.55)
     static let warning = Color(red: 0.96, green: 0.67, blue: 0.25)
 }

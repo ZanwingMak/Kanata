@@ -1,5 +1,8 @@
 import KanataCore
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// 设置页：网关配置与源状态（FR-SET-001 / FR-SET-002）
 struct SettingsView: View {
@@ -20,6 +23,11 @@ struct SettingsView: View {
     @State private var builtInSourceResult: String?
     @State private var isTestingBuiltInSource = false
     @State private var isShowingBilibiliQRCode = false
+    #if os(iOS)
+    @State private var selectedIconName: String?
+    @State private var iconResult: String?
+    @State private var isChangingIcon = false
+    #endif
 
     /// 创建设置界面；Apple TV 可沿用媒体库导航栈作为独立页面。
     /// - Parameter usesParentNavigation: 是否由外层 NavigationStack 提供返回操作。
@@ -63,10 +71,81 @@ struct SettingsView: View {
         @Bindable var settings = settings
         @Bindable var cloudSync = cloudSync
         return Form {
+                Section("外观与个性化") {
+                    Picker("主题色", selection: $settings.accentTheme) {
+                        ForEach(KanataAccentTheme.allCases) { theme in
+                            Label {
+                                Text(theme.title)
+                            } icon: {
+                                Circle().fill(theme.accent)
+                            }
+                            .tag(theme)
+                        }
+                    }
+                    Picker("界面外观", selection: $settings.appearance) {
+                        ForEach(KanataAppearance.allCases) { appearance in
+                            Text(appearance.title).tag(appearance)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    #if os(iOS)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("应用图标")
+                            .font(.subheadline.weight(.semibold))
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 14) {
+                                ForEach(KanataAppIconChoice.all) { choice in
+                                    Button {
+                                        applyAppIcon(choice)
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            Image(choice.previewName)
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 62, height: 62)
+                                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                                .overlay {
+                                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                        .stroke(
+                                                            selectedIconName == choice.alternateName
+                                                                ? settings.accentTheme.accent
+                                                                : Color.clear,
+                                                            lineWidth: 3
+                                                        )
+                                                }
+                                            Text(choice.title)
+                                                .font(.caption)
+                                                .foregroundStyle(.primary)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(isChangingIcon)
+                                }
+                            }
+                        }
+                        .scrollIndicators(.hidden)
+                    }
+                    if let iconResult {
+                        Text(iconResult)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    #endif
+                }
+
                 Section("开箱即用弹幕") {
                     Toggle(isOn: $settings.builtInBilibiliEnabled) {
                         settingsLabel("哔哩哔哩", symbol: "play.rectangle.on.rectangle")
                     }
+                    Toggle(isOn: $settings.builtInDandanplayEnabled) {
+                        settingsLabel("弹弹play低额度备用", symbol: "shield.lefthalf.filled")
+                    }
+                    .disabled(!settings.hasDandanplayConfiguration)
+                    Text(settings.hasDandanplayConfiguration
+                        ? "当前构建已安全注入开放平台凭证。默认关闭，仅在需要时启用，以减少每日额度消耗。"
+                        : "当前构建未注入开放平台凭证；密钥不会写入仓库。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Toggle(isOn: $settings.builtInPublicSourcesEnabled) {
                         settingsLabel("公共平台来源", symbol: "network")
                     }
@@ -97,6 +176,7 @@ struct SettingsView: View {
                     .disabled(
                         (
                             !settings.builtInBilibiliEnabled
+                            && !settings.builtInDandanplayEnabled
                             && (!settings.builtInPublicSourcesEnabled
                                 || (!settings.builtInIqiyiEnabled
                                     && !settings.builtInQQEnabled
@@ -251,6 +331,9 @@ struct SettingsView: View {
                 }
             }
             .task { await refreshStorageUsage() }
+            #if os(iOS)
+            .onAppear { selectedIconName = UIApplication.shared.alternateIconName }
+            #endif
             .onChange(of: settings.onlineDanmakuCacheLimitMB) { _, newValue in
                 Task { await applyCacheLimit(newValue) }
             }
@@ -296,6 +379,28 @@ struct SettingsView: View {
                 .foregroundStyle(KanataTheme.accent)
         }
     }
+
+    #if os(iOS)
+    /// 调用系统接口切换 App 图标，并在设置页同步展示结果。
+    /// - Parameter choice: 用户选择的主图标或备用图标。
+    private func applyAppIcon(_ choice: KanataAppIconChoice) {
+        guard UIApplication.shared.supportsAlternateIcons,
+              selectedIconName != choice.alternateName,
+              !isChangingIcon else { return }
+        isChangingIcon = true
+        UIApplication.shared.setAlternateIconName(choice.alternateName) { error in
+            Task { @MainActor in
+                isChangingIcon = false
+                if let error {
+                    iconResult = "图标切换失败：\(error.localizedDescription)"
+                } else {
+                    selectedIconName = choice.alternateName
+                    iconResult = "已切换为“\(choice.title)”图标"
+                }
+            }
+        }
+    }
+    #endif
 
     /// 构建弹幕缓存与导入文件的存储管理分区。
     private var storageSection: some View {
@@ -384,11 +489,12 @@ struct SettingsView: View {
         }
     }
 
-    /// 检查无需网关的哔哩哔哩、爱奇艺、腾讯视频与巴哈姆特来源是否可访问。
+    /// 检查无需网关的弹幕来源是否可访问；弹弹play只在用户启用时消耗一次搜索额度。
     private func testBuiltInSource() async {
         let bilibiliClient = settings.makeBuiltInBilibiliClient()
         let publicClient = settings.makeBuiltInPublicDanmakuClient()
-        guard bilibiliClient != nil || publicClient != nil else {
+        let dandanplayClient = settings.makeBuiltInDandanplayClient()
+        guard bilibiliClient != nil || publicClient != nil || dandanplayClient != nil else {
             builtInSourceResult = "内置来源已关闭"
             return
         }
@@ -398,6 +504,9 @@ struct SettingsView: View {
         var statuses: [String] = []
         if let bilibiliClient {
             statuses.append("哔哩哔哩\(await bilibiliClient.health() ? "可用" : "失败")")
+        }
+        if let dandanplayClient {
+            statuses.append("弹弹play\(await dandanplayClient.health() ? "可用" : "失败")")
         }
         if let publicClient {
             let health = await publicClient.health()
@@ -516,3 +625,32 @@ struct SettingsView: View {
         }
     }
 }
+
+#if os(iOS)
+/// 设置页可选择的系统 App 图标；nil 表示主图标。
+private struct KanataAppIconChoice: Identifiable {
+    let alternateName: String?
+    let previewName: String
+    let title: String
+
+    var id: String { alternateName ?? "AppIcon" }
+
+    static let all = [
+        KanataAppIconChoice(
+            alternateName: nil,
+            previewName: "AppIconPreviewDefault",
+            title: "星河"
+        ),
+        KanataAppIconChoice(
+            alternateName: "AppIconAurora",
+            previewName: "AppIconPreviewAurora",
+            title: "极光"
+        ),
+        KanataAppIconChoice(
+            alternateName: "AppIconSunset",
+            previewName: "AppIconPreviewSunset",
+            title: "落日"
+        ),
+    ]
+}
+#endif

@@ -15,7 +15,8 @@ struct KanataApp: App {
             LibraryView()
                 .environment(settings)
                 .environment(cloudSync)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(settings.appearance.colorScheme)
+                .tint(settings.accentTheme.accent)
                 .task { cloudSync.configure(settings: settings) }
         }
     }

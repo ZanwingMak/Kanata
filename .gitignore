@@ -5,6 +5,8 @@ dist/
 build/
 .env
 .env.local
+Secrets.xcconfig
+*.xcconfig.local
 xcuserdata/
 *.xcworkspace/xcuserdata/
 DerivedData/

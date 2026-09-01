@@ -29,8 +29,11 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Sources/Kanata.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconAurora AppIconSunset"
+        DANDANPLAY_APP_ID: ""
+        DANDANPLAY_APP_SECRET: ""
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "8"
+        CURRENT_PROJECT_VERSION: "9"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
@@ -50,6 +53,25 @@ targets:
       path: Sources/Info.plist
       properties:
         ITSAppUsesNonExemptEncryption: false
+        DandanplayAppId: $(DANDANPLAY_APP_ID)
+        DandanplayAppSecret: $(DANDANPLAY_APP_SECRET)
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconName: AppIcon
+            CFBundleIconFiles:
+              - AppIcon
+            UIPrerenderedIcon: false
+          CFBundleAlternateIcons:
+            AppIconAurora:
+              CFBundleIconName: AppIconAurora
+              CFBundleIconFiles:
+                - AppIconAurora
+              UIPrerenderedIcon: false
+            AppIconSunset:
+              CFBundleIconName: AppIconSunset
+              CFBundleIconFiles:
+                - AppIconSunset
+              UIPrerenderedIcon: false
         # 允许连接局域网内以 HTTP 部署的自托管网关
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -74,8 +96,10 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Sources/Kanata.entitlements
         PRODUCT_NAME: Kanata
+        DANDANPLAY_APP_ID: ""
+        DANDANPLAY_APP_SECRET: ""
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "8"
+        CURRENT_PROJECT_VERSION: "9"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "3"
         GENERATE_INFOPLIST_FILE: YES
@@ -90,6 +114,8 @@ targets:
       path: Sources/Info-tvOS.plist
       properties:
         ITSAppUsesNonExemptEncryption: false
+        DandanplayAppId: $(DANDANPLAY_APP_ID)
+        DandanplayAppSecret: $(DANDANPLAY_APP_SECRET)
         TVTopShelfImage:
           TVTopShelfPrimaryImage: Top Shelf Image
           TVTopShelfPrimaryImageWide: Top Shelf Image Wide

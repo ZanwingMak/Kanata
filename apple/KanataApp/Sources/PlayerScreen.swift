@@ -120,6 +120,7 @@ struct PlayerScreen: View {
     @State private var isPlaying = false
     @State private var currentTime: Double = 0
     @State private var isSeeking = false
+    @State private var pendingSeekTarget: Double?
     @State private var isImportingDanmaku = false
     @State private var isImportingSubtitle = false
     @State private var danmakuOperationError: String?
@@ -372,7 +373,7 @@ struct PlayerScreen: View {
                    currentTime >= 0.5,
                    currentTime < introEnd - 0.5 {
                     Button("跳过片头") {
-                        viewModel.seek(to: introEnd)
+                        commitSeek(to: introEnd)
                         showOSD("已跳过片头")
                     }
                     .buttonStyle(.borderedProminent)
@@ -384,7 +385,7 @@ struct PlayerScreen: View {
                         if activeIndex < items.count - 1 {
                             moveEpisode(by: 1)
                         } else {
-                            viewModel.seek(to: viewModel.duration)
+                            commitSeek(to: viewModel.duration)
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -507,11 +508,9 @@ struct PlayerScreen: View {
             .onEnded { _ in
                 let finalText = osdText
                 if gestureMode == .seek {
-                    viewModel.seek(to: currentTime)
-                    canvasBridge.sync(time: currentTime, rate: isPlaying ? viewModel.playbackRate : 0)
+                    commitSeek(to: currentTime)
                 }
                 gestureMode = nil
-                isSeeking = false
                 if let finalText { showOSD(finalText) }
                 scheduleControlsHide()
             }
@@ -575,20 +574,13 @@ struct PlayerScreen: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                #if os(iOS)
                 Button {
-                    toggleLandscapeFullscreen()
+                    viewModel.isShowingCandidates = true
                 } label: {
-                    controlSymbol(
-                        isLandscapeFullscreen
-                            ? "arrow.down.right.and.arrow.up.left"
-                            : "arrow.up.left.and.arrow.down.right",
-                        prominent: false
-                    )
+                    controlSymbol("text.magnifyingglass", prominent: false)
                 }
                 .buttonStyle(PlayerControlButtonStyle())
-                .accessibilityLabel(isLandscapeFullscreen ? "退出横屏全屏" : "横屏全屏")
-                #endif
+                .accessibilityLabel("重新匹配弹幕")
                 Button {
                     isShowingPlaybackPanel = true
                 } label: {
@@ -620,12 +612,12 @@ struct PlayerScreen: View {
                         value: $currentTime,
                         in: 0...max(viewModel.duration, 1),
                         onEditingChanged: { editing in
-                            isSeeking = editing
-                            if !editing {
-                                viewModel.seek(to: currentTime)
-                                scheduleControlsHide()
-                            } else {
+                            if editing {
+                                isSeeking = true
+                                pendingSeekTarget = nil
                                 controlsTask?.cancel()
+                            } else {
+                                commitSeek(to: currentTime)
                             }
                         }
                     )
@@ -661,7 +653,7 @@ struct PlayerScreen: View {
     private func playbackControlRow(showAllActions: Bool, compact: Bool) -> some View {
         HStack(spacing: compact ? 6 : 10) {
                     Button {
-                        viewModel.seek(to: max(currentTime - 10, 0))
+                        commitSeek(to: currentTime - 10)
                         showOSD("后退 10 秒")
                     } label: {
                         controlSymbol("gobackward.10", prominent: false, compact: compact)
@@ -686,7 +678,7 @@ struct PlayerScreen: View {
                     .buttonStyle(PlayerControlButtonStyle())
                     .accessibilityLabel(isPlaying ? "暂停" : "播放")
                     Button {
-                        viewModel.seek(to: min(currentTime + 10, viewModel.duration))
+                        commitSeek(to: currentTime + 10)
                         showOSD("前进 10 秒")
                     } label: {
                         controlSymbol("goforward.10", prominent: false, compact: compact)
@@ -734,6 +726,21 @@ struct PlayerScreen: View {
                     }
                     .buttonStyle(PlayerControlButtonStyle())
                     .accessibilityLabel("弹幕设置")
+                    #if os(iOS)
+                    Button {
+                        toggleLandscapeFullscreen()
+                    } label: {
+                        controlSymbol(
+                            isLandscapeFullscreen
+                                ? "arrow.down.right.and.arrow.up.left"
+                                : "arrow.up.left.and.arrow.down.right",
+                            prominent: false,
+                            compact: compact
+                        )
+                    }
+                    .buttonStyle(PlayerControlButtonStyle())
+                    .accessibilityLabel(isLandscapeFullscreen ? "退出横屏全屏" : "横屏全屏")
+                    #endif
                     if showAllActions {
                         Button {
                             viewModel.isShowingCandidates = true
@@ -795,6 +802,10 @@ struct PlayerScreen: View {
             bridge.load(items: items)
         }
         viewModel.onTimeChanged = { time, rate in
+            if let target = pendingSeekTarget {
+                guard abs(time - target) <= 0.75 else { return }
+                pendingSeekTarget = nil
+            }
             if !isSeeking { currentTime = time }
             bridge.sync(time: time, rate: rate)
         }
@@ -863,6 +874,8 @@ struct PlayerScreen: View {
         externalSubtitleOffset = 0
         skipSegment = PlaybackSkipSegmentStore.segment(for: skipSegmentKey)
         currentTime = 0
+        pendingSeekTarget = nil
+        isSeeking = false
         isPlaying = false
         guard let url = activeItem.resolveURL() else {
             danmakuOperationError = "无法访问 \(activeItem.displayName)，请重新连接媒体源"
@@ -985,6 +998,19 @@ struct PlayerScreen: View {
             viewModel.play()
         }
         isPlaying.toggle()
+        scheduleControlsHide()
+    }
+
+    /// 提交一次进度跳转，并在播放器确认目标时间前屏蔽旧周期回调。
+    /// - Parameter time: 用户期望跳转到的播放秒数。
+    private func commitSeek(to time: Double) {
+        let upperBound = max(viewModel.duration, 0)
+        let target = min(max(time, 0), upperBound)
+        currentTime = target
+        pendingSeekTarget = target
+        isSeeking = false
+        viewModel.seek(to: target)
+        canvasBridge.sync(time: target, rate: isPlaying ? viewModel.playbackRate : 0)
         scheduleControlsHide()
     }
 

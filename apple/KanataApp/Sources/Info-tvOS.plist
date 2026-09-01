@@ -18,6 +18,10 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>DandanplayAppId</key>
+	<string>$(DANDANPLAY_APP_ID)</string>
+	<key>DandanplayAppSecret</key>
+	<string>$(DANDANPLAY_APP_SECRET)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>

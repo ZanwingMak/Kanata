@@ -85,6 +85,19 @@ struct MediaSourceSheet: View {
     /// 构建可由弹窗或独立导航页面共同复用的媒体源列表。
     private var content: some View {
         List {
+                #if os(tvOS)
+                Section("手机辅助配置") {
+                    NavigationLink {
+                        TVMediaSourcePairingView(onSaved: reloadProfiles)
+                    } label: {
+                        sourceLabel(
+                            "扫码在手机上配置",
+                            detail: "同一 Wi‑Fi 下用手机浏览器填写地址、账号与密码",
+                            symbol: "qrcode.viewfinder"
+                        )
+                    }
+                }
+                #endif
                 if !profiles.isEmpty {
                     Section("最近使用") {
                         ForEach(profiles) { profile in
@@ -340,7 +353,10 @@ private struct MediaSourceConnectionView: View {
     let onSaved: (MediaSourceProfile) -> Void
     let onAdd: ([LibraryItem]) -> Void
     @State private var name = ""
-    @State private var server = ""
+    @State private var serverScheme = "http"
+    @State private var serverHost = ""
+    @State private var serverPort = ""
+    @State private var serverPath = ""
     @State private var rootPath = "/"
     @State private var username = ""
     @State private var password = ""
@@ -379,14 +395,17 @@ private struct MediaSourceConnectionView: View {
         .kanataInlineNavigationTitle()
         .onAppear { restoreDraft() }
         .onChange(of: name) { _, _ in saveDraft() }
-        .onChange(of: server) { _, _ in saveDraft() }
+        .onChange(of: serverScheme) { _, _ in saveDraft() }
+        .onChange(of: serverHost) { _, _ in saveDraft() }
+        .onChange(of: serverPort) { _, _ in saveDraft() }
+        .onChange(of: serverPath) { _, _ in saveDraft() }
         .onChange(of: rootPath) { _, _ in saveDraft() }
         .onChange(of: username) { _, _ in saveDraft() }
         .sheet(isPresented: $isShowingPlexAuthorization) {
             PlexAuthorizationView { connection in
                 let currentName = name.trimmingCharacters(in: .whitespacesAndNewlines)
                 name = currentName.isEmpty ? connection.serverName : currentName
-                server = connection.serverURL.absoluteString
+                applyServerURL(connection.serverURL)
                 plexToken = connection.token
                 isShowingPlexAuthorization = false
                 Task { await connect() }
@@ -414,17 +433,55 @@ private struct MediaSourceConnectionView: View {
             }
 
             if kind != .plex || plexLoginMode == .token {
-                Section("服务器") {
-                    TextField("频道名称（可选）", text: $name)
-                    TextField(kind.defaultPortHint, text: $server)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                    if kind == .webDAV {
-                        TextField("起始路径，例如 /Movies", text: $rootPath)
+                Section("服务器地址") {
+                    LabeledContent("显示名称") {
+                        TextField("例如：客厅 NAS", text: $name)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Picker("协议", selection: $serverScheme) {
+                        Text("HTTP").tag("http")
+                        Text("HTTPS").tag("https")
+                    }
+                    .pickerStyle(.segmented)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("域名或 IP 地址")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("例如 nas.local 或 192.168.1.20", text: $serverHost)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .keyboardType(.URL)
                     }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("端口")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField(defaultPort, text: $serverPort)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.numberPad)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("基础路径（可选）")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("例如 /jellyfin", text: $serverPath)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    }
+                    if kind == .webDAV {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("媒体起始目录")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            TextField("例如 /Movies", text: $rootPath)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        }
+                    }
+                    Text("将连接到：\(serverPreview)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -468,7 +525,7 @@ private struct MediaSourceConnectionView: View {
                         }
                     }
                     .buttonStyle(KanataPrimaryButtonStyle())
-                    .disabled(server.isEmpty || isLoading || (kind == .plex && plexToken.isEmpty))
+                    .disabled(serverHost.isEmpty || isLoading || (kind == .plex && plexToken.isEmpty))
                 }
             }
             if let errorMessage {
@@ -530,10 +587,15 @@ private struct MediaSourceConnectionView: View {
 
     /// 恢复当前媒体源未完成的非敏感表单字段。
     private func restoreDraft() {
-        guard profile == nil, name.isEmpty, server.isEmpty, username.isEmpty else { return }
+        guard profile == nil, name.isEmpty, serverHost.isEmpty, username.isEmpty else { return }
         let draft = MediaSourceDraftStore.load(for: kind)
         name = draft.name
-        server = draft.server
+        if let url = URL(string: draft.server), url.host != nil {
+            applyServerURL(url)
+        } else {
+            serverScheme = kind == .synology ? "https" : "http"
+            serverPort = defaultPort
+        }
         rootPath = draft.rootPath
         username = draft.username
     }
@@ -544,7 +606,7 @@ private struct MediaSourceConnectionView: View {
         MediaSourceDraftStore.save(
             MediaSourceConnectionDraft(
                 name: name,
-                server: server,
+                server: serverPreview,
                 rootPath: rootPath,
                 username: username
             ),
@@ -555,14 +617,44 @@ private struct MediaSourceConnectionView: View {
     /// 规范化用户输入的服务器根地址。
     /// - Returns: 合法 HTTP(S) URL，非法时返回 nil。
     private func normalizedServerURL() -> URL? {
-        let raw = server.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = raw.count > 1
-            ? raw.replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression)
-            : raw
-        guard let url = URL(string: normalized), ["http", "https"].contains(url.scheme?.lowercased()) else {
-            return nil
-        }
+        var components = URLComponents()
+        components.scheme = serverScheme
+        components.host = serverHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        components.port = Int(serverPort.trimmingCharacters(in: .whitespacesAndNewlines))
+        let path = serverPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        components.path = path.isEmpty ? "" : (path.hasPrefix("/") ? path : "/\(path)")
+        guard let url = components.url,
+              components.host?.isEmpty == false,
+              ["http", "https"].contains(url.scheme?.lowercased()) else { return nil }
         return url
+    }
+
+    /// 把自动发现或历史记录中的完整 URL 拆回结构化表单字段。
+    /// - Parameter url: 已验证的服务器地址。
+    private func applyServerURL(_ url: URL) {
+        serverScheme = url.scheme?.lowercased() == "https" ? "https" : "http"
+        serverHost = url.host ?? ""
+        serverPort = url.port.map(String.init) ?? ""
+        serverPath = url.path == "/" ? "" : url.path
+    }
+
+    /// 返回当前媒体源的常用端口，作为明确的输入提示与初始值。
+    private var defaultPort: String {
+        switch kind {
+        case .webDAV: "5005"
+        case .jellyfin, .emby: "8096"
+        case .plex: "32400"
+        case .synology: "5001"
+        }
+    }
+
+    /// 返回结构化服务器字段合成后的只读预览地址。
+    private var serverPreview: String {
+        var value = "\(serverScheme)://\(serverHost.isEmpty ? "服务器地址" : serverHost)"
+        if !serverPort.isEmpty { value += ":\(serverPort)" }
+        let path = serverPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !path.isEmpty { value += path.hasPrefix("/") ? path : "/\(path)" }
+        return value
     }
 
     /// 把 WebDAV 起始路径拼接到服务器根地址。
@@ -785,26 +877,61 @@ private struct WebDAVChannelView: View {
 
     var body: some View {
         List {
+            Section("当前位置") {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label(directoryStack.last?.name ?? profile.name, systemImage: "folder")
+                        .font(.headline)
+                    Text(directoryStack.map(\.name).joined(separator: " / "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Button {
+                    addCurrentDirectory()
+                } label: {
+                    Label("选择整个当前目录", systemImage: "rectangle.stack.badge.plus")
+                }
+                .buttonStyle(KanataSecondaryButtonStyle())
+                .disabled(entries.isEmpty || isLoading)
+            }
             if isLoading { ProgressView("正在读取目录…") }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
-            ForEach(entries) { entry in
-                HStack(spacing: 12) {
-                    Button {
-                        Task { await select(entry) }
-                    } label: {
-                        Label(entry.name, systemImage: entry.isDirectory ? "folder.fill" : "play.rectangle")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
-                    if entry.isDirectory {
+            Section("目录内容") {
+                ForEach(entries) { entry in
+                    HStack(spacing: 8) {
                         Button {
-                            Task { await addDirectory(url: entry.url, title: entry.name) }
+                            Task { await select(entry) }
                         } label: {
-                            Image(systemName: "rectangle.stack.badge.plus")
-                                .frame(width: 44, height: 44)
+                            HStack(spacing: 12) {
+                                Image(systemName: entry.isDirectory ? "folder.fill" : "play.rectangle")
+                                    .foregroundStyle(entry.isDirectory ? KanataTheme.accent : .secondary)
+                                    .frame(width: 28)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(entry.name)
+                                        .lineLimit(2)
+                                    Text(entry.isDirectory ? "打开文件夹" : "选择单个视频")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 4)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("把 \(entry.name) 添加为合集")
+                        if entry.isDirectory {
+                            Button {
+                                Task { await addDirectory(url: entry.url, title: entry.name) }
+                            } label: {
+                                Image(systemName: "rectangle.stack.badge.plus")
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("把 \(entry.name) 添加为合集")
+                        }
                     }
                 }
             }
@@ -814,12 +941,6 @@ private struct WebDAVChannelView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    addCurrentDirectory()
-                } label: {
-                    Label("添加当前目录", systemImage: "rectangle.stack.badge.plus")
-                }
-                .disabled(entries.isEmpty || isLoading)
                 if directoryStack.count > 1 {
                     Button("上一级") { Task { await goBack() } }
                 }
@@ -1056,13 +1177,28 @@ private struct MediaServerChannelView: View {
 
     var body: some View {
         List {
-            Section {
+            Section("浏览方式") {
                 Picker("分类", selection: $filter) {
                     ForEach(MediaChannelFilter.allCases) { value in
                         Text(value.title).tag(value)
                     }
                 }
                 .pickerStyle(.segmented)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(stack.last?.name ?? profile.name, systemImage: "folder")
+                        .font(.headline)
+                    Text(stack.map(\.name).joined(separator: " / "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Button {
+                    Task { await addCurrentDirectory() }
+                } label: {
+                    Label("选择当前内容", systemImage: "rectangle.stack.badge.plus")
+                }
+                .buttonStyle(KanataSecondaryButtonStyle())
+                .disabled(entries.isEmpty || isLoading)
             }
             if isLoading { ProgressView("正在读取 \(profile.kind.title)…") }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
@@ -1088,6 +1224,8 @@ private struct MediaServerChannelView: View {
                                 Spacer()
                             }
                         }
+                        .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+                        .contentShape(Rectangle())
                         .buttonStyle(.plain)
                         if entry.isDirectory {
                             Button {
@@ -1109,12 +1247,6 @@ private struct MediaServerChannelView: View {
         .searchable(text: $searchText, prompt: "搜索当前频道")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    Task { await addCurrentDirectory() }
-                } label: {
-                    Label("添加当前内容", systemImage: "rectangle.stack.badge.plus")
-                }
-                .disabled(entries.isEmpty)
                 if stack.count > 1 {
                     Button("上一级") { Task { await goBack() } }
                 }

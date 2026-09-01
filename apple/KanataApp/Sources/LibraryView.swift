@@ -62,6 +62,7 @@ struct LibraryView: View {
     @State private var selectedCollectionID: String?
     @State private var libraryNotice: String?
     @State private var pendingLocalImport: MediaImportDraft?
+    @State private var recentScrollRequest = 0
 
     #if os(tvOS)
     private let columns = [GridItem(.adaptive(minimum: 300, maximum: 480), spacing: 36)]
@@ -116,6 +117,15 @@ struct LibraryView: View {
         items.filter { favoriteIDs.contains($0.id) }
     }
 
+    /// 返回最近加入媒体库的条目，方便从大批导入结果中立即找到新内容。
+    private var recentlyAddedItems: [LibraryItem] {
+        items
+            .filter { $0.addedAt != nil }
+            .sorted { ($0.addedAt ?? .distantPast) > ($1.addedAt ?? .distantPast) }
+            .prefix(12)
+            .map { $0 }
+    }
+
     /// 把媒体库中带合集标识的条目聚合为剧集卡片。
     private var mediaCollections: [MediaCollection] {
         _ = progressRevision
@@ -151,7 +161,7 @@ struct LibraryView: View {
         NavigationStack {
             ZStack {
                 LinearGradient(
-                    colors: [Color.black, KanataTheme.background],
+                    colors: [KanataTheme.backgroundTop, KanataTheme.background],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -175,38 +185,53 @@ struct LibraryView: View {
                             .buttonStyle(.bordered)
                     }
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 18) {
-                            if !mediaSources.isEmpty {
-                                sourceChannels
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 18) {
+                                if !mediaSources.isEmpty {
+                                    sourceChannels
+                                }
+                                if !recentlyAddedItems.isEmpty && searchText.isEmpty {
+                                    recentlyAddedSection
+                                        .id("recently-added")
+                                }
+                                if !continueWatchingItems.isEmpty {
+                                    continueWatchingSection
+                                }
+                                if !favoriteItems.isEmpty && searchText.isEmpty {
+                                    favoritesSection
+                                }
+                                if !mediaCollections.isEmpty && searchText.isEmpty {
+                                    collectionSection
+                                }
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(searchText.isEmpty && filterMode != .collection ? "单个视频" : "视频项目")
+                                        .font(.title2.bold())
+                                    Spacer()
+                                    Text("\(filteredItems.count) 个项目")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+                                    ForEach(filteredItems) { item in
+                                        mediaCard(item)
+                                    }
+                                }
                             }
-                            if !continueWatchingItems.isEmpty {
-                                continueWatchingSection
-                            }
-                            if !favoriteItems.isEmpty && searchText.isEmpty {
-                                favoritesSection
-                            }
-                            if !mediaCollections.isEmpty && searchText.isEmpty {
-                                collectionSection
-                            }
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(searchText.isEmpty && filterMode != .collection ? "单个视频" : "视频项目")
-                                    .font(.title2.bold())
-                                Spacer()
-                                Text("\(filteredItems.count) 个项目")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
-                                ForEach(filteredItems) { item in
-                                    mediaCard(item)
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 32)
+                        }
+                        .scrollIndicators(.hidden)
+                        .onChange(of: recentScrollRequest) { _, value in
+                            guard value > 0 else { return }
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(250))
+                                withAnimation(.easeInOut(duration: 0.28)) {
+                                    proxy.scrollTo("recently-added", anchor: .top)
                                 }
                             }
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 32)
                     }
-                    .scrollIndicators(.hidden)
                 }
             }
             .navigationTitle("媒体库")
@@ -409,6 +434,29 @@ struct LibraryView: View {
         }
     }
 
+    /// 首页最近添加横向栏目，新增目录或文件后会自动滚动到这里。
+    private var recentlyAddedSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("最近添加")
+                    .font(.title2.bold())
+                Spacer()
+                Text("最新 \(recentlyAddedItems.count) 项")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(recentlyAddedItems) { item in
+                        mediaCard(item, showsHistoryContext: true)
+                            .frame(width: 260)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
     /// 首页收藏横向列表，避免常看的单集或电影被大媒体库淹没。
     private var favoritesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -459,6 +507,7 @@ struct LibraryView: View {
                                 .overlay(alignment: .bottomLeading) {
                                     Text("共 \(collection.items.count) 集")
                                         .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.white)
                                         .padding(.horizontal, 9)
                                         .padding(.vertical, 5)
                                         .background(.black.opacity(0.62), in: Capsule())
@@ -476,6 +525,11 @@ struct LibraryView: View {
                             .frame(width: 250, alignment: .leading)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("从媒体库移除合集", systemImage: "trash", role: .destructive) {
+                                removeCollection(collection.id)
+                            }
+                        }
                     }
                 }
             }
@@ -557,6 +611,7 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 4)
+        .foregroundStyle(.white)
         .background(.black.opacity(0.28), in: Capsule())
     }
 
@@ -604,6 +659,7 @@ struct LibraryView: View {
                             systemImage: item.remoteURLString == nil ? "internaldrive" : "network"
                         )
                         .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
                         .background(.black.opacity(0.62), in: Capsule())
@@ -700,10 +756,11 @@ struct LibraryView: View {
             )
         }
         progressRevision += 1
+        recentScrollRequest += 1
         let collectionCount = Set(newItems.compactMap(\.collectionID)).count
         libraryNotice = collectionCount > 0
-            ? "已加入 \(collectionCount) 个合集、共 \(newItems.count) 个视频。你可以在“剧集与合集”中检查顺序后播放。"
-            : "已加入 \(newItems.count) 个视频。"
+            ? "已加入 \(collectionCount) 个合集、共 \(newItems.count) 个视频，并已定位到“最近添加”。"
+            : "已加入 \(newItems.count) 个视频，并已定位到“最近添加”。"
     }
 
     /// 从历史存储刷新首页媒体源频道。
@@ -1043,6 +1100,8 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     var collectionID: String?
     var collectionTitle: String?
     var collectionIndex: Int?
+    /// 最近添加栏目使用的时间；旧版媒体库缺少该字段时保持 nil。
+    let addedAt: Date?
     let title: String
     let season: Int?
     let episode: Int?
@@ -1072,6 +1131,7 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.collectionID = collectionID
         self.collectionTitle = collectionTitle
         self.collectionIndex = collectionIndex
+        self.addedAt = Date()
         self.title = parsed.title
         self.season = parsed.season
         self.episode = parsed.episode
@@ -1108,6 +1168,7 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.collectionID = collectionID
         self.collectionTitle = collectionTitle
         self.collectionIndex = collectionIndex
+        self.addedAt = Date()
         self.title = parsed.title
         self.season = parsed.season
         self.episode = parsed.episode

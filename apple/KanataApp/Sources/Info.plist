@@ -6,6 +6,45 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundleAlternateIcons</key>
+		<dict>
+			<key>AppIconAurora</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AppIconAurora</string>
+				</array>
+				<key>CFBundleIconName</key>
+				<string>AppIconAurora</string>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+			<key>AppIconSunset</key>
+			<dict>
+				<key>CFBundleIconFiles</key>
+				<array>
+					<string>AppIconSunset</string>
+				</array>
+				<key>CFBundleIconName</key>
+				<string>AppIconSunset</string>
+				<key>UIPrerenderedIcon</key>
+				<false/>
+			</dict>
+		</dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon</string>
+			</array>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+			<key>UIPrerenderedIcon</key>
+			<false/>
+		</dict>
+	</dict>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -18,6 +57,10 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>DandanplayAppId</key>
+	<string>$(DANDANPLAY_APP_ID)</string>
+	<key>DandanplayAppSecret</key>
+	<string>$(DANDANPLAY_APP_SECRET)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>
