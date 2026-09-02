@@ -186,6 +186,7 @@ final class PlayerViewModel {
         settings: AppSettings,
         requestHeaders: [String: String] = [:]
     ) async {
+        configurePlaybackAudioSession()
         resetDanmakuState()
         state = .preparing("正在读取视频…")
         client = settings.makeClient()
@@ -216,6 +217,8 @@ final class PlayerViewModel {
         let item = AVPlayerItem(asset: asset)
         let player = AVPlayer(playerItem: item)
         player.automaticallyWaitsToMinimizeStalling = true
+        player.allowsExternalPlayback = true
+        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         self.player = player
         installTimeObserver(on: player)
         installPlaybackObservers(on: player, item: item)
@@ -231,6 +234,17 @@ final class PlayerViewModel {
         }
         matchingTask = Task { [weak self] in
             await self?.matchDanmaku(url: url, displayName: displayName)
+        }
+    }
+
+    /// 激活影视播放音频会话，让静音模式、后台音频、画中画与 AirPlay 使用系统媒体路径。
+    private func configurePlaybackAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .moviePlayback, policy: .longFormAudio)
+            try session.setActive(true)
+        } catch {
+            // 音频会话失败不阻断本地播放，系统输出功能会按当前可用路由降级。
         }
     }
 

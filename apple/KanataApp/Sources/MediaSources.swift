@@ -54,6 +54,8 @@ struct MediaSourceSheet: View {
     let usesParentNavigation: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var profiles = MediaSourceProfileStore.load()
+    @State private var browsingProfile: MediaSourceProfile?
+    @State private var editingProfile: MediaSourceProfile?
     @State private var isImportingFolder = false
     @State private var importError: String?
     @State private var pendingImport: MediaImportDraft?
@@ -102,50 +104,43 @@ struct MediaSourceSheet: View {
                 if !profiles.isEmpty {
                     Section("最近使用") {
                         ForEach(profiles) { profile in
-                            HStack(spacing: 8) {
-                                NavigationLink {
-                                    MediaSourceChannelView(profile: profile, onAdd: finish)
+                            HStack(spacing: 10) {
+                                Button {
+                                    browsingProfile = profile
                                 } label: {
                                     sourceLabel(
                                         profile.name,
-                                        detail: "\(profile.kind.title) · \(profile.subtitle)",
+                                        detail: historyDetail(profile),
                                         symbol: profile.kind.symbol
                                     )
                                     .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
                                     .contentShape(Rectangle())
                                 }
+                                .buttonStyle(.plain)
                                 .kanataTVFocus(cornerRadius: 14)
-                                NavigationLink {
-                                    MediaSourceConnectionView(
-                                        kind: profile.kind,
-                                        existingProfile: profile,
-                                        onSaved: { _ in reloadProfiles() },
-                                        onAdd: finish
-                                    )
+                                Menu {
+                                    Button {
+                                        editingProfile = profile
+                                    } label: {
+                                        Label("编辑连接", systemImage: "pencil")
+                                    }
+                                    Button(role: .destructive) {
+                                        MediaSourceProfileStore.remove(profile)
+                                        reloadProfiles()
+                                    } label: {
+                                        Label("删除登录记录", systemImage: "trash")
+                                    }
                                 } label: {
-                                    Image(systemName: "pencil")
-                                        .frame(width: 44, height: 44)
-                                        .contentShape(Rectangle())
+                                    Image(systemName: "ellipsis")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 38, height: 38)
+                                        .background(KanataTheme.surface, in: Circle())
+                                        .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
-                                .kanataTVFocus(cornerRadius: 22)
-                                .accessibilityLabel("编辑 \(profile.name)")
-                            }
-                            .contextMenu {
-                                NavigationLink {
-                                    MediaSourceConnectionView(
-                                        kind: profile.kind,
-                                        existingProfile: profile,
-                                        onSaved: { _ in reloadProfiles() },
-                                        onAdd: finish
-                                    )
-                                } label: {
-                                    Label("编辑媒体源", systemImage: "pencil")
-                                }
-                                Button("删除登录记录", systemImage: "trash", role: .destructive) {
-                                    MediaSourceProfileStore.remove(profile)
-                                    reloadProfiles()
-                                }
+                                .kanataTVFocus(cornerRadius: 19)
+                                .accessibilityLabel("管理 \(profile.name)")
                             }
                         }
                     }
@@ -190,8 +185,24 @@ struct MediaSourceSheet: View {
                 }
         }
         .kanataFormBackground()
+        #if os(tvOS)
+        .listStyle(.plain)
+        #else
+        .listStyle(.insetGrouped)
+        #endif
         .navigationTitle("添加媒体源")
         .kanataInlineNavigationTitle()
+        .navigationDestination(item: $browsingProfile) { profile in
+            MediaSourceChannelView(profile: profile, onAdd: finish)
+        }
+        .navigationDestination(item: $editingProfile) { profile in
+            MediaSourceConnectionView(
+                kind: profile.kind,
+                existingProfile: profile,
+                onSaved: { _ in reloadProfiles() },
+                onAdd: finish
+            )
+        }
         .toolbar {
             if !usesParentNavigation {
                 ToolbarItem(placement: .cancellationAction) {
@@ -243,6 +254,15 @@ struct MediaSourceSheet: View {
         case .plex: "浏览电影、剧集和媒体库分区"
         case .synology: "登录 DSM，浏览 File Station 视频"
         }
+    }
+
+    /// 生成最近使用媒体源的紧凑说明，保留类型、主机与可选账号。
+    /// - Parameter profile: 已保存的媒体源。
+    /// - Returns: 不重复显示名称且适合两行列表的说明。
+    private func historyDetail(_ profile: MediaSourceProfile) -> String {
+        let host = profile.serverURL?.host ?? profile.serverURLString
+        let endpoint = profile.username.isEmpty ? host : "\(profile.username) · \(host)"
+        return "\(profile.kind.title) · \(endpoint)"
     }
 
     /// 把选中的单个视频或合集交给首页并关闭添加窗口。

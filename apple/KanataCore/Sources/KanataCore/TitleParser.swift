@@ -41,7 +41,8 @@ public enum TitleParser {
         "2160p", "1080p", "1080i", "720p", "480p", "4k", "8k", "uhd", "hdr10", "hdr", "sdr",
         "web-dl", "webdl", "webrip", "bdrip", "bluray", "blu-ray", "hdtv", "remux", "dvdrip",
         "hevc", "avc", "x264", "x265", "h264", "h265", "h.264", "h.265", "av1", "vc-1",
-        "aac", "flac", "dts", "dts-hd", "truehd", "ac3", "eac3", "opus", "10bit", "8bit", "ma10p",
+        "aac", "flac", "dts", "dts-hd", "truehd", "ac3", "eac3", "ddp", "opus", "atmos",
+        "10bit", "8bit", "hi10p", "ma10p", "dual audio", "dual-audio",
         "60fps", "30fps", "imax", "limited", "series", "korean", "japanese", "repack", "proper",
         "chs", "cht", "gb", "big5", "jptc", "简日双语", "简体", "繁体", "内嵌", "中字", "字幕",
         "tv全集", "全集", "tv版", "剧场版", "合集", "国语", "中配版", "baha", "viutv", "nf",
@@ -49,9 +50,11 @@ public enum TitleParser {
     ]
 
     /// 解析文件名
-    /// - Parameter fileName: 可带扩展名的文件名
+    /// - Parameters:
+    ///   - fileName: 可带扩展名的文件名。
+    ///   - folderNames: 从近到远的父目录名，用于补足 `Season 02/02.mkv` 这类文件。
     /// - Returns: 解析结果，标题为空时表示解析失败
-    public static func parse(_ fileName: String) -> ParsedTitle {
+    public static func parse(_ fileName: String, folderNames: [String] = []) -> ParsedTitle {
         let base = (fileName as NSString).deletingPathExtension
         let blocks = extractBlocks(from: base)
         let stripped = removeBlocks(from: base)
@@ -75,11 +78,15 @@ public enum TitleParser {
             }
         } else {
             parseBlocks(blocks, into: &result)
+            if result.episode == nil, let episode = matchPlainNumber(core) {
+                result.episode = episode
+            }
         }
 
         if result.title.isEmpty {
             result.title = cleanTitle(core.isEmpty ? base : core)
         }
+        applyFolderContext(folderNames, into: &result)
         if result.episode != nil && result.season == nil {
             result.season = 1
         }
@@ -95,35 +102,44 @@ public enum TitleParser {
         var titleCut: Int?
         func mark(_ start: Int) { titleCut = min(titleCut ?? start, start) }
 
-        // S01E02 / s01 e02
-        if let match = firstMatch(#"[Ss](\d{1,2})\s*[\.\-_ ]?\s*[Ee](\d{1,4})"#, in: working) {
+        // S01E02、S01.E02、S01E02-E03；多集文件以首集参与排序和弹幕匹配。
+        if let match = firstMatch(#"(?i)(?<![a-z0-9])s(\d{1,3})\s*[\.\-_ ]?\s*e(\d{1,4})(?:\s*[-_]?\s*(?:e|x)?\d{1,4})*"#, in: working) {
             result.season = Int(match.g1)
             result.episode = Int(match.g2)
             mark(match.start)
-            working = removeMatch(#"[Ss](\d{1,2})\s*[\.\-_ ]?\s*[Ee](\d{1,4})"#, in: working)
+            working = removeMatch(#"(?i)(?<![a-z0-9])s\d{1,3}\s*[\.\-_ ]?\s*e\d{1,4}(?:\s*[-_]?\s*(?:e|x)?\d{1,4})*"#, in: working)
         }
-        // 中文「第N季 第M集」
+        // 中文「第N季 第M集」，同时支持中文数字集号。
         if result.episode == nil,
-           let match = firstMatch(#"第\s*([一二三四五六七八九十\d]+)\s*[季期部].{0,4}?第\s*(\d{1,4})\s*[集话話回]"#, in: working) {
+           let match = firstMatch(#"第\s*([零〇一二两三四五六七八九十百千\d]+)\s*[季期部].{0,8}?第\s*([零〇一二两三四五六七八九十百千\d]+)\s*[集话話回章]"#, in: working) {
             result.season = chineseNumber(match.g1)
-            result.episode = Int(match.g2)
+            result.episode = chineseNumber(match.g2)
             mark(match.start)
-            working = removeMatch(#"第\s*([一二三四五六七八九十\d]+)\s*[季期部].{0,4}?第\s*(\d{1,4})\s*[集话話回]"#, in: working)
+            working = removeMatch(#"第\s*[零〇一二两三四五六七八九十百千\d]+\s*[季期部].{0,8}?第\s*[零〇一二两三四五六七八九十百千\d]+\s*[集话話回章]"#, in: working)
         }
-        // 1x02
+        // 1x02、1x02x03；多集文件同样取首集。
         if result.episode == nil,
-           let match = firstMatch(#"(?<![\d])(\d{1,2})[xX](\d{1,4})(?![\d])"#, in: working) {
+           let match = firstMatch(#"(?i)(?<![\d])(\d{1,3})x(\d{1,4})(?:x\d{1,4})*(?![\d])"#, in: working) {
             result.season = Int(match.g1)
             result.episode = Int(match.g2)
             mark(match.start)
-            working = removeMatch(#"(?<![\d])(\d{1,2})[xX](\d{1,4})(?![\d])"#, in: working)
+            working = removeMatch(#"(?i)(?<![\d])\d{1,3}x\d{1,4}(?:x\d{1,4})*(?![\d])"#, in: working)
+        }
+        // OVA 02、OAD02、SP03、Special 4 统一视为第 0 季特别篇。
+        if result.episode == nil,
+           let match = firstMatch(#"(?i)(?<![a-z0-9])(?:ova|oad|sp|special)\s*[._-]?\s*(\d{1,3})(?![a-z0-9])"#, in: working),
+           let episode = plausibleEpisode(match.g1) {
+            result.season = 0
+            result.episode = episode
+            mark(match.start)
+            working = removeMatch(#"(?i)(?<![a-z0-9])(?:ova|oad|sp|special)\s*[._-]?\s*\d{1,3}(?![a-z0-9])"#, in: working)
         }
         // 单独的季号
         if result.season == nil,
-           let match = firstMatch(#"第\s*([一二三四五六七八九十\d]+)\s*[季期部]"#, in: working) {
+           let match = firstMatch(#"第\s*([零〇一二两三四五六七八九十百千\d]+)\s*[季期部]"#, in: working) {
             result.season = chineseNumber(match.g1)
             mark(match.start)
-            working = removeMatch(#"第\s*([一二三四五六七八九十\d]+)\s*[季期部]"#, in: working)
+            working = removeMatch(#"第\s*[零〇一二两三四五六七八九十百千\d]+\s*[季期部]"#, in: working)
         }
         if result.season == nil,
            let match = firstMatch(#"(?i)\bseason\s*(\d{1,2})\b"#, in: working) {
@@ -131,33 +147,48 @@ public enum TitleParser {
             mark(match.start)
             working = removeMatch(#"(?i)\bseason\s*(\d{1,2})\b"#, in: working)
         }
+        if result.season == nil,
+           let match = firstMatch(#"(?i)(?<![a-z0-9])(\d{1,2})(?:st|nd|rd|th)\s+season\b"#, in: working) {
+            result.season = Int(match.g1)
+            mark(match.start)
+            working = removeMatch(#"(?i)(?<![a-z0-9])\d{1,2}(?:st|nd|rd|th)\s+season\b"#, in: working)
+        }
+        if result.season == nil,
+           let match = firstMatch(#"(?i)\bcour\s*(\d{1,2})\b"#, in: working) {
+            result.season = Int(match.g1)
+            mark(match.start)
+            working = removeMatch(#"(?i)\bcour\s*\d{1,2}\b"#, in: working)
+        }
         // 中文集号
         if result.episode == nil,
-           let match = firstMatch(#"第\s*(\d{1,4})\s*[集话話回]"#, in: working) {
-            result.episode = Int(match.g1)
+           let match = firstMatch(#"第\s*([零〇一二两三四五六七八九十百千\d]+)\s*[集话話回章]"#, in: working) {
+            result.episode = chineseNumber(match.g1)
             mark(match.start)
-            working = removeMatch(#"第\s*(\d{1,4})\s*[集话話回]"#, in: working)
+            working = removeMatch(#"第\s*[零〇一二两三四五六七八九十百千\d]+\s*[集话話回章]"#, in: working)
         }
-        // EP02 / E02
+        // Episode 02 / EP02 / E02 / #02
         if result.episode == nil,
-           let match = firstMatch(#"(?i)(?<![a-z0-9])ep?\.?\s*(\d{1,4})(?![a-z0-9])"#, in: working) {
-            result.episode = Int(match.g1)
+           let match = firstMatch(#"(?i)(?<![a-z0-9])(?:episode|ep|e|#)\.?\s*(\d{1,4})(?:v\d+)?(?![a-z0-9])"#, in: working),
+           let episode = plausibleEpisode(match.g1) {
+            result.episode = episode
             mark(match.start)
-            working = removeMatch(#"(?i)(?<![a-z0-9])ep?\.?\s*(\d{1,4})(?![a-z0-9])"#, in: working)
+            working = removeMatch(#"(?i)(?<![a-z0-9])(?:episode|ep|e|#)\.?\s*\d{1,4}(?:v\d+)?(?![a-z0-9])"#, in: working)
         }
-        // 分隔符后的裸数字，例如 `孤独摇滚！ - 08`、`庆余年第二季-06`
+        // 分隔符后的动画绝对集号，例如 `孤独摇滚！ - 08v2`。
         if result.episode == nil,
-           let match = firstMatch(#"[-–_]\s*(\d{1,4})\s*$"#, in: working) {
-            result.episode = Int(match.g1)
+           let match = firstMatch(#"[-–_]\s*(\d{1,4})(?:v\d+)?(?:\s*(?:end|fin))?\s*$"#, in: working),
+           let episode = plausibleEpisode(match.g1) {
+            result.episode = episode
             mark(match.start)
-            working = removeMatch(#"[-–_]\s*(\d{1,4})\s*$"#, in: working)
+            working = removeMatch(#"(?i)[-–_]\s*\d{1,4}(?:v\d+)?(?:\s*(?:end|fin))?\s*$"#, in: working)
         }
         // 末尾的裸数字，例如 `名侦探柯南 1082`
         if result.episode == nil,
-           let match = firstMatch(#"\s(\d{2,4})\s*$"#, in: working) {
-            result.episode = Int(match.g1)
+           let match = firstMatch(#"\s(\d{1,4})(?:v\d+)?(?:\s*(?:END|FIN))?\s*$"#, in: working),
+           let episode = plausibleEpisode(match.g1) {
+            result.episode = episode
             mark(match.start)
-            working = removeMatch(#"\s(\d{2,4})\s*$"#, in: working)
+            working = removeMatch(#"(?i)\s\d{1,4}(?:v\d+)?(?:\s*(?:end|fin))?\s*$"#, in: working)
         }
 
         // 标题取最早一个季集号匹配之前的部分；没有集号时用整段主体
@@ -172,11 +203,18 @@ public enum TitleParser {
     private static func parseBlocks(_ blocks: [String], into result: inout ParsedTitle) {
         var titleCandidates: [String] = []
         for (index, block) in blocks.enumerated() {
-            if index == 0 { continue }  // 首块通常是字幕组
             if let episode = matchPlainNumber(block), result.episode == nil {
                 result.episode = episode
                 continue
             }
+            var holder = ParsedTitle(title: "")
+            parseCore(block, into: &holder)
+            if holder.episode != nil {
+                if result.season == nil { result.season = holder.season }
+                if result.episode == nil { result.episode = holder.episode }
+                continue
+            }
+            if index == 0 { continue }  // 首块通常是字幕组
             if isTitleLike(block) { titleCandidates.append(block) }
         }
         // 标题取第一个像标题的块——字幕组之后紧跟的通常就是作品名
@@ -230,13 +268,92 @@ public enum TitleParser {
 
     /// 括号内的纯数字集号，例如 [01]、[EP03]
     private static func matchPlainNumber(_ block: String) -> Int? {
-        if let match = firstMatch(#"^(\d{1,4})$"#, in: block) {
-            guard let value = Int(match.g1) else { return nil }
-            // 1900-2099 视为年份而非集号
-            return (1900...2099).contains(value) ? nil : value
+        if let match = firstMatch(#"^(\d{1,4})(?:v\d+)?(?:\s*(?:END|FIN))?$"#, in: block) {
+            return plausibleEpisode(match.g1)
         }
-        if let match = firstMatch(#"(?i)^ep?\.?\s*(\d{1,4})$"#, in: block) { return Int(match.g1) }
+        if let match = firstMatch(#"(?i)^(?:episode|ep|e|#)\.?\s*(\d{1,4})(?:v\d+)?$"#, in: block) {
+            return plausibleEpisode(match.g1)
+        }
         return nil
+    }
+
+    /// 使用父目录补足季度和剧名，但不让 `Season 02` 等结构目录覆盖有效文件标题。
+    /// - Parameters:
+    ///   - folderNames: 从当前文件父目录开始、由近到远的目录名。
+    ///   - result: 已完成文件名解析的结果。
+    private static func applyFolderContext(_ folderNames: [String], into result: inout ParsedTitle) {
+        if result.season == nil {
+            result.season = folderNames.lazy.compactMap(seasonNumber).first
+        }
+        guard isGenericTitle(result.title) else { return }
+        for folder in folderNames {
+            let candidate = cleanFolderTitle(folder)
+            if !isGenericTitle(candidate), isTitleLike(candidate) {
+                result.title = candidate
+                return
+            }
+        }
+    }
+
+    /// 从季度目录名称中读取季号，支持 Season/S、中文季度、序数 Season 与 Cour。
+    /// - Parameter text: 单层目录名。
+    /// - Returns: 识别到的季度；Specials 返回 0。
+    private static func seasonNumber(from text: String) -> Int? {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if firstMatch(#"(?i)^(?:specials?|特别篇|特別篇)$"#, in: value) != nil { return 0 }
+        let patterns = [
+            #"(?i)(?:^|[^a-z0-9])season\s*0*(\d{1,3})(?:$|[^a-z0-9])"#,
+            #"(?i)^s0*(\d{1,3})$"#,
+            #"(?i)(?:^|[^a-z0-9])(\d{1,3})(?:st|nd|rd|th)\s+season(?:$|[^a-z0-9])"#,
+            #"(?i)(?:^|[^a-z0-9])cour\s*0*(\d{1,3})(?:$|[^a-z0-9])"#,
+        ]
+        for pattern in patterns {
+            if let match = firstMatch(pattern, in: value), let season = Int(match.g1) { return season }
+        }
+        if let match = firstMatch(#"第\s*([零〇一二两三四五六七八九十百千\d]+)\s*[季期部]"#, in: value) {
+            return chineseNumber(match.g1)
+        }
+        return nil
+    }
+
+    /// 清除父目录中的季度、年份和数据库 ID，只保留可作为剧名的部分。
+    /// - Parameter text: 原始目录名。
+    /// - Returns: 清理后的候选剧名。
+    private static func cleanFolderTitle(_ text: String) -> String {
+        var value = text
+        value = removeMatch(#"(?i)\{(?:tmdb|tvdb|imdb)(?:id)?[-=][^}]+\}"#, in: value)
+        value = removeMatch(#"(?i)\[(?:tmdb|tvdb|imdb)(?:id)?[-=][^\]]+\]"#, in: value)
+        value = removeMatch(#"(?i)(?:^|[\s._-])season\s*\d{1,3}(?:$|[\s._-])"#, in: value)
+        value = removeMatch(#"(?i)^s\d{1,3}$"#, in: value)
+        value = removeMatch(#"第\s*[零〇一二两三四五六七八九十百千\d]+\s*[季期部]"#, in: value)
+        value = removeMatch(#"(?i)(?:^|[\s._-])cour\s*\d{1,3}(?:$|[\s._-])"#, in: value)
+        value = removeMatch(#"(?i)(?:^|[\s._-])\d{1,3}(?:st|nd|rd|th)\s+season(?:$|[\s._-])"#, in: value)
+        return cleanTitle(value)
+    }
+
+    /// 判断标题是否只是服务器占位符、集号或季度目录名。
+    /// - Parameter text: 已清理的标题。
+    /// - Returns: 需要用父目录补全时返回 true。
+    private static func isGenericTitle(_ text: String) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if value.isEmpty || ["file", "video", "stream", "download", "play", "original", "episode", "ep", "e", "未命名视频"].contains(value) {
+            return true
+        }
+        if firstMatch(#"^[\d\s._-]+$"#, in: value) != nil { return true }
+        if firstMatch(#"(?i)^(?:s\d{1,3}[._ -]?e\d{1,4}(?:[._ -]?(?:e|x)?\d{1,4})*|\d{1,3}x\d{1,4}(?:x\d{1,4})*|(?:episode|ep|e|#|ova|oad|sp|special)[._ -]?\d{1,4})$"#, in: value) != nil {
+            return true
+        }
+        return seasonNumber(from: value) != nil && cleanFolderTitle(value).isEmpty
+    }
+
+    /// 过滤年份、分辨率和画面尺寸等最常被误认为集号的裸数字。
+    /// - Parameter text: 正则捕获到的数字。
+    /// - Returns: 合理的集号，否则返回 nil。
+    private static func plausibleEpisode(_ text: String) -> Int? {
+        guard let value = Int(text), value <= 9_999 else { return nil }
+        if (1900...2099).contains(value) { return nil }
+        let technicalNumbers: Set<Int> = [240, 360, 480, 540, 576, 720, 1080, 1440, 1920, 2160, 3840, 4096, 4320, 7680]
+        return technicalNumbers.contains(value) ? nil : value
     }
 
     /// 识别合集文件，例如 [01-15TV全集]
@@ -297,21 +414,34 @@ public enum TitleParser {
         }
     }
 
-    /// 中文数字转阿拉伯数字，仅覆盖 1-20 的常见写法
+    /// 中文数字转阿拉伯数字，覆盖文件名中常见的零到九千九百九十九。
+    /// - Parameter text: 阿拉伯数字或中文数字。
+    /// - Returns: 可识别的整数。
     private static func chineseNumber(_ text: String) -> Int? {
         if let value = Int(text) { return value }
-        let digits = ["一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
-                      "六": 6, "七": 7, "八": 8, "九": 9, "十": 10]
-        if let single = digits[text] { return single }
-        if text.hasPrefix("十"), text.count == 2 {
-            let tail = String(text.suffix(1))
-            return 10 + (digits[tail] ?? 0)
+        let digits: [Character: Int] = [
+            "零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+            "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
+        ]
+        let units: [Character: Int] = ["十": 10, "百": 100, "千": 1_000]
+        if !text.contains(where: { units[$0] != nil }) {
+            let values = text.compactMap { digits[$0] }
+            guard values.count == text.count else { return nil }
+            return values.reduce(0) { $0 * 10 + $1 }
         }
-        if text.hasSuffix("十"), text.count == 2 {
-            let head = String(text.prefix(1))
-            return (digits[head] ?? 0) * 10
+        var total = 0
+        var digit = 0
+        for character in text {
+            if let value = digits[character] {
+                digit = value
+            } else if let unit = units[character] {
+                total += (digit == 0 ? 1 : digit) * unit
+                digit = 0
+            } else {
+                return nil
+            }
         }
-        return nil
+        return total + digit
     }
 
     /// 返回首个匹配的前两个捕获组与匹配起点。

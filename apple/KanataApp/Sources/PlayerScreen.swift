@@ -1569,11 +1569,12 @@ struct PlaybackOptionsPanel: View {
                         Label("进入画中画", systemImage: "pip.enter")
                     }
                     HStack {
-                        Label("AirPlay", systemImage: "airplayvideo")
+                        Label("选择 AirPlay 设备", systemImage: "airplayvideo")
                         Spacer()
                         AirPlayRouteButton()
-                            .frame(width: 44, height: 44)
+                            .frame(width: 52, height: 44)
                     }
+                    .contentShape(Rectangle())
                 }
                 #endif
 

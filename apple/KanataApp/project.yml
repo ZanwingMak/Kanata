@@ -33,7 +33,7 @@ targets:
         DANDANPLAY_APP_ID: ""
         DANDANPLAY_APP_SECRET: ""
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "10"
+        CURRENT_PROJECT_VERSION: "12"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
@@ -53,6 +53,8 @@ targets:
       path: Sources/Info.plist
       properties:
         ITSAppUsesNonExemptEncryption: false
+        UIBackgroundModes:
+          - audio
         DandanplayAppId: $(DANDANPLAY_APP_ID)
         DandanplayAppSecret: $(DANDANPLAY_APP_SECRET)
         CFBundleIcons:
@@ -99,7 +101,7 @@ targets:
         DANDANPLAY_APP_ID: ""
         DANDANPLAY_APP_SECRET: ""
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "10"
+        CURRENT_PROJECT_VERSION: "12"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "3"
         GENERATE_INFOPLIST_FILE: YES

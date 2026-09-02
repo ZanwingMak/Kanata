@@ -1208,9 +1208,9 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     var collectionIndex: Int?
     /// 最近添加栏目使用的时间；旧版媒体库缺少该字段时保持 nil。
     let addedAt: Date?
-    let title: String
-    let season: Int?
-    let episode: Int?
+    var title: String
+    var season: Int?
+    var episode: Int?
 
     /// 播放进度存储使用的稳定媒体标识。
     var mediaKey: String? { resolveURL()?.absoluteString }
@@ -1227,7 +1227,11 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         guard let bookmark = try? url.bookmarkData(options: .minimalBookmark) else { return nil }
-        let parsed = TitleParser.parse(url.lastPathComponent)
+        let parent = url.deletingLastPathComponent()
+        let parsed = TitleParser.parse(
+            url.lastPathComponent,
+            folderNames: [parent.lastPathComponent, parent.deletingLastPathComponent().lastPathComponent]
+        )
         self.id = "local:\(url.standardizedFileURL.absoluteString)"
         self.displayName = url.lastPathComponent
         self.bookmark = bookmark
@@ -1266,7 +1270,7 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         let displayName = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? (!inferredName.isEmpty ? inferredName : (remoteURL.host ?? "网络视频"))
             : name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let parsed = TitleParser.parse(displayName)
+        let parsed = TitleParser.parse(displayName, folderNames: collectionTitle.map { [$0] } ?? [])
         self.id = "remote:\(remoteURL.absoluteString)"
         self.displayName = displayName
         self.bookmark = nil
@@ -1338,6 +1342,39 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         value.collectionTitle = title
         value.collectionIndex = index
         return value
+    }
+
+    /// 以新版文件命名规则刷新可推断的剧名与季集号，同时保留媒体服务器提供的可靠元数据。
+    /// - Returns: 适用于旧媒体库记录的向前兼容条目。
+    func refreshingParsedMetadata() -> LibraryItem {
+        let parsed = TitleParser.parse(displayName, folderNames: collectionTitle.map { [$0] } ?? [])
+        var value = self
+        if !parsed.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            value.title = parsed.title
+        }
+        if let episode = parsed.episode {
+            value.episode = episode
+            value.season = parsed.season ?? value.season
+        } else if value.episode == parsed.year || containsTechnicalEpisode(value.episode) {
+            value.episode = nil
+            if value.season == 1 { value.season = parsed.season }
+        } else if value.season == nil {
+            value.season = parsed.season
+        }
+        return value
+    }
+
+    /// 判断旧解析结果是否来自 `[1080]`、`1080p` 等清晰度标签。
+    /// - Parameter episode: 旧媒体库保存的候选集号。
+    /// - Returns: 文件名明确把该数字作为技术标签时返回 true。
+    private func containsTechnicalEpisode(_ episode: Int?) -> Bool {
+        guard let episode,
+              [480, 720, 1080, 1440, 2160, 4320].contains(episode) else { return false }
+        let escaped = NSRegularExpression.escapedPattern(for: String(episode))
+        return displayName.range(
+            of: "(?i)(?:\\[\\s*\(escaped)\\s*\\]|\(escaped)p)",
+            options: .regularExpression
+        ) != nil
     }
 
     /// 解析书签取回文件地址，文件已失效时返回 nil
@@ -1719,15 +1756,27 @@ struct MediaRequestCredential: Codable {
 /// 媒体库的本地持久化。M0 用 UserDefaults，M1 换成 SQLite（docs/02 §5）。
 enum LibraryStore {
     private static let key = "library.items"
+    private static let parserVersionKey = "library.title-parser-version"
+    private static let parserVersion = 2
 
+    /// 读取媒体库，并在命名规则升级后一次性刷新旧条目的可推断元数据。
+    /// - Returns: 当前媒体库条目。
     static func load() -> [LibraryItem] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let items = try? JSONDecoder().decode([LibraryItem].self, from: data) else {
             return []
         }
-        return items
+        guard UserDefaults.standard.integer(forKey: parserVersionKey) < parserVersion else {
+            return items
+        }
+        let refreshed = items.map { $0.refreshingParsedMetadata() }
+        save(refreshed)
+        UserDefaults.standard.set(parserVersion, forKey: parserVersionKey)
+        return refreshed
     }
 
+    /// 持久化全部媒体库条目。
+    /// - Parameter items: 当前媒体库快照。
     static func save(_ items: [LibraryItem]) {
         guard let data = try? JSONEncoder().encode(items) else { return }
         UserDefaults.standard.set(data, forKey: key)

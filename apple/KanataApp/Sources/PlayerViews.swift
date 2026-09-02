@@ -75,6 +75,8 @@ struct VideoSurface: UIViewRepresentable {
 
         var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
         private var pictureInPictureController: AVPictureInPictureController?
+        private var pictureInPicturePossibilityObservation: NSKeyValueObservation?
+        private var startsPictureInPictureWhenReady = false
 
         /// 在图层已有播放器后创建系统画中画控制器。
         func preparePictureInPicture() {
@@ -85,6 +87,19 @@ struct VideoSurface: UIViewRepresentable {
             controller.canStartPictureInPictureAutomaticallyFromInline = true
 #endif
             pictureInPictureController = controller
+            pictureInPicturePossibilityObservation = controller.observe(
+                \.isPictureInPicturePossible,
+                options: [.initial, .new]
+            ) { [weak self] _, _ in
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          let controller = self.pictureInPictureController,
+                          self.startsPictureInPictureWhenReady,
+                          controller.isPictureInPicturePossible else { return }
+                    self.startsPictureInPictureWhenReady = false
+                    controller.startPictureInPicture()
+                }
+            }
         }
 
         /// 切换系统画中画状态。
@@ -92,9 +107,13 @@ struct VideoSurface: UIViewRepresentable {
             preparePictureInPicture()
             guard let pictureInPictureController else { return }
             if pictureInPictureController.isPictureInPictureActive {
+                startsPictureInPictureWhenReady = false
                 pictureInPictureController.stopPictureInPicture()
             } else if pictureInPictureController.isPictureInPicturePossible {
+                startsPictureInPictureWhenReady = false
                 pictureInPictureController.startPictureInPicture()
+            } else {
+                startsPictureInPictureWhenReady = true
             }
         }
     }
@@ -121,12 +140,13 @@ struct VideoSurface: UIViewRepresentable {
 #if os(iOS)
 /// 系统 AirPlay 路由选择按钮。
 struct AirPlayRouteButton: UIViewRepresentable {
-    /// 创建原生路由选择器并使用浅色图标适配播放器背景。
+    /// 创建原生路由选择器，使用动态前景色同时适配浅色设置页和深色播放器。
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
-        view.tintColor = .white
+        view.tintColor = .label
         view.activeTintColor = .systemCyan
         view.prioritizesVideoDevices = true
+        view.accessibilityLabel = "选择 AirPlay 设备"
         return view
     }
 

@@ -281,6 +281,7 @@ struct KanataRowLabel: View {
                     #else
                     .font(.body.weight(.medium))
                     #endif
+                    .foregroundStyle(.primary)
                 if let detail, !detail.isEmpty {
                     Text(detail)
                         #if os(tvOS)
@@ -288,8 +289,8 @@ struct KanataRowLabel: View {
                         #else
                         .font(.caption)
                         #endif
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
                 }
             }
             Spacer(minLength: 0)
