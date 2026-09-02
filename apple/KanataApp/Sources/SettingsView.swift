@@ -308,7 +308,7 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Text("同步播放进度、收藏、剧集排序与忽略、弹幕偏移和显示偏好。媒体源密码、令牌与本地文件不会上传。")
+                    Text("同步网络媒体库、媒体源地址、播放进度、收藏、剧集排序与忽略、弹幕匹配和显示偏好。密码、令牌与本地文件不会上传；新设备首次打开媒体源时可能需要重新登录。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -321,6 +321,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .tint(settings.accentTheme.accent)
             .kanataFormBackground()
             .navigationTitle("设置")
             .kanataInlineNavigationTitle()
@@ -379,7 +380,7 @@ struct SettingsView: View {
         } icon: {
             Image(systemName: symbol)
                 .frame(width: 24)
-                .foregroundStyle(KanataTheme.accent)
+                .foregroundStyle(settings.accentTheme.accent)
         }
     }
 

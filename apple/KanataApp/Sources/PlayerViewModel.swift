@@ -518,6 +518,7 @@ final class PlayerViewModel {
         rebuildRawItems()
         if persistBinding, let currentFingerprint {
             DanmakuBindingStore.save(candidate, for: currentFingerprint)
+            CloudSyncStore.shared.noteLocalChange()
         }
         if let currentFingerprint {
             try? await DanmakuCacheStore.shared.save(
@@ -577,6 +578,7 @@ final class PlayerViewModel {
     func removeCurrentBinding() {
         guard let currentFingerprint else { return }
         DanmakuBindingStore.remove(for: currentFingerprint)
+        CloudSyncStore.shared.noteLocalChange()
         currentBinding = nil
         danmakuStats = "已解除绑定，当前弹幕继续播放"
     }

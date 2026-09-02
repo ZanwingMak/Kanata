@@ -502,6 +502,24 @@ actor BuiltInPublicDanmakuClient {
     /// 解压爱奇艺 zlib 弹幕数据，并按需扩大输出缓冲区。
     private static func inflateZlib(_ data: Data) throws -> Data {
         guard !data.isEmpty else { return Data() }
+        if let output = decodeDeflate(data) { return output }
+        guard data.count > 6,
+              data[0] & 0x0F == 8 else {
+            throw PublicDanmakuError.decompressionFailed
+        }
+        let headerSize = data[1] & 0x20 == 0 ? 2 : 6
+        guard data.count > headerSize + 4 else { throw PublicDanmakuError.decompressionFailed }
+        let rawDeflate = Data(data.dropFirst(headerSize).dropLast(4))
+        guard let output = decodeDeflate(rawDeflate) else {
+            throw PublicDanmakuError.decompressionFailed
+        }
+        return output
+    }
+
+    /// 使用 Apple Compression 解码 DEFLATE，并在输出空间不足时逐步扩容。
+    /// - Parameter data: 完整 zlib 或已剥离 RFC 1950 包装的 DEFLATE 数据。
+    /// - Returns: 解码成功的数据；格式不受支持时返回 nil。
+    private static func decodeDeflate(_ data: Data) -> Data? {
         var capacity = max(data.count * 16, 2 * 1_024 * 1_024)
         while capacity <= 32 * 1_024 * 1_024 {
             var output = Data(count: capacity)
@@ -525,7 +543,7 @@ actor BuiltInPublicDanmakuClient {
             }
             capacity *= 2
         }
-        throw PublicDanmakuError.decompressionFailed
+        return nil
     }
 
     /// 从腾讯视频 URL 或纯 vid 中提取剧集标识。

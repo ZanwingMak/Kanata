@@ -207,6 +207,43 @@ enum MediaSourceProfileStore {
         load().first { $0.id == id }
     }
 
+    /// 导出不含密码和令牌的媒体源配置供 iCloud 恢复。
+    /// - Returns: 媒体源配置 JSON；编码失败时返回 nil。
+    static func exportCloudData() -> Data? {
+        try? JSONEncoder().encode(load())
+    }
+
+    /// 从 iCloud 恢复非敏感媒体源配置，并尽量复用本机已有 Keychain 凭证。
+    /// - Parameter data: 云端媒体源配置 JSON。
+    /// - Returns: 云端媒体源 ID 到本机实际 ID 的映射。
+    static func importCloudData(_ data: Data?) -> [String: String] {
+        guard let data,
+              let cloudProfiles = try? JSONDecoder().decode([MediaSourceProfile].self, from: data) else {
+            return [:]
+        }
+        let localProfiles = load()
+        var mapping: [String: String] = [:]
+        let restored = cloudProfiles.map { cloud -> MediaSourceProfile in
+            guard let local = localProfiles.first(where: { profilesMatch($0, cloud) }) else {
+                mapping[cloud.id] = cloud.id
+                return cloud
+            }
+            mapping[cloud.id] = local.id
+            return MediaSourceProfile(
+                id: local.id,
+                kind: cloud.kind,
+                name: cloud.name,
+                serverURLString: cloud.serverURLString,
+                username: cloud.username,
+                rootPath: cloud.rootPath,
+                credentialAccount: local.credentialAccount,
+                updatedAt: max(cloud.updatedAt, local.updatedAt)
+            )
+        }
+        persist(restored, schedulesCloudPush: false)
+        return mapping
+    }
+
     /// 生成 AVURLAsset 播放该媒体源时需要的认证请求头。
     /// - Parameter profile: 视频所属媒体源。
     /// - Returns: WebDAV Basic、MediaBrowser 或 Plex 请求头。
@@ -255,10 +292,29 @@ enum MediaSourceProfileStore {
             : value
     }
 
+    /// 判断两个设备上的媒体源配置是否指向同一账号和服务端。
+    /// - Parameters:
+    ///   - left: 本机媒体源。
+    ///   - right: 云端媒体源。
+    /// - Returns: 类型、规范化地址和用户名一致时返回 true。
+    private static func profilesMatch(_ left: MediaSourceProfile, _ right: MediaSourceProfile) -> Bool {
+        left.kind == right.kind
+            && left.serverURLString.caseInsensitiveCompare(right.serverURLString) == .orderedSame
+            && left.username.caseInsensitiveCompare(right.username) == .orderedSame
+    }
+
     /// 编码并持久化媒体源元数据。
-    /// - Parameter profiles: 最新连接列表。
-    private static func persist(_ profiles: [MediaSourceProfile]) {
+    /// - Parameters:
+    ///   - profiles: 最新连接列表。
+    ///   - schedulesCloudPush: 是否安排 iCloud 上传。
+    private static func persist(
+        _ profiles: [MediaSourceProfile],
+        schedulesCloudPush: Bool = true
+    ) {
         guard let data = try? JSONEncoder().encode(profiles) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
+        if schedulesCloudPush {
+            Task { @MainActor in CloudSyncStore.shared.noteLocalChange() }
+        }
     }
 }

@@ -52,6 +52,7 @@ struct MediaSourceSheet: View {
     let onAdd: ([LibraryItem]) -> Void
     let onSourcesChanged: () -> Void
     let usesParentNavigation: Bool
+    @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     @State private var profiles = MediaSourceProfileStore.load()
     @State private var browsingProfile: MediaSourceProfile?
@@ -163,6 +164,7 @@ struct MediaSourceSheet: View {
                             symbol: "folder.badge.plus"
                         )
                     }
+                    .buttonStyle(.plain)
                     #endif
                     ForEach(MediaSourceKind.allCases) { kind in
                         NavigationLink {
@@ -184,6 +186,7 @@ struct MediaSourceSheet: View {
                         .foregroundStyle(.secondary)
                 }
         }
+        .tint(settings.accentTheme.accent)
         .kanataFormBackground()
         #if os(tvOS)
         .listStyle(.plain)
@@ -240,7 +243,12 @@ struct MediaSourceSheet: View {
     ///   - symbol: SF Symbol 名称。
     /// - Returns: 统一样式的标签视图。
     private func sourceLabel(_ title: String, detail: String, symbol: String) -> some View {
-        KanataRowLabel(title: title, detail: detail, symbol: symbol)
+        KanataRowLabel(
+            title: title,
+            detail: detail,
+            symbol: symbol,
+            tint: settings.accentTheme.accent
+        )
     }
 
     /// 返回媒体源在添加列表中的能力说明。
@@ -1686,6 +1694,7 @@ private struct MediaServerChannelView: View {
             return LibraryItem(
                 remoteURL: url,
                 name: entry.name,
+                stableID: entry.id,
                 sourceName: profile.kind.title,
                 artworkURL: artworkURL(for: entry),
                 sourceProfileID: profile.id,

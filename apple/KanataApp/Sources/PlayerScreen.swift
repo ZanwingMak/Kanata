@@ -1456,16 +1456,10 @@ struct PlaybackOptionsPanel: View {
         NavigationStack {
             Form {
                 Section("播放") {
-                    Picker(
-                        "播放速度",
-                        selection: Binding(
-                            get: { viewModel.playbackRate },
-                            set: { viewModel.setPlaybackRate($0) }
-                        )
-                    ) {
-                        ForEach([0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4], id: \.self) { rate in
-                            Text(rate == 1 ? "正常" : "\(rate.formatted())×").tag(rate)
-                        }
+                    NavigationLink {
+                        PlaybackRateSelectionView(viewModel: viewModel)
+                    } label: {
+                        LabeledContent("播放速度", value: playbackRateLabel(viewModel.playbackRate))
                     }
                     Picker("连播方式", selection: $queueMode) {
                         ForEach(PlaybackQueueMode.allCases) { mode in
@@ -1568,11 +1562,17 @@ struct PlaybackOptionsPanel: View {
                     } label: {
                         Label("进入画中画", systemImage: "pip.enter")
                     }
-                    HStack {
-                        Label("选择 AirPlay 设备", systemImage: "airplayvideo")
-                        Spacer()
-                        AirPlayRouteButton()
-                            .frame(width: 52, height: 44)
+                    ZStack {
+                        HStack {
+                            Label("选择 AirPlay 设备", systemImage: "airplayvideo")
+                            Spacer()
+                            Image(systemName: "airplayvideo")
+                                .foregroundStyle(.tint)
+                                .frame(width: 44, height: 44)
+                        }
+                        .allowsHitTesting(false)
+                        AirPlayRouteButton(isVisuallyHidden: true)
+                            .frame(maxWidth: .infinity, minHeight: 52)
                     }
                     .contentShape(Rectangle())
                 }
@@ -1618,5 +1618,52 @@ struct PlaybackOptionsPanel: View {
         return hours > 0
             ? String(format: "%d:%02d:%02d", hours, minutes, remaining)
             : String(format: "%02d:%02d", minutes, remaining)
+    }
+
+    /// 把播放倍率格式化为设置页右侧的稳定文案。
+    /// - Parameter rate: 当前播放倍率。
+    /// - Returns: 1 倍显示“正常”，其他倍率显示数字与乘号。
+    private func playbackRateLabel(_ rate: Double) -> String {
+        abs(rate - 1) < 0.001 ? "正常" : "\(rate.formatted())×"
+    }
+}
+
+/// 使用独立页面选择播放倍速，避免弹窗内菜单偶发失焦。
+private struct PlaybackRateSelectionView: View {
+    let viewModel: PlayerViewModel
+    @Environment(\.dismiss) private var dismiss
+    private let rates: [Double] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+
+    var body: some View {
+        List(rates, id: \.self) { rate in
+            Button {
+                viewModel.setPlaybackRate(rate)
+                dismiss()
+            } label: {
+                HStack {
+                    Text(rateLabel(rate))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    if abs(viewModel.playbackRate - rate) < 0.001 {
+                        Image(systemName: "checkmark")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.tint)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .kanataTVFocus(cornerRadius: 12)
+        }
+        .navigationTitle("播放速度")
+        .kanataInlineNavigationTitle()
+    }
+
+    /// 把候选倍率转换为用户可读的单选项文案。
+    /// - Parameter rate: 候选播放倍率。
+    /// - Returns: 1 倍显示“正常”，其他倍率显示数字与乘号。
+    private func rateLabel(_ rate: Double) -> String {
+        abs(rate - 1) < 0.001 ? "正常" : "\(rate.formatted())×"
     }
 }

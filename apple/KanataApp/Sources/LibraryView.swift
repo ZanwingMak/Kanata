@@ -433,6 +433,8 @@ struct LibraryView: View {
                 await scanDocuments()
             }
             .onReceive(NotificationCenter.default.publisher(for: .kanataCloudDataDidChange)) { _ in
+                items = LibraryStore.load()
+                reloadMediaSources()
                 favoriteIDs = LibraryFavoriteStore.load()
                 progressRevision += 1
             }
@@ -1201,7 +1203,7 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// 存储在 Keychain 的请求头账号名，媒体库本身不保存密码或令牌。
     let credentialAccount: String?
     /// 视频所属的持久化媒体源，用于从 Keychain 动态生成播放请求头。
-    let sourceProfileID: String?
+    var sourceProfileID: String?
     /// 同一目录、季度或剧集共享的播放合集标识。
     var collectionID: String?
     var collectionTitle: String?
@@ -1253,9 +1255,11 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// - Parameters:
     ///   - remoteURL: HTTP(S) 视频、HLS 或 NAS 直链。
     ///   - name: 用户提供的显示名称，空值时从 URL 推断。
+    ///   - stableID: 媒体服务器逻辑条目 ID；同一底层文件存在多个别名时用于隔离条目。
     init(
         remoteURL: URL,
         name: String,
+        stableID: String? = nil,
         sourceName: String? = nil,
         artworkURL: URL? = nil,
         credentialAccount: String? = nil,
@@ -1271,7 +1275,16 @@ struct LibraryItem: Identifiable, Codable, Hashable {
             ? (!inferredName.isEmpty ? inferredName : (remoteURL.host ?? "网络视频"))
             : name.trimmingCharacters(in: .whitespacesAndNewlines)
         let parsed = TitleParser.parse(displayName, folderNames: collectionTitle.map { [$0] } ?? [])
-        self.id = "remote:\(remoteURL.absoluteString)"
+        if let stableID {
+            let serverIdentity = [
+                sourceName ?? "network",
+                remoteURL.host ?? "unknown-host",
+                remoteURL.port.map(String.init) ?? "default-port",
+            ].joined(separator: ":")
+            self.id = "remote:\(serverIdentity):\(stableID)"
+        } else {
+            self.id = "remote:\(remoteURL.absoluteString)"
+        }
         self.displayName = displayName
         self.bookmark = nil
         self.remoteURLString = remoteURL.absoluteString
@@ -1770,16 +1783,45 @@ enum LibraryStore {
             return items
         }
         let refreshed = items.map { $0.refreshingParsedMetadata() }
-        save(refreshed)
+        save(refreshed, schedulesCloudPush: false)
         UserDefaults.standard.set(parserVersion, forKey: parserVersionKey)
         return refreshed
     }
 
     /// 持久化全部媒体库条目。
-    /// - Parameter items: 当前媒体库快照。
-    static func save(_ items: [LibraryItem]) {
+    /// - Parameters:
+    ///   - items: 当前媒体库快照。
+    ///   - schedulesCloudPush: 是否安排 iCloud 上传。
+    static func save(_ items: [LibraryItem], schedulesCloudPush: Bool = true) {
         guard let data = try? JSONEncoder().encode(items) else { return }
         UserDefaults.standard.set(data, forKey: key)
+        if schedulesCloudPush {
+            Task { @MainActor in CloudSyncStore.shared.noteLocalChange() }
+        }
+    }
+
+    /// 导出可跨设备访问的网络媒体库索引，本地安全书签不会进入 iCloud。
+    /// - Returns: 网络媒体条目的 JSON 数据。
+    static func exportCloudData() -> Data? {
+        try? JSONEncoder().encode(load().filter { $0.remoteURLString != nil })
+    }
+
+    /// 用云端网络媒体库替换本机网络索引，同时保留本机文件并重映射媒体源 ID。
+    /// - Parameters:
+    ///   - data: 云端网络媒体条目 JSON。
+    ///   - profileIDMap: 云端媒体源 ID 到本机媒体源 ID 的映射。
+    static func importCloudData(_ data: Data?, profileIDMap: [String: String]) {
+        guard let data,
+              let cloudItems = try? JSONDecoder().decode([LibraryItem].self, from: data) else { return }
+        let localItems = load().filter { $0.remoteURLString == nil }
+        let remoteItems = cloudItems.map { item -> LibraryItem in
+            var value = item
+            if let profileID = item.sourceProfileID {
+                value.sourceProfileID = profileIDMap[profileID] ?? profileID
+            }
+            return value
+        }
+        save(localItems + remoteItems, schedulesCloudPush: false)
     }
 }
 

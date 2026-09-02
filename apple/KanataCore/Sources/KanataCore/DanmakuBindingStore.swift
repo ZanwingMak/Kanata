@@ -23,6 +23,20 @@ public enum DanmakuBindingStore {
         persist(bindings)
     }
 
+    /// 导出弹幕匹配绑定供 Apple 设备间同步。
+    /// - Returns: 绑定表 JSON；编码失败时返回 nil。
+    public static func exportData() -> Data? {
+        try? JSONEncoder().encode(loadAll())
+    }
+
+    /// 用 iCloud 快照替换本机弹幕匹配绑定。
+    /// - Parameter data: JSON 编码的绑定表。
+    public static func importData(_ data: Data?) {
+        guard let data,
+              let bindings = try? JSONDecoder().decode([String: ProviderCandidate].self, from: data) else { return }
+        persist(bindings)
+    }
+
     /// 从 UserDefaults 解码全部绑定，读取失败时安全回退为空表。
     private static func loadAll() -> [String: ProviderCandidate] {
         guard let data = UserDefaults.standard.data(forKey: storageKey),

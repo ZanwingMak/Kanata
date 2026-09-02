@@ -22,23 +22,66 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
     }
 
     var accent: Color {
-        switch self {
-        case .galaxy: Color(red: 0.18, green: 0.72, blue: 0.86)
-        case .aurora: Color(red: 0.16, green: 0.78, blue: 0.61)
-        case .sunset: Color(red: 1.00, green: 0.38, blue: 0.34)
-        case .amethyst: Color(red: 0.66, green: 0.48, blue: 0.96)
-        case .gold: Color(red: 0.94, green: 0.67, blue: 0.22)
-        }
+        adaptiveColor(light: lightAccent, dark: darkAccent)
     }
 
     var accentStrong: Color {
+        adaptiveColor(light: lightAccentStrong, dark: darkAccentStrong)
+    }
+
+    /// 浅色背景使用较深的强调色，保证文字、图标与开关对比度。
+    private var lightAccent: UIColor {
         switch self {
-        case .galaxy: Color(red: 0.08, green: 0.58, blue: 0.76)
-        case .aurora: Color(red: 0.05, green: 0.59, blue: 0.45)
-        case .sunset: Color(red: 0.82, green: 0.16, blue: 0.30)
-        case .amethyst: Color(red: 0.43, green: 0.28, blue: 0.82)
-        case .gold: Color(red: 0.72, green: 0.42, blue: 0.08)
+        case .galaxy: UIColor(red: 0.02, green: 0.42, blue: 0.58, alpha: 1)
+        case .aurora: UIColor(red: 0.02, green: 0.43, blue: 0.31, alpha: 1)
+        case .sunset: UIColor(red: 0.78, green: 0.13, blue: 0.20, alpha: 1)
+        case .amethyst: UIColor(red: 0.43, green: 0.28, blue: 0.76, alpha: 1)
+        case .gold: UIColor(red: 0.62, green: 0.37, blue: 0.04, alpha: 1)
         }
+    }
+
+    /// 深色背景使用较明亮的强调色，保持影院界面的辨识度。
+    private var darkAccent: UIColor {
+        switch self {
+        case .galaxy: UIColor(red: 0.18, green: 0.72, blue: 0.86, alpha: 1)
+        case .aurora: UIColor(red: 0.16, green: 0.78, blue: 0.61, alpha: 1)
+        case .sunset: UIColor(red: 1.00, green: 0.38, blue: 0.34, alpha: 1)
+        case .amethyst: UIColor(red: 0.66, green: 0.48, blue: 0.96, alpha: 1)
+        case .gold: UIColor(red: 0.94, green: 0.67, blue: 0.22, alpha: 1)
+        }
+    }
+
+    /// 浅色模式下用于渐变末端和聚焦边界的更深颜色。
+    private var lightAccentStrong: UIColor {
+        switch self {
+        case .galaxy: UIColor(red: 0.01, green: 0.30, blue: 0.46, alpha: 1)
+        case .aurora: UIColor(red: 0.01, green: 0.31, blue: 0.22, alpha: 1)
+        case .sunset: UIColor(red: 0.62, green: 0.07, blue: 0.15, alpha: 1)
+        case .amethyst: UIColor(red: 0.32, green: 0.18, blue: 0.62, alpha: 1)
+        case .gold: UIColor(red: 0.48, green: 0.25, blue: 0.01, alpha: 1)
+        }
+    }
+
+    /// 深色模式下用于渐变末端和聚焦边界的强调色。
+    private var darkAccentStrong: UIColor {
+        switch self {
+        case .galaxy: UIColor(red: 0.08, green: 0.58, blue: 0.76, alpha: 1)
+        case .aurora: UIColor(red: 0.05, green: 0.59, blue: 0.45, alpha: 1)
+        case .sunset: UIColor(red: 0.82, green: 0.16, blue: 0.30, alpha: 1)
+        case .amethyst: UIColor(red: 0.43, green: 0.28, blue: 0.82, alpha: 1)
+        case .gold: UIColor(red: 0.72, green: 0.42, blue: 0.08, alpha: 1)
+        }
+    }
+
+    /// 根据系统当前明暗外观返回动态 UIColor，切换外观时无需重建页面。
+    /// - Parameters:
+    ///   - light: 浅色模式颜色。
+    ///   - dark: 深色模式颜色。
+    /// - Returns: 会随 trait collection 自动刷新的 SwiftUI 颜色。
+    private func adaptiveColor(light: UIColor, dark: UIColor) -> Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .light ? light : dark
+        })
     }
 }
 
@@ -92,8 +135,16 @@ enum KanataTheme {
     static let surface = Color.primary.opacity(0.07)
     static let elevatedSurface = Color.primary.opacity(0.11)
     static let separator = Color.primary.opacity(0.10)
-    static let success = Color(red: 0.28, green: 0.78, blue: 0.55)
-    static let warning = Color(red: 0.96, green: 0.67, blue: 0.25)
+    static let success = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .light
+            ? UIColor(red: 0.04, green: 0.47, blue: 0.28, alpha: 1)
+            : UIColor(red: 0.28, green: 0.78, blue: 0.55, alpha: 1)
+    })
+    static let warning = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .light
+            ? UIColor(red: 0.66, green: 0.37, blue: 0.02, alpha: 1)
+            : UIColor(red: 0.96, green: 0.67, blue: 0.25, alpha: 1)
+    })
 }
 
 /// 适合表单主操作的高对比度按钮样式。

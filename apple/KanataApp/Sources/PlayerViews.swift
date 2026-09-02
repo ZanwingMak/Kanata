@@ -140,18 +140,28 @@ struct VideoSurface: UIViewRepresentable {
 #if os(iOS)
 /// 系统 AirPlay 路由选择按钮。
 struct AirPlayRouteButton: UIViewRepresentable {
+    var isVisuallyHidden = false
+
     /// 创建原生路由选择器，使用动态前景色同时适配浅色设置页和深色播放器。
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
-        view.tintColor = .label
-        view.activeTintColor = .systemCyan
         view.prioritizesVideoDevices = true
         view.accessibilityLabel = "选择 AirPlay 设备"
+        applyColors(to: view)
         return view
     }
 
-    /// 路由状态由系统维护，无需额外同步。
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+    /// 路由状态由系统维护，仅同步可见性对应的动态颜色。
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
+        applyColors(to: uiView)
+    }
+
+    /// 配置可见图标或整行透明命中层使用的颜色。
+    /// - Parameter view: 系统 AirPlay 路由选择器。
+    private func applyColors(to view: AVRoutePickerView) {
+        view.tintColor = isVisuallyHidden ? .clear : .label
+        view.activeTintColor = isVisuallyHidden ? .clear : .systemCyan
+    }
 }
 #endif
 

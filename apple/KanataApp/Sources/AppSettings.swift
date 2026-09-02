@@ -74,6 +74,7 @@ final class AppSettings {
     }
 
     private let defaults: UserDefaults
+    private var suppressesCloudPush = false
 
     private enum Keys {
         static let gatewayURL = "gateway.url"
@@ -147,7 +148,8 @@ final class AppSettings {
         )
 
         var config = DanmakuRenderConfig()
-        if let scale = defaults.object(forKey: Keys.fontScale) as? Double { config.fontScale = scale }
+        let storedFontScale = defaults.object(forKey: Keys.fontScale) as? Double
+        if let storedFontScale { config.fontScale = storedFontScale }
         config.fontName = defaults.string(forKey: Keys.fontName)
         if let opacity = defaults.object(forKey: Keys.opacity) as? Double { config.opacity = opacity }
         if let area = defaults.string(forKey: Keys.displayArea),
@@ -166,7 +168,8 @@ final class AppSettings {
             config.blockRules.blockRepeated = repeated
         }
         config.blockRules.keywords = defaults.stringArray(forKey: Keys.blockKeywords) ?? []
-        let requiresVisualMigration = defaults.integer(forKey: Keys.visualStyleVersion) < 5
+        let storedVisualStyleVersion = defaults.integer(forKey: Keys.visualStyleVersion)
+        let requiresVisualMigration = storedVisualStyleVersion < 5
         if requiresVisualMigration {
             config.fontScale = 0.9
             config.opacity = 1
@@ -176,16 +179,36 @@ final class AppSettings {
             config.strokeWidth = 0.6
             config.densityLimit = 100
         }
+        #if os(tvOS)
+        if storedVisualStyleVersion < 6,
+           storedFontScale == nil || abs(config.fontScale - 0.9) < 0.001 {
+            config.fontScale = 1.15
+        }
+        #endif
         self.danmakuConfig = config
 
         if let legacyGatewayToken {
             KeychainStore.setString(legacyGatewayToken, account: KeychainAccounts.gatewayToken)
             defaults.removeObject(forKey: Keys.gatewayToken)
         }
-        if requiresVisualMigration {
-            defaults.set(5, forKey: Keys.visualStyleVersion)
+        if storedVisualStyleVersion < 6 {
+            defaults.set(6, forKey: Keys.visualStyleVersion)
+            suppressesCloudPush = true
             persistDanmakuConfig()
+            suppressesCloudPush = false
         }
+    }
+
+    /// 应用 iCloud 弹幕配置，同时保留 Apple TV 适合观看距离的本机字号。
+    /// - Parameter config: 云端通用弹幕配置。
+    func applyCloudDanmakuConfig(_ config: DanmakuRenderConfig) {
+        var value = config
+        #if os(tvOS)
+        value.fontScale = danmakuConfig.fontScale
+        #endif
+        suppressesCloudPush = true
+        danmakuConfig = value
+        suppressesCloudPush = false
     }
 
     /// 按当前设置构建网关客户端，地址非法时返回 nil
@@ -307,7 +330,9 @@ final class AppSettings {
         defaults.set(danmakuConfig.blockRules.blockColorful, forKey: Keys.blockColorful)
         defaults.set(danmakuConfig.blockRules.blockRepeated, forKey: Keys.blockRepeated)
         defaults.set(danmakuConfig.blockRules.keywords, forKey: Keys.blockKeywords)
-        Task { @MainActor in CloudSyncStore.shared.noteLocalChange() }
+        if !suppressesCloudPush {
+            Task { @MainActor in CloudSyncStore.shared.noteLocalChange() }
+        }
     }
 
     /// 把 B 站会话字段编码后写入 Keychain；SESSDATA 为空时删除记录。
