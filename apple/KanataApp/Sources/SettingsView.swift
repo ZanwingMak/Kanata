@@ -341,7 +341,7 @@ struct SettingsView: View {
             .onChange(of: settings.onlineDanmakuCacheLimitMB) { _, newValue in
                 Task { await applyCacheLimit(newValue) }
             }
-            .sheet(isPresented: $isShowingBilibiliQRCode) {
+            .kanataModal(isPresented: $isShowingBilibiliQRCode) {
                 BilibiliQRCodeLoginSheet { cookie in
                     if settings.importBilibiliCookie(cookie) {
                         bilibiliResult = "扫码登录成功，凭证已保存"

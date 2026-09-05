@@ -397,6 +397,40 @@ struct KanataRowLabel: View {
 }
 
 extension View {
+    /// 在 Apple TV 使用全屏任务面板，在触屏设备保留系统 Sheet。
+    /// - Parameters:
+    ///   - isPresented: 是否显示面板。
+    ///   - content: 面板内容。
+    /// - Returns: 符合当前平台交互距离的模态界面。
+    @ViewBuilder
+    func kanataModal<Content: View>(
+        isPresented: Binding<Bool>,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        #if os(tvOS)
+        fullScreenCover(isPresented: isPresented, content: content)
+        #else
+        sheet(isPresented: isPresented, content: content)
+        #endif
+    }
+
+    /// 在 Apple TV 使用全屏数据面板，在触屏设备保留系统 Sheet。
+    /// - Parameters:
+    ///   - item: 驱动面板展示的数据。
+    ///   - content: 使用当前数据构建的面板内容。
+    /// - Returns: 符合当前平台交互距离的数据模态界面。
+    @ViewBuilder
+    func kanataModal<Item: Identifiable, Content: View>(
+        item: Binding<Item?>,
+        @ViewBuilder content: @escaping (Item) -> Content
+    ) -> some View {
+        #if os(tvOS)
+        fullScreenCover(item: item, content: content)
+        #else
+        sheet(item: item, content: content)
+        #endif
+    }
+
     /// 在 Apple TV 接管按钮焦点绘制，其他平台继续使用无附加材质的 plain 样式。
     /// - Parameter cornerRadius: 控件焦点框圆角。
     /// - Returns: 不会叠加系统白色焦点材质的按钮或导航入口。

@@ -206,7 +206,7 @@ struct MediaImportPreview: View {
             EpisodeMetadataEditor(candidate: candidate, onSave: updateEpisode)
         }
         #else
-        .sheet(item: $editingCandidate) { candidate in
+        .kanataModal(item: $editingCandidate) { candidate in
             NavigationStack {
                 EpisodeMetadataEditor(candidate: candidate, onSave: updateEpisode)
             }

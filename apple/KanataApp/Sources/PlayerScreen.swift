@@ -285,7 +285,7 @@ struct PlayerScreen: View {
             }
             #endif
         }
-        .sheet(isPresented: $isShowingDanmakuPanel) {
+        .kanataModal(isPresented: $isShowingDanmakuPanel) {
             DanmakuSettingsPanel(
                 config: $settings.danmakuConfig,
                 offset: $viewModel.offset,
@@ -293,7 +293,7 @@ struct PlayerScreen: View {
             )
             .presentationDetents([.medium, .large])
         }
-        .sheet(isPresented: $isShowingPlaybackPanel) {
+        .kanataModal(isPresented: $isShowingPlaybackPanel) {
             PlaybackOptionsPanel(
                 viewModel: viewModel,
                 scalingMode: $scalingMode,
@@ -327,14 +327,14 @@ struct PlayerScreen: View {
             )
             .presentationDetents([.medium, .large])
         }
-        .sheet(isPresented: $isShowingPlaylist) {
+        .kanataModal(isPresented: $isShowingPlaylist) {
             PlaylistPicker(
                 items: items,
                 currentItemID: activeItem.id,
                 onSelect: selectItem
             )
         }
-        .sheet(isPresented: $viewModel.isShowingCandidates) {
+        .kanataModal(isPresented: $viewModel.isShowingCandidates) {
             CandidatePicker(viewModel: viewModel)
         }
         .kanataFileImporter(

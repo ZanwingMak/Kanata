@@ -229,7 +229,7 @@ struct MediaSourceSheet: View {
         } message: {
             Text(importError ?? "")
         }
-        .sheet(item: $pendingImport) { draft in
+        .kanataModal(item: $pendingImport) { draft in
             MediaImportPreview(draft: draft, onConfirm: finish)
         }
     }
@@ -491,7 +491,7 @@ private struct MediaSourceConnectionView: View {
         .onChange(of: serverPath) { _, _ in saveDraft() }
         .onChange(of: rootPath) { _, _ in saveDraft() }
         .onChange(of: username) { _, _ in saveDraft() }
-        .sheet(isPresented: $isShowingPlexAuthorization) {
+        .kanataModal(isPresented: $isShowingPlexAuthorization) {
             PlexAuthorizationView { connection in
                 let currentName = name.trimmingCharacters(in: .whitespacesAndNewlines)
                 name = currentName.isEmpty ? connection.serverName : currentName
@@ -866,8 +866,215 @@ private struct PlexAuthorizationView: View {
     @State private var errorMessage: String?
     @State private var didOpenBrowser = false
     private let client = PlexAccountClient()
+    #if os(tvOS)
+    @FocusState private var focusedControl: PlexAuthorizationFocus?
+
+    /// Apple TV Plex 授权页中的焦点目标。
+    private enum PlexAuthorizationFocus: Hashable {
+        case close
+        case retry
+        case connection(String)
+    }
+    #endif
 
     var body: some View {
+        Group {
+            #if os(tvOS)
+            tvContent
+            #else
+            compactContent
+            #endif
+        }
+        .task { await beginAuthorization() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, didOpenBrowser else { return }
+            statusText = "已返回 Kanata，正在发现服务器…"
+        }
+        #if os(tvOS)
+        .onChange(of: connections.map(\.id)) { _, ids in
+            if let id = ids.first { focusedControl = .connection(id) }
+        }
+        #endif
+    }
+
+    #if os(tvOS)
+    /// 构建适合客厅观看距离的 Plex 授权与服务器选择全屏面板。
+    private var tvContent: some View {
+        ZStack {
+            LinearGradient(
+                colors: [KanataTheme.backgroundTop, KanataTheme.background],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 34) {
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("登录 Plex")
+                            .font(.largeTitle.bold())
+                        Text(connections.isEmpty ? "在另一台设备完成授权" : "选择要连接的媒体服务器")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Label("关闭", systemImage: "xmark")
+                    }
+                    .buttonStyle(KanataTVActionButtonStyle())
+                    .focused($focusedControl, equals: .close)
+                }
+                .focusSection()
+
+                if !connections.isEmpty {
+                    tvConnectionList
+                } else if let pin, errorMessage == nil {
+                    HStack(spacing: 42) {
+                        VStack(alignment: .leading, spacing: 28) {
+                            Label("在手机或电脑上操作", systemImage: "desktopcomputer")
+                                .font(.title2.bold())
+                                .foregroundStyle(KanataTheme.accent)
+                            plexInstructionRow(number: 1, text: "打开 plex.tv/link")
+                            plexInstructionRow(number: 2, text: "登录同一个 Plex 账号")
+                            plexInstructionRow(number: 3, text: "输入右侧授权码")
+                            Divider()
+                            Text("授权成功后会自动发现服务器并测试可用线路。")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(40)
+                        .frame(width: 650, alignment: .topLeading)
+                        .frame(minHeight: 520, alignment: .topLeading)
+                        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+
+                        VStack(spacing: 28) {
+                            Text("授权码")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(pin.code)
+                                .font(.system(size: 64, weight: .bold, design: .monospaced))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.55)
+                                .foregroundStyle(KanataTheme.accent)
+                                .padding(.horizontal, 36)
+                                .frame(maxWidth: .infinity, minHeight: 128)
+                                .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 22))
+                            Label(statusText, systemImage: "person.badge.key")
+                                .font(.title3.bold())
+                                .multilineTextAlignment(.center)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(40)
+                        .frame(maxWidth: .infinity, minHeight: 520)
+                        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    }
+                } else if let errorMessage {
+                    VStack(spacing: 24) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 62, weight: .light))
+                            .foregroundStyle(KanataTheme.warning)
+                        Text("Plex 登录失败")
+                            .font(.title.bold())
+                        Text(errorMessage)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("重新生成") { Task { await beginAuthorization() } }
+                            .buttonStyle(KanataPrimaryButtonStyle())
+                            .focused($focusedControl, equals: .retry)
+                            .frame(width: 360)
+                    }
+                    .padding(48)
+                    .frame(maxWidth: 980, maxHeight: 560)
+                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                } else {
+                    VStack(spacing: 22) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text(statusText)
+                            .font(.title2.bold())
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(maxWidth: 1480, maxHeight: 900)
+            .padding(.horizontal, 72)
+            .padding(.vertical, 54)
+        }
+        .onExitCommand { dismiss() }
+    }
+
+    /// 构建 Plex 授权页的服务器选择列表。
+    private var tvConnectionList: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("已发现 \(connections.count) 台可用服务器")
+                .font(.title2.bold())
+            ScrollView {
+                LazyVStack(spacing: 16) {
+                    ForEach(Array(connections.enumerated()), id: \.element.id) { index, connection in
+                        Button { onSelect(connection) } label: {
+                            HStack(spacing: 22) {
+                                Image(systemName: connection.isLocal ? "network" : "globe")
+                                    .font(.title2)
+                                    .foregroundStyle(KanataTheme.accent)
+                                    .frame(width: 52)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 12) {
+                                        Text(connection.serverName)
+                                            .font(.title3.bold())
+                                        if index == 0 {
+                                            Label("推荐", systemImage: "checkmark.circle.fill")
+                                                .font(.headline)
+                                                .foregroundStyle(KanataTheme.success)
+                                        }
+                                    }
+                                    Text(connection.detail)
+                                        .font(.headline)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text("连接")
+                                    .font(.headline.bold())
+                                Image(systemName: "chevron.right")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 28)
+                            .frame(maxWidth: .infinity, minHeight: 116)
+                            .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 20))
+                        }
+                        .kanataTVFocus(cornerRadius: 24)
+                        .focused($focusedControl, equals: .connection(connection.id))
+                    }
+                }
+                .padding(8)
+            }
+            .scrollClipDisabled()
+        }
+        .padding(34)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .focusSection()
+    }
+
+    /// 生成 Apple TV Plex 授权说明中的单步提示行。
+    /// - Parameters:
+    ///   - number: 步骤序号。
+    ///   - text: 操作说明。
+    /// - Returns: 带序号标识的说明行。
+    private func plexInstructionRow(number: Int, text: String) -> some View {
+        HStack(spacing: 18) {
+            Text("\(number)")
+                .font(.headline.bold())
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(KanataTheme.accent, in: Circle())
+            Text(text)
+                .font(.title3.weight(.semibold))
+        }
+    }
+    #else
+    /// 构建 iPhone 与 iPad 使用的 Plex 授权列表。
+    private var compactContent: some View {
         NavigationStack {
             List {
                 if let pin, connections.isEmpty, errorMessage == nil {
@@ -876,18 +1083,12 @@ private struct PlexAuthorizationView: View {
                             Text("授权码")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            #if os(tvOS)
-                            Text(pin.code)
-                                .font(.system(.largeTitle, design: .monospaced, weight: .bold))
-                            #else
                             Text(pin.code)
                                 .font(.system(.largeTitle, design: .monospaced, weight: .bold))
                                 .textSelection(.enabled)
-                            #endif
                             Label(statusText, systemImage: "person.badge.key")
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
-                            #if !os(tvOS)
                             Button {
                                 didOpenBrowser = true
                                 statusText = "登录成功后请返回 Kanata"
@@ -900,10 +1101,6 @@ private struct PlexAuthorizationView: View {
                                 Label("发送登录链接到其他设备", systemImage: "square.and.arrow.up")
                             }
                             .buttonStyle(KanataSecondaryButtonStyle())
-                            #else
-                            Text("请在手机或电脑打开 plex.tv/link，登录同一账号并输入上方授权码。")
-                                .font(.callout)
-                            #endif
                         }
                         .padding(.vertical, 8)
                     }
@@ -964,13 +1161,9 @@ private struct PlexAuthorizationView: View {
                         .kanataToolbarTextButton()
                 }
             }
-            .task { await beginAuthorization() }
-            .onChange(of: scenePhase) { _, phase in
-                guard phase == .active, didOpenBrowser else { return }
-                statusText = "已返回 Kanata，正在发现服务器…"
-            }
         }
     }
+    #endif
 
     /// 创建 PIN 并持续轮询，直到授权成功、失败或界面关闭。
     private func beginAuthorization() async {
@@ -1173,7 +1366,7 @@ private struct WebDAVChannelView: View {
             }
         }
         #else
-        .sheet(item: $pendingImport) { draft in
+        .kanataModal(item: $pendingImport) { draft in
             MediaImportPreview(draft: draft, onConfirm: onAdd)
         }
         #endif
@@ -1545,7 +1738,7 @@ private struct MediaServerChannelView: View {
             }
         }
         #else
-        .sheet(item: $pendingImport) { draft in
+        .kanataModal(item: $pendingImport) { draft in
             MediaImportPreview(draft: draft, onConfirm: onAdd)
         }
         #endif

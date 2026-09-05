@@ -388,11 +388,11 @@ struct LibraryView: View {
                     )
                 }
             }
-            .sheet(item: $pendingLocalImport) { draft in
+            .kanataModal(item: $pendingLocalImport) { draft in
                 MediaImportPreview(draft: draft, onConfirm: addMediaItems)
             }
             #if os(tvOS)
-            .sheet(isPresented: $isSearching) {
+            .kanataModal(isPresented: $isSearching) {
                 TVLibrarySearchSheet(searchText: $searchText)
             }
             .navigationDestination(isPresented: $isShowingSettings) {
@@ -1221,26 +1221,114 @@ private extension View {
 private struct TVLibrarySearchSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var searchText: String
+    @FocusState private var focusedControl: SearchFocus?
+
+    /// Apple TV 搜索页中的焦点目标。
+    private enum SearchFocus: Hashable {
+        case close
+        case field
+        case clear
+        case done
+    }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                TextField("标题或集数", text: $searchText)
-            }
-            .navigationTitle("搜索媒体库")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
-                        .kanataToolbarTextButton()
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("清除") {
-                        searchText = ""
-                        dismiss()
+        ZStack {
+            LinearGradient(
+                colors: [KanataTheme.backgroundTop, KanataTheme.background],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 48) {
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("搜索媒体库")
+                            .font(.largeTitle.bold())
+                        Text("按标题、文件名或集数筛选已添加的内容")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
                     }
-                    .kanataToolbarTextButton()
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Label("关闭", systemImage: "xmark")
+                    }
+                    .buttonStyle(KanataTVActionButtonStyle())
+                    .focused($focusedControl, equals: .close)
                 }
+                .focusSection()
+
+                VStack(alignment: .leading, spacing: 20) {
+                    Label("搜索关键词", systemImage: "magnifyingglass")
+                        .font(.title2.bold())
+                    HStack(spacing: 18) {
+                        Image(systemName: "text.magnifyingglass")
+                            .font(.title2)
+                            .foregroundStyle(KanataTheme.accent)
+                        TextField("例如：未来日记、S01E03、第 12 集", text: $searchText)
+                            .font(.title2)
+                            .focused($focusedControl, equals: .field)
+                            .onSubmit { finishSearch() }
+                    }
+                    .padding(.horizontal, 26)
+                    .frame(minHeight: 82)
+                    .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18)
+                            .stroke(KanataTheme.separator, lineWidth: 1)
+                    }
+                    Text(searchText.isEmpty
+                        ? "输入关键词后，媒体库会立即筛选匹配内容。"
+                        : "当前关键词：\(searchText)")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 18) {
+                        Button { clearSearch() } label: {
+                            Label("清除关键词", systemImage: "xmark.circle")
+                        }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        .focused($focusedControl, equals: .clear)
+                        .disabled(searchText.isEmpty)
+
+                        Button { finishSearch() } label: {
+                            Label("查看搜索结果", systemImage: "checkmark")
+                        }
+                        .buttonStyle(KanataPrimaryButtonStyle())
+                        .focused($focusedControl, equals: .done)
+                    }
+                    .focusSection()
+                }
+                .padding(40)
+                .frame(maxWidth: 1120)
+                .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: 1560, maxHeight: 880)
+            .padding(.horizontal, 72)
+            .padding(.vertical, 56)
+        }
+        .onAppear { focusSearchField() }
+        .onExitCommand { dismiss() }
+    }
+
+    /// 清空关键词并把焦点送回输入框，方便继续输入。
+    private func clearSearch() {
+        searchText = ""
+        focusedControl = .field
+    }
+
+    /// 完成搜索并返回媒体库展示筛选结果。
+    private func finishSearch() {
+        dismiss()
+    }
+
+    /// 在面板出现后聚焦输入框，确保键盘只在用户主动搜索时显示。
+    private func focusSearchField() {
+        Task { @MainActor in
+            await Task.yield()
+            focusedControl = .field
         }
     }
 }

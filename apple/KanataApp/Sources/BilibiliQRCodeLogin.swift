@@ -189,6 +189,144 @@ struct BilibiliQRCodeLoginSheet: View {
     private let client = BilibiliQRCodeClient()
 
     var body: some View {
+        Group {
+            #if os(tvOS)
+            tvContent
+            #else
+            compactContent
+            #endif
+        }
+        .task { await beginLogin() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, didOpenBrowser else { return }
+            statusText = "已返回 Kanata，正在确认登录…"
+        }
+    }
+
+    #if os(tvOS)
+    /// 构建适合客厅观看距离的 B 站扫码登录全屏面板。
+    private var tvContent: some View {
+        ZStack {
+            LinearGradient(
+                colors: [KanataTheme.backgroundTop, KanataTheme.background],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 34) {
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("扫码登录 B 站")
+                            .font(.largeTitle.bold())
+                        Text("用手机完成授权，Kanata 会自动保存登录状态")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Label("关闭", systemImage: "xmark")
+                    }
+                    .buttonStyle(KanataTVActionButtonStyle())
+                }
+                .focusSection()
+
+                if let renderedQRCode {
+                    HStack(spacing: 42) {
+                        VStack(alignment: .leading, spacing: 26) {
+                            Label("在手机上操作", systemImage: "iphone")
+                                .font(.title2.bold())
+                                .foregroundStyle(KanataTheme.accent)
+                            instructionRow(number: 1, text: "打开哔哩哔哩 App")
+                            instructionRow(number: 2, text: "扫描右侧二维码")
+                            instructionRow(number: 3, text: "在手机上确认登录")
+                            Divider()
+                            Text("二维码只用于本次登录。成功后凭证仅保存到本机 Keychain。")
+                                .font(.headline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(38)
+                        .frame(width: 590, alignment: .topLeading)
+                        .frame(minHeight: 590, alignment: .topLeading)
+                        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+
+                        VStack(spacing: 24) {
+                            Image(uiImage: renderedQRCode)
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 390, height: 390)
+                                .padding(24)
+                                .background(.white, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                                .shadow(color: .black.opacity(0.24), radius: 24, y: 12)
+                                .accessibilityLabel("B 站登录二维码")
+                            Label(statusText, systemImage: statusSymbol)
+                                .font(.title3.bold())
+                                .padding(.horizontal, 22)
+                                .frame(minHeight: 58)
+                                .background(KanataTheme.elevatedSurface, in: Capsule())
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 590)
+                        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    }
+                } else if let errorText {
+                    VStack(spacing: 24) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 62, weight: .light))
+                            .foregroundStyle(KanataTheme.warning)
+                        Text("无法生成登录二维码")
+                            .font(.title.bold())
+                        Text(errorText)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("重新生成") {
+                            self.errorText = nil
+                            Task { await beginLogin() }
+                        }
+                        .buttonStyle(KanataPrimaryButtonStyle())
+                        .frame(width: 360)
+                    }
+                    .padding(48)
+                    .frame(maxWidth: 980, maxHeight: 560)
+                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                } else {
+                    VStack(spacing: 22) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text(statusText)
+                            .font(.title2.bold())
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(maxWidth: 1480, maxHeight: 900)
+            .padding(.horizontal, 72)
+            .padding(.vertical, 54)
+        }
+        .onExitCommand { dismiss() }
+    }
+
+    /// 生成 Apple TV 扫码说明中的单步提示行。
+    /// - Parameters:
+    ///   - number: 步骤序号。
+    ///   - text: 操作说明。
+    /// - Returns: 带序号标识的说明行。
+    private func instructionRow(number: Int, text: String) -> some View {
+        HStack(spacing: 18) {
+            Text("\(number)")
+                .font(.headline.bold())
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .background(KanataTheme.accent, in: Circle())
+            Text(text)
+                .font(.title3.weight(.semibold))
+        }
+    }
+    #else
+    /// 构建 iPhone 与 iPad 使用的紧凑扫码登录面板。
+    private var compactContent: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
@@ -212,7 +350,6 @@ struct BilibiliQRCodeLoginSheet: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                    #if !os(tvOS)
                     VStack(spacing: 12) {
                         Button {
                             didOpenBrowser = true
@@ -231,7 +368,6 @@ struct BilibiliQRCodeLoginSheet: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                    #endif
                 } else if loginSession != nil, errorText == nil {
                     ContentUnavailableView(
                         "二维码生成失败",
@@ -268,13 +404,9 @@ struct BilibiliQRCodeLoginSheet: View {
                         .kanataToolbarTextButton()
                 }
             }
-            .task { await beginLogin() }
-            .onChange(of: scenePhase) { _, phase in
-                guard phase == .active, didOpenBrowser else { return }
-                statusText = "已返回 Kanata，正在确认登录…"
-            }
         }
     }
+    #endif
 
     /// 创建新二维码并每两秒轮询一次，直到登录、过期或任务取消。
     private func beginLogin() async {
