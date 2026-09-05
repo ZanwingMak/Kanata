@@ -4,6 +4,24 @@ import Foundation
 import SwiftUI
 import UIKit
 
+/// 为登录流程生成高容错、无插值的二维码图片。
+enum KanataQRCodeRenderer {
+    /// 把登录地址渲染为适合屏幕扫码的二维码。
+    /// - Parameter value: 二维码承载的完整文本。
+    /// - Returns: 可直接显示的二维码图片；生成失败时返回 nil。
+    static func image(from value: String) -> UIImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(value.utf8)
+        filter.correctionLevel = "Q"
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)) else {
+            return nil
+        }
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        guard let image = context.createCGImage(output, from: output.extent) else { return nil }
+        return UIImage(cgImage: image)
+    }
+}
+
 /// 一次 B 站二维码登录会话。
 struct BilibiliQRCodeSession: Sendable {
     let url: URL
@@ -418,7 +436,7 @@ struct BilibiliQRCodeLoginSheet: View {
             statusText = "正在生成二维码…"
             let value = try await client.generate()
             loginSession = value
-            renderedQRCode = Self.qrImage(from: value.url.absoluteString)
+            renderedQRCode = KanataQRCodeRenderer.image(from: value.url.absoluteString)
             statusText = "等待扫码"
             while !Task.isCancelled {
                 switch try await client.poll(key: value.key) {
@@ -442,21 +460,6 @@ struct BilibiliQRCodeLoginSheet: View {
         } catch {
             errorText = error.localizedDescription
         }
-    }
-
-    /// 把登录 URL 生成为高容错、无插值的二维码图片。
-    /// - Parameter value: 二维码承载的完整 URL。
-    /// - Returns: 可直接显示的二维码图片。
-    private static func qrImage(from value: String) -> UIImage? {
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(value.utf8)
-        filter.correctionLevel = "Q"
-        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)) else {
-            return nil
-        }
-        let context = CIContext(options: [.useSoftwareRenderer: false])
-        guard let image = context.createCGImage(output, from: output.extent) else { return nil }
-        return UIImage(cgImage: image)
     }
 
     /// 根据登录状态选择易懂的状态图标。

@@ -856,6 +856,28 @@ private struct MediaSourceConnectionView: View {
 
 /// Plex 官方网页登录与服务器选择界面。
 private struct PlexAuthorizationView: View {
+    /// Plex 官方授权页可切换的登录呈现方式。
+    private enum AuthorizationMode: String, CaseIterable, Identifiable {
+        case web
+        case qrCode
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .web: "网页登录"
+            case .qrCode: "扫码登录"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .web: "safari"
+            case .qrCode: "qrcode"
+            }
+        }
+    }
+
     let onSelect: (PlexDiscoveredConnection) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -865,6 +887,12 @@ private struct PlexAuthorizationView: View {
     @State private var statusText = "正在创建 Plex 登录会话…"
     @State private var errorMessage: String?
     @State private var didOpenBrowser = false
+    @State private var renderedQRCode: UIImage?
+    #if os(tvOS)
+    @State private var authorizationMode = AuthorizationMode.qrCode
+    #else
+    @State private var authorizationMode = AuthorizationMode.web
+    #endif
     private let client = PlexAccountClient()
     #if os(tvOS)
     @FocusState private var focusedControl: PlexAuthorizationFocus?
@@ -872,6 +900,7 @@ private struct PlexAuthorizationView: View {
     /// Apple TV Plex 授权页中的焦点目标。
     private enum PlexAuthorizationFocus: Hashable {
         case close
+        case authorizationMode
         case retry
         case connection(String)
     }
@@ -913,7 +942,7 @@ private struct PlexAuthorizationView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("登录 Plex")
                             .font(.largeTitle.bold())
-                        Text(connections.isEmpty ? "在另一台设备完成授权" : "选择要连接的媒体服务器")
+                        Text(tvSubtitle)
                             .font(.title3)
                             .foregroundStyle(.secondary)
                     }
@@ -929,44 +958,21 @@ private struct PlexAuthorizationView: View {
                 if !connections.isEmpty {
                     tvConnectionList
                 } else if let pin, errorMessage == nil {
-                    HStack(spacing: 42) {
-                        VStack(alignment: .leading, spacing: 28) {
-                            Label("在手机或电脑上操作", systemImage: "desktopcomputer")
-                                .font(.title2.bold())
-                                .foregroundStyle(KanataTheme.accent)
-                            plexInstructionRow(number: 1, text: "打开 plex.tv/link")
-                            plexInstructionRow(number: 2, text: "登录同一个 Plex 账号")
-                            plexInstructionRow(number: 3, text: "输入右侧授权码")
-                            Divider()
-                            Text("授权成功后会自动发现服务器并测试可用线路。")
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
+                    VStack(spacing: 24) {
+                        Picker("登录方式", selection: $authorizationMode) {
+                            ForEach(AuthorizationMode.allCases) { mode in
+                                Label(mode.title, systemImage: mode.symbol).tag(mode)
+                            }
                         }
-                        .padding(40)
-                        .frame(width: 650, alignment: .topLeading)
-                        .frame(minHeight: 520, alignment: .topLeading)
-                        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .pickerStyle(.segmented)
+                        .frame(width: 620)
+                        .focused($focusedControl, equals: .authorizationMode)
 
-                        VStack(spacing: 28) {
-                            Text("授权码")
-                                .font(.title3.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Text(pin.code)
-                                .font(.system(size: 64, weight: .bold, design: .monospaced))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.55)
-                                .foregroundStyle(KanataTheme.accent)
-                                .padding(.horizontal, 36)
-                                .frame(maxWidth: .infinity, minHeight: 128)
-                                .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 22))
-                            Label(statusText, systemImage: "person.badge.key")
-                                .font(.title3.bold())
-                                .multilineTextAlignment(.center)
-                                .foregroundStyle(.secondary)
+                        if authorizationMode == .qrCode {
+                            tvQRCodeAuthorization(pin)
+                        } else {
+                            tvWebAuthorization(pin)
                         }
-                        .padding(40)
-                        .frame(maxWidth: .infinity, minHeight: 520)
-                        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
                     }
                 } else if let errorMessage {
                     VStack(spacing: 24) {
@@ -1002,6 +1008,109 @@ private struct PlexAuthorizationView: View {
             .padding(.vertical, 54)
         }
         .onExitCommand { dismiss() }
+    }
+
+    /// 返回 Apple TV Plex 授权页当前模式对应的副标题。
+    private var tvSubtitle: String {
+        guard connections.isEmpty else { return "选择要连接的媒体服务器" }
+        return authorizationMode == .qrCode ? "使用手机扫描二维码完成授权" : "在另一台设备输入授权码"
+    }
+
+    /// 构建 Apple TV 默认展示的 Plex 扫码授权内容。
+    /// - Parameter pin: 当前 Plex 官方授权会话。
+    /// - Returns: 扫码说明、二维码与授权状态。
+    private func tvQRCodeAuthorization(_ pin: PlexAuthorizationPin) -> some View {
+        HStack(spacing: 42) {
+            VStack(alignment: .leading, spacing: 28) {
+                Label("用手机扫码", systemImage: "iphone")
+                    .font(.title2.bold())
+                    .foregroundStyle(KanataTheme.accent)
+                plexInstructionRow(number: 1, text: "打开手机相机或扫码工具")
+                plexInstructionRow(number: 2, text: "扫描右侧二维码")
+                plexInstructionRow(number: 3, text: "登录 Plex 并确认授权")
+                Divider()
+                Text("授权完成后无需返回操作，Apple TV 会自动发现服务器。")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(40)
+            .frame(width: 650, alignment: .topLeading)
+            .frame(minHeight: 540, alignment: .topLeading)
+            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+
+            VStack(spacing: 22) {
+                if let renderedQRCode {
+                    Image(uiImage: renderedQRCode)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 350, height: 350)
+                        .padding(22)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .shadow(color: .black.opacity(0.24), radius: 24, y: 12)
+                        .accessibilityLabel("Plex 登录二维码")
+                } else {
+                    Image(systemName: "qrcode")
+                        .font(.system(size: 100, weight: .light))
+                        .foregroundStyle(.secondary)
+                    Text("二维码生成失败，请切换到网页登录")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+                Label(statusText, systemImage: "person.badge.key")
+                    .font(.title3.bold())
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(36)
+            .frame(maxWidth: .infinity, minHeight: 540)
+            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        }
+    }
+
+    /// 构建 Apple TV 可切换使用的 Plex 授权码内容。
+    /// - Parameter pin: 当前 Plex 官方授权会话。
+    /// - Returns: 网页操作说明、授权码与授权状态。
+    private func tvWebAuthorization(_ pin: PlexAuthorizationPin) -> some View {
+        HStack(spacing: 42) {
+            VStack(alignment: .leading, spacing: 28) {
+                Label("在手机或电脑上操作", systemImage: "desktopcomputer")
+                    .font(.title2.bold())
+                    .foregroundStyle(KanataTheme.accent)
+                plexInstructionRow(number: 1, text: "打开 plex.tv/link")
+                plexInstructionRow(number: 2, text: "登录同一个 Plex 账号")
+                plexInstructionRow(number: 3, text: "输入右侧授权码")
+                Divider()
+                Text("授权成功后会自动发现服务器并测试可用线路。")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(40)
+            .frame(width: 650, alignment: .topLeading)
+            .frame(minHeight: 540, alignment: .topLeading)
+            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+
+            VStack(spacing: 28) {
+                Text("授权码")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(pin.code)
+                    .font(.system(size: 64, weight: .bold, design: .monospaced))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                    .foregroundStyle(KanataTheme.accent)
+                    .padding(.horizontal, 36)
+                    .frame(maxWidth: .infinity, minHeight: 128)
+                    .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 22))
+                Label(statusText, systemImage: "person.badge.key")
+                    .font(.title3.bold())
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(40)
+            .frame(maxWidth: .infinity, minHeight: 540)
+            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        }
     }
 
     /// 构建 Plex 授权页的服务器选择列表。
@@ -1078,31 +1187,68 @@ private struct PlexAuthorizationView: View {
         NavigationStack {
             List {
                 if let pin, connections.isEmpty, errorMessage == nil {
-                    Section("网页登录") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("授权码")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(pin.code)
-                                .font(.system(.largeTitle, design: .monospaced, weight: .bold))
-                                .textSelection(.enabled)
-                            Label(statusText, systemImage: "person.badge.key")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                            Button {
-                                didOpenBrowser = true
-                                statusText = "登录成功后请返回 Kanata"
-                                openURL(pin.authorizationURL)
-                            } label: {
-                                Label("打开 Plex 官方登录页", systemImage: "safari")
+                    Section("登录方式") {
+                        Picker("授权方式", selection: $authorizationMode) {
+                            ForEach(AuthorizationMode.allCases) { mode in
+                                Label(mode.title, systemImage: mode.symbol).tag(mode)
                             }
-                            .buttonStyle(KanataPrimaryButtonStyle())
-                            ShareLink(item: pin.authorizationURL) {
-                                Label("发送登录链接到其他设备", systemImage: "square.and.arrow.up")
-                            }
-                            .buttonStyle(KanataSecondaryButtonStyle())
                         }
-                        .padding(.vertical, 8)
+                        .pickerStyle(.segmented)
+                    }
+
+                    if authorizationMode == .web {
+                        Section("网页登录") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("授权码")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(pin.code)
+                                    .font(.system(.largeTitle, design: .monospaced, weight: .bold))
+                                    .textSelection(.enabled)
+                                Label(statusText, systemImage: "person.badge.key")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                Button {
+                                    didOpenBrowser = true
+                                    statusText = "登录成功后请返回 Kanata"
+                                    openURL(pin.authorizationURL)
+                                } label: {
+                                    Label("打开 Plex 官方登录页", systemImage: "safari")
+                                }
+                                .buttonStyle(KanataPrimaryButtonStyle())
+                                ShareLink(item: pin.authorizationURL) {
+                                    Label("发送登录链接到其他设备", systemImage: "square.and.arrow.up")
+                                }
+                                .buttonStyle(KanataSecondaryButtonStyle())
+                            }
+                            .padding(.vertical, 8)
+                        }
+                    } else {
+                        Section("扫码登录") {
+                            VStack(spacing: 14) {
+                                if let renderedQRCode {
+                                    Image(uiImage: renderedQRCode)
+                                        .interpolation(.none)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 240, height: 240)
+                                        .padding(14)
+                                        .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                        .accessibilityLabel("Plex 登录二维码")
+                                } else {
+                                    Label("二维码生成失败", systemImage: "exclamationmark.triangle")
+                                        .foregroundStyle(KanataTheme.warning)
+                                }
+                                Label(statusText, systemImage: "person.badge.key")
+                                    .font(.callout.weight(.semibold))
+                                Text("请使用另一台设备扫描二维码，在 Plex 官方页面登录并确认授权。")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                        }
                     }
                 }
 
@@ -1171,10 +1317,12 @@ private struct PlexAuthorizationView: View {
         connections = []
         errorMessage = nil
         didOpenBrowser = false
+        renderedQRCode = nil
         statusText = "正在创建 Plex 登录会话…"
         do {
             let value = try await client.createPin()
             pin = value
+            renderedQRCode = KanataQRCodeRenderer.image(from: value.authorizationURL.absoluteString)
             statusText = "等待在 Plex 官方页面授权"
             for _ in 0..<150 where !Task.isCancelled {
                 if let values = try await client.check(value) {
