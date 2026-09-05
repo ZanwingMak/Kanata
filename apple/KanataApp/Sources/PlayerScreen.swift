@@ -1883,7 +1883,6 @@ private struct PlaybackRouteSelectionView: View {
                 .frame(maxWidth: .infinity, minHeight: 50)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .disabled(mode == .compatible && !isCompatibilityAvailable)
             .kanataTVFocus(cornerRadius: 12)
         }
@@ -1927,7 +1926,6 @@ private struct PlaybackRateSelectionView: View {
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .kanataTVFocus(cornerRadius: 12)
         }
         .navigationTitle("播放速度")

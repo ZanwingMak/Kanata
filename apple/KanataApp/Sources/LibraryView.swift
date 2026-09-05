@@ -651,7 +651,6 @@ struct LibraryView: View {
             }
             .frame(width: collectionCardWidth, alignment: .leading)
         }
-        .buttonStyle(.plain)
         .kanataTVFocus(cornerRadius: 18)
         .contextMenu {
             Button("从媒体库移除合集", systemImage: "trash", role: .destructive) {
@@ -676,7 +675,6 @@ struct LibraryView: View {
                         .frame(minHeight: 44)
                         .background(KanataTheme.surface, in: Capsule())
                 }
-                .buttonStyle(.plain)
                 .kanataTVFocus(cornerRadius: 22)
                 #endif
             }
@@ -723,7 +721,6 @@ struct LibraryView: View {
                             .padding(18)
                             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
-                        .buttonStyle(.plain)
                         .kanataTVFocus(cornerRadius: 18)
                         .contextMenu {
                             Button("删除登录记录", systemImage: "trash", role: .destructive) {
@@ -831,7 +828,6 @@ struct LibraryView: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .kanataTVFocus(cornerRadius: 18)
         .contextMenu {
             Button(
@@ -1821,7 +1817,6 @@ private struct CollectionDetailView: View {
                             .contentShape(Rectangle())
                             .frame(maxWidth: .infinity, minHeight: collectionEpisodeRowHeight)
                         }
-                        .buttonStyle(.plain)
                         .kanataTVFocus(cornerRadius: 14)
                         Menu {
                             Button("上移", systemImage: "arrow.up") { move(itemID: item.id, delta: -1) }
@@ -1841,7 +1836,6 @@ private struct CollectionDetailView: View {
                             Image(systemName: "ellipsis.circle")
                                 .frame(width: 54, height: 54)
                         }
-                        .buttonStyle(.plain)
                         .kanataTVFocus(cornerRadius: 27)
                     }
                 }

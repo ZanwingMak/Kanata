@@ -117,7 +117,6 @@ struct MediaSourceSheet: View {
                                     .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
                                     .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
                                 .kanataTVFocus(cornerRadius: 14)
                                 Menu {
                                     Button {
@@ -139,7 +138,6 @@ struct MediaSourceSheet: View {
                                         .background(KanataTheme.surface, in: Circle())
                                         .contentShape(Circle())
                                 }
-                                .buttonStyle(.plain)
                                 .kanataTVFocus(cornerRadius: 19)
                                 .accessibilityLabel("管理 \(profile.name)")
                             }
@@ -1113,7 +1111,6 @@ private struct WebDAVChannelView: View {
                             .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
                         .kanataTVFocus(cornerRadius: 14)
                         if entry.isDirectory {
                             Button {
@@ -1128,7 +1125,6 @@ private struct WebDAVChannelView: View {
                                     .frame(width: 44, height: 44)
                                 #endif
                             }
-                            .buttonStyle(.plain)
                             .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .kanataTVFocus(cornerRadius: 14)
                             .accessibilityLabel("把 \(entry.name) 添加为合集")
@@ -1486,7 +1482,6 @@ private struct MediaServerChannelView: View {
                             .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
                         .kanataTVFocus(cornerRadius: 14)
                         if entry.isDirectory {
                             Button {
@@ -1501,7 +1496,6 @@ private struct MediaServerChannelView: View {
                                     .frame(width: 44, height: 44)
                                 #endif
                             }
-                            .buttonStyle(.plain)
                             .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .kanataTVFocus(cornerRadius: 14)
                             .accessibilityLabel("把 \(entry.name) 添加为合集")

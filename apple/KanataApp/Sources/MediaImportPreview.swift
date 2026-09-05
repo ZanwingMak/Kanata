@@ -270,7 +270,6 @@ struct MediaImportPreview: View {
                 .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .kanataTVFocus(cornerRadius: 12)
             Menu {
                 Button("修改季集号", systemImage: "number") { editingCandidate = candidate }
@@ -298,7 +297,6 @@ struct MediaImportPreview: View {
                     .frame(width: 48, height: 48)
                 #endif
             }
-            .buttonStyle(.plain)
             .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .kanataTVFocus(cornerRadius: 12)
             .accessibilityLabel("管理 \(candidate.item.displayName)")

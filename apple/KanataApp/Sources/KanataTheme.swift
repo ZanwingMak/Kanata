@@ -177,13 +177,18 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
                     .stroke(.white.opacity(primaryFocusOpacity), lineWidth: primaryFocusLineWidth)
             }
             .shadow(color: KanataTheme.accent.opacity(primaryFocusOpacity), radius: 14)
+            #if os(tvOS)
+            .scaleEffect(isFocused ? 1.018 : 1)
+            .focusEffectDisabled()
+            .animation(.easeOut(duration: 0.16), value: isFocused)
+            #endif
             .opacity(configuration.isPressed ? 0.78 : 1)
     }
 
     /// 返回 Apple TV 当前焦点的描边透明度。
     private var primaryFocusOpacity: Double {
         #if os(tvOS)
-        isFocused ? 0.95 : 0
+        isFocused ? 0.72 : 0
         #else
         0
         #endif
@@ -192,7 +197,7 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
     /// 返回 Apple TV 当前焦点的描边宽度。
     private var primaryFocusLineWidth: CGFloat {
         #if os(tvOS)
-        isFocused ? 4 : 0
+        isFocused ? 2 : 0
         #else
         0
         #endif
@@ -225,6 +230,11 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
                     .stroke(secondaryBorder, lineWidth: secondaryLineWidth)
             }
             .shadow(color: KanataTheme.accent.opacity(secondaryFocusOpacity), radius: 12)
+            #if os(tvOS)
+            .scaleEffect(isFocused ? 1.015 : 1)
+            .focusEffectDisabled()
+            .animation(.easeOut(duration: 0.16), value: isFocused)
+            #endif
     }
 
     /// 返回次级按钮在按压和 Apple TV 聚焦状态下的背景色。
@@ -233,7 +243,7 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     private func secondaryBackground(configuration: Configuration) -> Color {
         if configuration.isPressed { return KanataTheme.elevatedSurface }
         #if os(tvOS)
-        if isFocused { return KanataTheme.accent.opacity(0.26) }
+        if isFocused { return KanataTheme.accent.opacity(0.16) }
         #endif
         return KanataTheme.surface
     }
@@ -249,7 +259,7 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     /// 返回次级按钮当前描边宽度。
     private var secondaryLineWidth: CGFloat {
         #if os(tvOS)
-        isFocused ? 4 : 1
+        isFocused ? 2 : 1
         #else
         1
         #endif
@@ -258,7 +268,7 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     /// 返回次级按钮 Apple TV 焦点阴影透明度。
     private var secondaryFocusOpacity: Double {
         #if os(tvOS)
-        isFocused ? 0.55 : 0
+        isFocused ? 0.24 : 0
         #else
         0
         #endif
@@ -280,15 +290,15 @@ struct KanataTVActionButtonStyle: ButtonStyle {
             .padding(.horizontal, 20)
             .frame(minHeight: 58)
             .background(
-                isFocused ? KanataTheme.accent.opacity(0.28) : KanataTheme.elevatedSurface,
+                isFocused ? KanataTheme.accent.opacity(0.18) : KanataTheme.elevatedSurface,
                 in: Capsule()
             )
             .overlay {
                 Capsule()
-                    .stroke(isFocused ? KanataTheme.accent : KanataTheme.separator, lineWidth: isFocused ? 3 : 1)
+                    .stroke(isFocused ? KanataTheme.accent : KanataTheme.separator, lineWidth: isFocused ? 2 : 1)
             }
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.32 : 0), radius: 16)
-            .scaleEffect(isFocused ? 1.04 : 1)
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.22 : 0), radius: 14)
+            .scaleEffect(isFocused ? 1.025 : 1)
             .opacity(configuration.isPressed ? 0.72 : 1)
             .focusEffectDisabled()
             .animation(.easeOut(duration: 0.14), value: isFocused)
@@ -297,30 +307,30 @@ struct KanataTVActionButtonStyle: ButtonStyle {
 #endif
 
 #if os(tvOS)
-/// Apple TV 上使用主题色边界和轻微放大表达焦点，避免高亮变成刺眼白色光条。
-private struct KanataTVFocusModifier: ViewModifier {
+/// Apple TV 卡片与列表行统一使用无白色材质的克制焦点样式。
+private struct KanataTVFocusButtonStyle: ButtonStyle {
     let cornerRadius: CGFloat
-    @FocusState private var isFocused: Bool
+    @Environment(\.isFocused) private var isFocused
 
-    /// 为可聚焦控件绘制稳定、克制的电视焦点反馈。
-    /// - Parameter content: 原始可聚焦控件。
-    /// - Returns: 禁用系统默认光晕并带主题色焦点框的控件。
-    func body(content: Content) -> some View {
-        content
-            .focused($isFocused)
+    /// 直接接管按钮焦点绘制，避免系统白色材质与自定义效果叠加。
+    /// - Parameter configuration: SwiftUI 按钮状态。
+    /// - Returns: 仅使用主题色描边、轻微提亮和阴影的按钮。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .focusEffectDisabled()
-            .background(
-                isFocused ? Color.white.opacity(0.10) : Color.clear,
-                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            )
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(isFocused ? KanataTheme.accent : Color.clear, lineWidth: 3)
+                    .stroke(isFocused ? KanataTheme.accent.opacity(0.92) : Color.clear, lineWidth: 2)
             }
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.32 : 0), radius: 16)
-            .scaleEffect(isFocused ? 1.018 : 1)
+            .shadow(color: .black.opacity(isFocused ? 0.34 : 0), radius: 18, y: 10)
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.20 : 0), radius: 12)
+            .brightness(isFocused ? 0.035 : 0)
+            .saturation(isFocused ? 1.05 : 1)
+            .scaleEffect(isFocused ? 1.022 : 1)
+            .opacity(configuration.isPressed ? 0.78 : 1)
             .zIndex(isFocused ? 1 : 0)
-            .animation(.easeOut(duration: 0.14), value: isFocused)
+            .animation(.easeOut(duration: 0.16), value: isFocused)
     }
 }
 #endif
@@ -386,15 +396,15 @@ struct KanataRowLabel: View {
 }
 
 extension View {
-    /// 在 Apple TV 使用无缩放焦点框，其他平台保持原视图。
+    /// 在 Apple TV 接管按钮焦点绘制，其他平台继续使用无附加材质的 plain 样式。
     /// - Parameter cornerRadius: 控件焦点框圆角。
-    /// - Returns: 平台适配后的可聚焦视图。
+    /// - Returns: 不会叠加系统白色焦点材质的按钮或导航入口。
     @ViewBuilder
     func kanataTVFocus(cornerRadius: CGFloat = 14) -> some View {
         #if os(tvOS)
-        modifier(KanataTVFocusModifier(cornerRadius: cornerRadius))
+        buttonStyle(KanataTVFocusButtonStyle(cornerRadius: cornerRadius))
         #else
-        self
+        buttonStyle(.plain)
         #endif
     }
 
