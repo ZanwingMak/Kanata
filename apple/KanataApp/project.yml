@@ -6,6 +6,9 @@ options:
   createIntermediateGroups: true
 
 packages:
+  KSPlayer:
+    url: https://github.com/kingslay/KSPlayer.git
+    from: 2.3.4
   KanataCore:
     path: ../KanataCore
   KanataRender:
@@ -18,6 +21,8 @@ targets:
     sources:
       - path: Sources
     dependencies:
+      - package: KSPlayer
+        product: KSPlayer
       - package: KanataCore
         product: KanataCore
       - package: KanataRender
@@ -33,7 +38,7 @@ targets:
         DANDANPLAY_APP_ID: ""
         DANDANPLAY_APP_SECRET: ""
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "21"
+        CURRENT_PROJECT_VERSION: "22"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
@@ -87,6 +92,8 @@ targets:
         excludes:
           - Info.plist
     dependencies:
+      - package: KSPlayer
+        product: KSPlayer
       - package: KanataCore
         product: KanataCore
       - package: KanataRender
@@ -101,7 +108,7 @@ targets:
         DANDANPLAY_APP_ID: ""
         DANDANPLAY_APP_SECRET: ""
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "21"
+        CURRENT_PROJECT_VERSION: "22"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "3"
         GENERATE_INFOPLIST_FILE: YES

@@ -336,6 +336,64 @@ private struct KanataTVFocusButtonStyle: ButtonStyle {
 }
 #endif
 
+/// 文件浏览器密集行专用样式；焦点边框贴合控件本身，不额外放大或挤占相邻操作。
+private struct KanataDirectoryRowButtonStyle: ButtonStyle {
+    let cornerRadius: CGFloat
+    #if os(tvOS)
+    @Environment(\.isFocused) private var isFocused
+    #endif
+
+    /// 绘制单层行背景与内描边，避免系统焦点、背景和外边框形成双框。
+    /// - Parameter configuration: SwiftUI 按钮状态。
+    /// - Returns: 尺寸稳定的目录行按钮。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                rowBackground,
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(rowBorder, lineWidth: rowBorderWidth)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            #if os(tvOS)
+            .focusEffectDisabled()
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.18 : 0), radius: 10)
+            .brightness(isFocused ? 0.025 : 0)
+            #endif
+            .opacity(configuration.isPressed ? 0.76 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    /// 当前焦点状态对应的行背景。
+    private var rowBackground: Color {
+        #if os(tvOS)
+        isFocused ? KanataTheme.accent.opacity(0.13) : KanataTheme.surface
+        #else
+        KanataTheme.surface
+        #endif
+    }
+
+    /// 当前焦点状态对应的单层边框颜色。
+    private var rowBorder: Color {
+        #if os(tvOS)
+        isFocused ? KanataTheme.accent.opacity(0.95) : KanataTheme.separator.opacity(0.65)
+        #else
+        KanataTheme.separator.opacity(0.55)
+        #endif
+    }
+
+    /// 当前焦点状态对应的边框宽度。
+    private var rowBorderWidth: CGFloat {
+        #if os(tvOS)
+        isFocused ? 2 : 1
+        #else
+        1
+        #endif
+    }
+}
+
 /// 统一设置页与媒体源页面的图标标题行。
 struct KanataRowLabel: View {
     let title: String
@@ -441,6 +499,13 @@ extension View {
         #else
         buttonStyle(.plain)
         #endif
+    }
+
+    /// 为目录主行和右侧操作提供无缩放、单描边的稳定焦点样式。
+    /// - Parameter cornerRadius: 行背景与焦点框圆角。
+    /// - Returns: 不会与相邻按钮边框重叠的目录按钮。
+    func kanataDirectoryRowStyle(cornerRadius: CGFloat = 14) -> some View {
+        buttonStyle(KanataDirectoryRowButtonStyle(cornerRadius: cornerRadius))
     }
 
     /// 在 Apple TV 的子目录中让遥控器返回键优先返回上一级，根目录保持系统导航行为。

@@ -347,7 +347,8 @@ struct MediaSourceSheet: View {
     /// - Parameter url: 文件提供器返回的文件 URL。
     /// - Returns: 常见视频格式时返回 true。
     private static func isVideoFile(_ url: URL) -> Bool {
-        ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "flv"]
+        ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "mts", "flv",
+         "mpg", "mpeg", "vob", "wmv", "ogv", "3gp", "3g2", "mxf", "rm", "rmvb"]
             .contains(url.pathExtension.lowercased())
     }
 
@@ -1420,7 +1421,7 @@ private struct WebDAVChannelView: View {
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
             Section("目录内容") {
                 ForEach(entries) { entry in
-                    HStack(spacing: 8) {
+                    HStack(spacing: 18) {
                         Button {
                             Task { await select(entry) }
                         } label: {
@@ -1449,10 +1450,9 @@ private struct WebDAVChannelView: View {
                             }
                             .frame(maxWidth: .infinity, minHeight: tvDirectoryRowHeight, alignment: .leading)
                             .padding(.horizontal, 16)
-                            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .contentShape(Rectangle())
                         }
-                        .kanataTVFocus(cornerRadius: 14)
+                        .kanataDirectoryRowStyle(cornerRadius: 14)
                         if entry.isDirectory {
                             Button {
                                 Task { await addDirectory(url: entry.url, title: entry.name) }
@@ -1466,8 +1466,7 @@ private struct WebDAVChannelView: View {
                                     .frame(width: 44, height: 44)
                                 #endif
                             }
-                            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .kanataTVFocus(cornerRadius: 14)
+                            .kanataDirectoryRowStyle(cornerRadius: 14)
                             .accessibilityLabel("把 \(entry.name) 添加为合集")
                         }
                     }
@@ -1789,7 +1788,7 @@ private struct MediaServerChannelView: View {
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
             Section(stack.last?.name ?? profile.name) {
                 ForEach(visibleEntries) { entry in
-                    HStack(spacing: 12) {
+                    HStack(spacing: 18) {
                         Button {
                             Task { await select(entry) }
                         } label: {
@@ -1820,10 +1819,9 @@ private struct MediaServerChannelView: View {
                             }
                             .frame(maxWidth: .infinity, minHeight: tvServerRowHeight, alignment: .leading)
                             .padding(.horizontal, 16)
-                            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .contentShape(Rectangle())
                         }
-                        .kanataTVFocus(cornerRadius: 14)
+                        .kanataDirectoryRowStyle(cornerRadius: 14)
                         if entry.isDirectory {
                             Button {
                                 Task { await addDirectory(entry) }
@@ -1837,8 +1835,7 @@ private struct MediaServerChannelView: View {
                                     .frame(width: 44, height: 44)
                                 #endif
                             }
-                            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .kanataTVFocus(cornerRadius: 14)
+                            .kanataDirectoryRowStyle(cornerRadius: 14)
                             .accessibilityLabel("把 \(entry.name) 添加为合集")
                         }
                     }

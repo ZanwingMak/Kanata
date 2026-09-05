@@ -3,7 +3,7 @@ import KanataCore
 import KanataRender
 import SwiftUI
 import UniformTypeIdentifiers
-#if os(iOS)
+#if canImport(UIKit)
 import UIKit
 #endif
 
@@ -30,6 +30,15 @@ enum PlayerScalingMode: String, CaseIterable, Identifiable {
         case .stretch: .resize
         }
     }
+
+    /// 返回通用解码内核对应的 UIKit 缩放模式。
+    var contentMode: UIView.ContentMode {
+        switch self {
+        case .fit: .scaleAspectFit
+        case .fill: .scaleAspectFill
+        case .stretch: .scaleToFill
+        }
+    }
 }
 
 /// 当前视频使用的读取路径；自动模式会在原始流失败后切换服务器兼容流。
@@ -50,8 +59,8 @@ enum PlaybackRouteMode: String, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
-        case .automatic: "优先直放，失败时自动请求媒体服务器转码"
-        case .direct: "只读取原始文件，保留最高画质且不使用服务器转码"
+        case .automatic: "依次尝试系统解码、通用解码与媒体服务器兼容流"
+        case .direct: "直接读取原始文件，MKV 等格式自动使用通用解码器"
         case .compatible: "直接请求 Jellyfin、Emby 或 Plex 的兼容 HLS"
         }
     }
@@ -121,12 +130,11 @@ private struct PlayerControlButtonStyle: ButtonStyle {
             #if os(tvOS)
             .focusEffectDisabled()
             .overlay {
-                Circle()
-                    .stroke(isFocused ? KanataTheme.accent : Color.clear, lineWidth: 4)
-                    .padding(-4)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(isFocused ? KanataTheme.accent : Color.clear, lineWidth: 3)
             }
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.48 : 0), radius: 18)
-            .scaleEffect(isFocused ? 1.1 : 1)
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.34 : 0), radius: 14)
+            .scaleEffect(isFocused ? 1.045 : 1)
             .animation(.easeOut(duration: 0.14), value: isFocused)
             #else
             .scaleEffect(1)
@@ -134,6 +142,86 @@ private struct PlayerControlButtonStyle: ButtonStyle {
             #endif
     }
 }
+
+#if os(tvOS)
+/// Apple TV 专用进度控件；获得焦点后可用遥控器左右键跳转。
+private struct TVSeekBar: View {
+    let value: Double
+    let duration: Double
+    let onSeek: (Double) -> Void
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = max(proxy.size.width, 1)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(isFocused ? 0.32 : 0.24))
+                Capsule()
+                    .fill(KanataTheme.accent)
+                    .frame(width: width * progress)
+                Circle()
+                    .fill(.white)
+                    .frame(width: isFocused ? 24 : 16, height: isFocused ? 24 : 16)
+                    .offset(x: max(0, width * progress - (isFocused ? 12 : 8)))
+                    .opacity(isFocused ? 1 : 0.82)
+            }
+            .frame(height: isFocused ? 14 : 8)
+            .frame(maxHeight: .infinity, alignment: .center)
+        }
+        .frame(height: 38)
+        .contentShape(Rectangle())
+        .focusable()
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(isFocused ? KanataTheme.accent.opacity(0.9) : .clear, lineWidth: 2)
+        }
+        .onMoveCommand(perform: handleMove)
+        .accessibilityLabel("播放进度")
+        .accessibilityValue("已播放 \(Int(value)) 秒，共 \(Int(duration)) 秒")
+        .accessibilityAdjustableAction(adjustAccessibilityValue)
+        .animation(.easeOut(duration: 0.12), value: isFocused)
+    }
+
+    /// 返回限制在 0 到 1 之间的播放进度。
+    private var progress: CGFloat {
+        guard duration.isFinite, duration > 0 else { return 0 }
+        return CGFloat(min(max(value / duration, 0), 1))
+    }
+
+    /// 处理遥控器方向键，短视频每次十秒，长视频每次三十秒。
+    /// - Parameter direction: Siri Remote 当前移动方向。
+    private func handleMove(_ direction: MoveCommandDirection) {
+        let step = duration >= 7_200 ? 30.0 : 10.0
+        switch direction {
+        case .left:
+            onSeek(max(0, value - step))
+        case .right:
+            onSeek(min(duration, value + step))
+        case .up, .down:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    /// 支持辅助功能的增减手势调整播放位置。
+    /// - Parameter direction: 辅助功能请求的增减方向。
+    private func adjustAccessibilityValue(_ direction: AccessibilityAdjustmentDirection) {
+        let step = duration >= 7_200 ? 30.0 : 10.0
+        switch direction {
+        case .increment:
+            onSeek(min(duration, value + step))
+        case .decrement:
+            onSeek(max(0, value - step))
+        @unknown default:
+            break
+        }
+    }
+}
+#endif
 
 #if os(iOS)
 /// iPhone 与 iPad 播放画面的连续手势类型。
@@ -183,6 +271,7 @@ struct PlayerScreen: View {
     @State private var isConfirmingExit = false
     @State private var resumesAfterExitCancellation = false
     @State private var isUsingCompatibilityStream = false
+    @State private var forcesUniversalPlayer = false
     @State private var playbackRouteMode = PlaybackRouteMode.automatic
     #if os(iOS)
     @State private var gestureMode: PlayerGestureMode?
@@ -211,12 +300,20 @@ struct PlayerScreen: View {
 
         ZStack {
             Color.black.ignoresSafeArea()
-            VideoSurface(
-                player: viewModel.player,
-                videoGravity: scalingMode.gravity,
-                controller: surfaceController
-            )
+            if viewModel.usesUniversalPlayer {
+                UniversalVideoSurface(
+                    playerLayer: viewModel.universalPlayerLayer,
+                    contentMode: scalingMode.contentMode
+                )
                 .ignoresSafeArea()
+            } else {
+                VideoSurface(
+                    player: viewModel.player,
+                    videoGravity: scalingMode.gravity,
+                    controller: surfaceController
+                )
+                .ignoresSafeArea()
+            }
 
             GeometryReader { proxy in
                 let viewport = danmakuViewport(
@@ -263,11 +360,19 @@ struct PlayerScreen: View {
                     .transition(.opacity)
             }
         }
+        #if os(tvOS)
+        .onPlayPauseCommand {
+            togglePlayback()
+            setControlsVisible(true)
+        }
+        .onMoveCommand(perform: handleTVRemoteMove)
+        #endif
         .kanataStatusBarHidden()
         .interactiveDismissDisabled()
         .onAppear { setIdleTimerDisabled(true) }
         .task(id: activeItem.id) {
             isUsingCompatibilityStream = playbackRouteMode == .compatible
+            forcesUniversalPlayer = false
             await openActiveItem()
         }
         .onChange(of: sleepMode) { _, value in
@@ -323,7 +428,11 @@ struct PlayerScreen: View {
                 onMarkOutro: { updateSkipSegment(outroStart: currentTime) },
                 onClearSkipSegment: { clearSkipSegment() },
                 onSelectPlaybackRoute: selectPlaybackRoute,
-                onPictureInPicture: { surfaceController.togglePictureInPicture() }
+                onPictureInPicture: {
+                    if !viewModel.toggleUniversalPictureInPicture() {
+                        surfaceController.togglePictureInPicture()
+                    }
+                }
             )
             .presentationDetents([.medium, .large])
         }
@@ -483,6 +592,9 @@ struct PlayerScreen: View {
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture { setControlsVisible(!isShowingControls) }
+                #if os(tvOS)
+                .focusable(!shouldShowPlayerControls)
+                #endif
         } else {
             Color.clear
                 .contentShape(Rectangle())
@@ -495,6 +607,9 @@ struct PlayerScreen: View {
                 }
                 #if os(iOS)
                 .gesture(playerDragGesture)
+                #endif
+                #if os(tvOS)
+                .focusable(!shouldShowPlayerControls)
                 #endif
         }
     }
@@ -683,7 +798,14 @@ struct PlayerScreen: View {
                 HStack(spacing: 8) {
                     Text(timeLabel(currentTime)).font(.caption.monospacedDigit())
                     #if os(tvOS)
-                    ProgressView(value: currentTime, total: max(viewModel.duration, 1))
+                    TVSeekBar(
+                        value: currentTime,
+                        duration: max(viewModel.duration, 1)
+                    ) { target in
+                        currentTime = target
+                        commitSeek(to: target)
+                        setControlsVisible(true)
+                    }
                     #else
                     Slider(
                         value: $currentTime,
@@ -784,7 +906,7 @@ struct PlayerScreen: View {
                         Button {
                             isShowingPlaylist = true
                         } label: {
-                            controlSymbol("rectangle.stack", prominent: false, compact: compact)
+                            controlSymbol("list.number", prominent: false, compact: compact)
                         }
                         .buttonStyle(PlayerControlButtonStyle())
                         .accessibilityLabel("选择分集")
@@ -872,12 +994,36 @@ struct PlayerScreen: View {
                 height: prominent ? primarySize : regularSize
             )
             .background(
-                prominent ? Color.white.opacity(0.24) : Color.black.opacity(0.34),
-                in: Circle()
+                prominent ? Color.white.opacity(0.23) : Color.black.opacity(0.42),
+                in: RoundedRectangle(cornerRadius: prominent ? 22 : 17, style: .continuous)
             )
-            .overlay(Circle().stroke(.white.opacity(prominent ? 0.25 : 0.12), lineWidth: 1))
-            .contentShape(Circle())
+            .overlay {
+                RoundedRectangle(cornerRadius: prominent ? 22 : 17, style: .continuous)
+                    .strokeBorder(.white.opacity(prominent ? 0.22 : 0.10), lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: prominent ? 22 : 17, style: .continuous))
     }
+
+    #if os(tvOS)
+    /// 播放中控制层隐藏时，任意方向键都先唤回控件；左右键同时执行十秒跳转。
+    /// - Parameter direction: Siri Remote 当前移动方向。
+    private func handleTVRemoteMove(_ direction: MoveCommandDirection) {
+        guard !shouldShowPlayerControls else { return }
+        setControlsVisible(true)
+        switch direction {
+        case .left:
+            commitSeek(to: currentTime - 10)
+            showOSD("后退 10 秒")
+        case .right:
+            commitSeek(to: currentTime + 10)
+            showOSD("前进 10 秒")
+        case .up, .down:
+            break
+        @unknown default:
+            break
+        }
+    }
+    #endif
 
     /// 返回播放器控制层在电视与触控设备上的水平安全间距。
     private var playerControlHorizontalPadding: CGFloat {
@@ -1038,6 +1184,8 @@ struct PlayerScreen: View {
             displayName: automaticMatchName,
             settings: settings,
             requestHeaders: activeItem.requestHeaders(),
+            mediaFileName: activeItem.displayName,
+            forceUniversalPlayer: forcesUniversalPlayer,
             progressKey: activeItem.mediaKey,
             nowPlaying: PlaybackNowPlayingMetadata(
                 title: activeItem.libraryTitle,
@@ -1065,6 +1213,12 @@ struct PlayerScreen: View {
     /// 原始媒体流失败时自动切换 Jellyfin、Emby 或 Plex 的服务端兼容 HLS。
     /// - Parameter message: 原始播放器返回的错误说明。
     private func handlePlaybackFailure(_ message: String) {
+        if !viewModel.usesUniversalPlayer {
+            forcesUniversalPlayer = true
+            showOSD("系统解码失败，正在切换通用解码器…")
+            Task { await openActiveItem() }
+            return
+        }
         guard playbackRouteMode == .automatic,
               !isUsingCompatibilityStream,
               activeItem.compatibilityPlaybackURL() != nil else { return }
@@ -1082,7 +1236,8 @@ struct PlayerScreen: View {
     private var playbackPathLabel: String {
         switch playbackRouteMode {
         case .automatic:
-            return isUsingCompatibilityStream ? "自动 · 兼容流" : "自动 · 原始流"
+            if isUsingCompatibilityStream { return "自动 · 服务器兼容流" }
+            return viewModel.usesUniversalPlayer ? "自动 · 通用解码" : "自动 · 系统解码"
         case .direct:
             return "原始流"
         case .compatible:
@@ -1100,6 +1255,7 @@ struct PlayerScreen: View {
         guard mode != playbackRouteMode || (mode == .automatic && isUsingCompatibilityStream) else { return }
         playbackRouteMode = mode
         isUsingCompatibilityStream = mode == .compatible
+        forcesUniversalPlayer = false
         showOSD("播放路径 · \(mode.title)")
         Task { await openActiveItem() }
     }
@@ -1108,6 +1264,7 @@ struct PlayerScreen: View {
     private func retryWithCompatibilityStream() {
         playbackRouteMode = .compatible
         isUsingCompatibilityStream = true
+        forcesUniversalPlayer = false
         showOSD("正在请求服务器兼容流…")
         Task { await openActiveItem() }
     }
@@ -1435,6 +1592,9 @@ private struct PlaylistPicker: View {
 
     var body: some View {
         NavigationStack {
+            #if os(tvOS)
+            tvContent
+            #else
             List {
                 ForEach(Array(items.enumerated()), id: \.element.id) { offset, item in
                     Button {
@@ -1471,8 +1631,90 @@ private struct PlaylistPicker: View {
                         .kanataToolbarTextButton()
                 }
             }
+            #endif
         }
     }
+
+    #if os(tvOS)
+    /// 构建电视端全屏分集面板，以独立背景和短标题避免文字与视频叠在一起。
+    private var tvContent: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.black.opacity(0.96), KanataTheme.background.opacity(0.98)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 26) {
+                HStack(alignment: .center, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(items.first?.collectionTitle ?? "选择分集")
+                            .font(.largeTitle.bold())
+                        Text("共 \(items.count) 集 · 选择后立即播放")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Label("关闭", systemImage: "xmark")
+                    }
+                    .buttonStyle(KanataTVActionButtonStyle())
+                }
+
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { offset, item in
+                            Button {
+                                onSelect(item)
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 18) {
+                                    Text("\(item.episode ?? item.collectionIndex ?? offset + 1)")
+                                        .font(.headline.monospacedDigit())
+                                        .foregroundStyle(item.id == currentItemID ? Color.black : Color.secondary)
+                                        .frame(width: 52, height: 52)
+                                        .background(
+                                            item.id == currentItemID ? KanataTheme.accent : KanataTheme.elevatedSurface,
+                                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        )
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(item.episodeLabel ?? "第 \(offset + 1) 集")
+                                            .font(.title3.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                        Text(item.displayName)
+                                            .font(.body)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer(minLength: 24)
+                                    if item.id == currentItemID {
+                                        Label("正在播放", systemImage: "speaker.wave.2.fill")
+                                            .font(.headline)
+                                            .foregroundStyle(KanataTheme.accent)
+                                    } else {
+                                        Image(systemName: "play.fill")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
+                                .padding(.horizontal, 18)
+                            }
+                            .kanataDirectoryRowStyle(cornerRadius: 16)
+                        }
+                    }
+                    .padding(6)
+                }
+                .scrollIndicators(.hidden)
+                .scrollClipDisabled()
+            }
+            .frame(maxWidth: 1540, maxHeight: 920)
+            .padding(.horizontal, 72)
+            .padding(.vertical, 52)
+        }
+        .navigationBarHidden(true)
+    }
+    #endif
 }
 
 /// 弹幕来源候选选择（FR-MATCH-003）
@@ -1602,10 +1844,10 @@ struct CandidatePicker: View {
             ToolbarItem(placement: .cancellationAction) {
                 Button("关闭") { dismiss() }
                     .kanataToolbarTextButton()
+                    }
+                }
             }
-        }
-    }
-    #endif
+            #endif
 
     #if os(tvOS)
     /// 构建 Apple TV 双栏弹幕来源选择界面，减少默认列表的大片高亮与焦点跳跃。
@@ -1663,12 +1905,13 @@ struct CandidatePicker: View {
                         TextField("剧名、集数或播放页链接", text: $keyword)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .frame(maxWidth: .infinity, minHeight: 64, alignment: .center)
                             .focused($focusedControl, equals: .searchField)
                             .onSubmit { searchCandidates() }
                         if viewModel.isSearchingCandidates { ProgressView() }
                     }
                     .padding(.horizontal, 18)
-                    .frame(minHeight: 64)
+                    .frame(height: 70, alignment: .center)
                     .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 14))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14)

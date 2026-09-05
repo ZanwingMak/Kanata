@@ -80,7 +80,8 @@ actor WebDAVClient {
     /// - Parameter url: WebDAV 文件地址。
     /// - Returns: 常见视频或 HLS 扩展名时返回 true。
     private static func isVideo(_ url: URL) -> Bool {
-        ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m3u8", "flv"]
+        ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "mts", "m3u8", "flv",
+         "mpg", "mpeg", "vob", "wmv", "ogv", "3gp", "3g2", "mxf", "rm", "rmvb"]
             .contains(url.pathExtension.lowercased())
     }
 
@@ -312,7 +313,8 @@ actor SynologyFileStationClient {
     /// - Returns: 常见视频格式时返回 true。
     private static func isVideo(path: String) -> Bool {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
-        return ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "flv"].contains(ext)
+        return ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "mts", "flv",
+                "mpg", "mpeg", "vob", "wmv", "ogv", "3gp", "3g2", "mxf", "rm", "rmvb"].contains(ext)
     }
 
     /// 把 DSM API 错误码转换为可操作提示。

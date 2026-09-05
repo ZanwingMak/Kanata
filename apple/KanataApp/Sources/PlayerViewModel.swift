@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import KanataCore
+@preconcurrency import KSPlayer
 import MediaPlayer
 import Observation
 
@@ -55,6 +56,8 @@ final class PlayerViewModel {
     }
 
     private(set) var player: AVPlayer?
+    private(set) var universalPlayerLayer: KSPlayerLayer?
+    private(set) var usesUniversalPlayer = false
     private(set) var state: LoadState = .idle
     /// 在线与本地弹幕合并后的原始数据，偏移在客户端本地应用。
     private(set) var rawItems: [DanmakuItem] = []
@@ -126,6 +129,8 @@ final class PlayerViewModel {
     private var subtitleGroup: AVMediaSelectionGroup?
     private var audioOptions: [String: AVMediaSelectionOption] = [:]
     private var subtitleOptions: [String: AVMediaSelectionOption] = [:]
+    private var universalAudioOptions: [String: any MediaPlayerTrack] = [:]
+    private var universalSubtitleOptions: [String: any MediaPlayerTrack] = [:]
     private var mediaKey = ""
     private var currentPlaybackURL: URL?
     private var currentDisplayName = ""
@@ -193,6 +198,10 @@ final class PlayerViewModel {
         itemStatusObservation = nil
         player?.pause()
         player = nil
+        universalPlayerLayer?.delegate = nil
+        universalPlayerLayer?.stop()
+        universalPlayerLayer = nil
+        usesUniversalPlayer = false
         currentPlaybackURL = nil
         currentDisplayName = ""
         uninstallSystemPlaybackControls()
@@ -208,6 +217,8 @@ final class PlayerViewModel {
     ///   - displayName: 媒体库保存的原始文件名或剧集名。
     ///   - settings: 应用设置，提供网关配置。
     ///   - requestHeaders: WebDAV 或媒体服务器播放所需的临时请求头。
+    ///   - mediaFileName: 保留扩展名的原始文件名，用于选择兼容容器的播放内核。
+    ///   - forceUniversalPlayer: 系统内核失败后强制改用 FFmpeg 重试。
     ///   - progressKey: 不含临时令牌的稳定断点标识。
     ///   - nowPlaying: 发布给锁屏、控制中心与遥控器的节目队列信息。
     func open(
@@ -215,12 +226,22 @@ final class PlayerViewModel {
         displayName: String,
         settings: AppSettings,
         requestHeaders: [String: String] = [:],
+        mediaFileName: String? = nil,
+        forceUniversalPlayer: Bool = false,
         progressKey: String? = nil,
         nowPlaying: PlaybackNowPlayingMetadata? = nil
     ) async {
         configurePlaybackAudioSession()
         playbackHasFailed = false
         resetDanmakuState()
+        localDuration = 0
+        resumePosition = nil
+        audioTracks = []
+        subtitleTracks = [MediaTrackOption(id: "off", title: "关闭")]
+        selectedAudioTrackID = nil
+        selectedSubtitleTrackID = "off"
+        universalAudioOptions.removeAll()
+        universalSubtitleOptions.removeAll()
         state = .preparing("正在读取视频…")
         client = settings.makeClient()
         builtInClient = settings.makeBuiltInBilibiliClient()
@@ -232,43 +253,86 @@ final class PlayerViewModel {
         currentDisplayName = displayName
         nowPlayingMetadata = nowPlaying
         mediaInfo.source = url.isFileURL ? "本地文件" : (url.host ?? "网络视频")
+        usesUniversalPlayer = forceUniversalPlayer
+            || Self.requiresUniversalPlayer(url: url, fileName: mediaFileName ?? displayName)
 
         // 文件选择器返回的地址需要显式申请访问权（FR-IMP-001）
         if url.startAccessingSecurityScopedResource() {
             securityScopedURL = url
         }
 
-        let assetOptions: [String: Any]? = requestHeaders.isEmpty
-            ? nil
-            : ["AVURLAssetHTTPHeaderFieldsKey": requestHeaders]
-        let asset = AVURLAsset(url: url, options: assetOptions)
-        if let duration = try? await asset.load(.duration) {
-            localDuration = duration.seconds.isFinite ? duration.seconds : 0
-        }
+        if usesUniversalPlayer {
+            openUniversalPlayer(url: url, requestHeaders: requestHeaders)
+        } else {
+            let assetOptions: [String: Any]? = requestHeaders.isEmpty
+                ? nil
+                : ["AVURLAssetHTTPHeaderFieldsKey": requestHeaders]
+            let asset = AVURLAsset(url: url, options: assetOptions)
+            if let duration = try? await asset.load(.duration) {
+                localDuration = duration.seconds.isFinite ? duration.seconds : 0
+            }
 
-        let item = AVPlayerItem(asset: asset)
-        let player = AVPlayer(playerItem: item)
-        player.automaticallyWaitsToMinimizeStalling = true
-        player.allowsExternalPlayback = true
-        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
-        self.player = player
-        installTimeObserver(on: player)
-        installPlaybackObservers(on: player, item: item)
-        installSystemPlaybackControls()
-        resumePosition = PlaybackProgressStore.position(for: mediaKey, duration: localDuration)
-        if let resumePosition {
-            await player.seek(to: CMTime(seconds: resumePosition, preferredTimescale: 600))
+            let item = AVPlayerItem(asset: asset)
+            let player = AVPlayer(playerItem: item)
+            player.automaticallyWaitsToMinimizeStalling = true
+            player.allowsExternalPlayback = true
+            player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
+            self.player = player
+            installTimeObserver(on: player)
+            installPlaybackObservers(on: player, item: item)
+            resumePosition = PlaybackProgressStore.position(for: mediaKey, duration: localDuration)
+            if let resumePosition {
+                await player.seek(to: CMTime(seconds: resumePosition, preferredTimescale: 600))
+            }
+            mediaTask = Task { [weak self] in
+                await self?.loadMediaOptions(asset: asset, item: item)
+            }
         }
+        installSystemPlaybackControls()
         state = .ready
         mediaInfo.duration = Self.timeLabel(localDuration)
         updateNowPlayingInfo(elapsedTime: resumePosition ?? 0, playbackRate: 0)
-
-        mediaTask = Task { [weak self] in
-            await self?.loadMediaOptions(asset: asset, item: item)
-        }
         matchingTask = Task { [weak self] in
             await self?.matchDanmaku(url: url, displayName: displayName)
         }
+    }
+
+    /// 为系统播放器不稳定支持的容器创建 FFmpeg 播放层，并保留请求头与断点。
+    /// - Parameters:
+    ///   - url: 原始媒体地址。
+    ///   - requestHeaders: WebDAV 或媒体服务器鉴权请求头。
+    private func openUniversalPlayer(url: URL, requestHeaders: [String: String]) {
+        let options = KSOptions()
+        options.registerRemoteControll = false
+        options.isAccurateSeek = true
+        options.isSecondOpen = true
+        options.autoSelectEmbedSubtitle = true
+        options.appendHeader(requestHeaders)
+        if let snapshot = PlaybackProgressStore.snapshot(for: mediaKey) {
+            resumePosition = snapshot.position
+            localDuration = snapshot.duration
+            options.startPlayTime = snapshot.position
+        }
+        let previousPlayerType = KSOptions.firstPlayerType
+        KSOptions.firstPlayerType = KSMEPlayer.self
+        let layer = KSPlayerLayer(url: url, isAutoPlay: false, options: options, delegate: self)
+        KSOptions.firstPlayerType = previousPlayerType
+        layer.player.allowsExternalPlayback = true
+        universalPlayerLayer = layer
+        loadUniversalMediaOptions(from: layer)
+    }
+
+    /// 判断媒体容器是否应跳过 AVPlayer 并直接使用 FFmpeg 内核。
+    /// - Parameters:
+    ///   - url: 实际播放地址。
+    ///   - fileName: 保留扩展名的媒体文件名。
+    /// - Returns: 容器需要通用解码时返回 true。
+    private static func requiresUniversalPlayer(url: URL, fileName: String) -> Bool {
+        let urlExtension = url.pathExtension.lowercased()
+        let nameExtension = URL(fileURLWithPath: fileName).pathExtension.lowercased()
+        let container = urlExtension.isEmpty ? nameExtension : urlExtension
+        return ["mkv", "webm", "avi", "flv", "rm", "rmvb", "ts", "m2ts", "mts",
+                "mpg", "mpeg", "vob", "wmv", "ogv", "3gp", "3g2", "mxf"].contains(container)
     }
 
     /// 激活影视播放音频会话，让静音模式、后台音频、画中画与 AirPlay 使用系统媒体路径。
@@ -757,17 +821,23 @@ final class PlayerViewModel {
 
     /// 按当前倍速继续播放。
     func play() {
-        guard let player else { return }
-        player.playImmediately(atRate: Float(playbackRate))
-        updateNowPlayingInfo(elapsedTime: player.currentTime().seconds, playbackRate: playbackRate)
+        if let universalPlayerLayer {
+            universalPlayerLayer.player.playbackRate = Float(playbackRate)
+            universalPlayerLayer.play()
+        } else {
+            guard let player else { return }
+            player.playImmediately(atRate: Float(playbackRate))
+        }
+        updateNowPlayingInfo(elapsedTime: currentPlaybackTime, playbackRate: playbackRate)
         onPlaybackStateChanged?(true)
     }
 
     /// 暂停视频并保存当前断点。
     func pause() {
         player?.pause()
+        universalPlayerLayer?.pause()
         saveProgressIfNeeded(force: true)
-        updateNowPlayingInfo(elapsedTime: player?.currentTime().seconds ?? 0, playbackRate: 0)
+        updateNowPlayingInfo(elapsedTime: currentPlaybackTime, playbackRate: 0)
         onPlaybackStateChanged?(false)
     }
 
@@ -778,24 +848,37 @@ final class PlayerViewModel {
         if player?.rate ?? 0 > 0 {
             player?.rate = Float(playbackRate)
         }
+        if let universalPlayerLayer {
+            universalPlayerLayer.player.playbackRate = Float(playbackRate)
+        }
         updateNowPlayingInfo(
-            elapsedTime: player?.currentTime().seconds ?? 0,
-            playbackRate: player?.rate ?? 0 > 0 ? playbackRate : 0
+            elapsedTime: currentPlaybackTime,
+            playbackRate: isPlaybackActive ? playbackRate : 0
         )
     }
 
     /// 设置播放器输出音量。
     /// - Parameter volume: 0 到 1 的音量值。
     func setVolume(_ volume: Double) {
-        player?.volume = Float(min(max(volume, 0), 1))
+        let value = Float(min(max(volume, 0), 1))
+        player?.volume = value
+        universalPlayerLayer?.player.playbackVolume = value
     }
 
     /// 读取播放器当前输出音量。
-    var volume: Double { Double(player?.volume ?? 1) }
+    var volume: Double {
+        if let universalPlayerLayer { return Double(universalPlayerLayer.player.playbackVolume) }
+        return Double(player?.volume ?? 1)
+    }
 
     /// 选择一条内封音轨。
     /// - Parameter id: 音轨稳定标识。
     func selectAudioTrack(id: String) {
+        if let track = universalAudioOptions[id], let universalPlayerLayer {
+            universalPlayerLayer.player.select(track: track)
+            selectedAudioTrackID = id
+            return
+        }
         guard let item = player?.currentItem,
               let audioGroup,
               let option = audioOptions[id] else { return }
@@ -806,6 +889,14 @@ final class PlayerViewModel {
     /// 选择或关闭一条内封字幕轨。
     /// - Parameter id: 字幕轨标识；off 表示关闭。
     func selectSubtitleTrack(id: String) {
+        if let universalPlayerLayer {
+            universalSubtitleOptions.values.forEach { $0.isEnabled = false }
+            if let track = universalSubtitleOptions[id] {
+                universalPlayerLayer.player.select(track: track)
+            }
+            selectedSubtitleTrackID = id
+            return
+        }
         guard let item = player?.currentItem, let subtitleGroup else { return }
         item.select(id == "off" ? nil : subtitleOptions[id], in: subtitleGroup)
         selectedSubtitleTrackID = id
@@ -814,20 +905,66 @@ final class PlayerViewModel {
     /// 跳转到指定时间，弹幕层会在下一次同步时重建（FR-PLY-012）
     func seek(to seconds: Double) {
         let target = min(max(seconds, 0), max(localDuration, 0))
-        player?.seek(
-            to: CMTime(seconds: target, preferredTimescale: 600),
-            toleranceBefore: .zero,
-            toleranceAfter: .zero
-        )
+        if let universalPlayerLayer {
+            universalPlayerLayer.seek(time: target, autoPlay: isPlaybackActive) { _ in }
+        } else {
+            player?.seek(
+                to: CMTime(seconds: target, preferredTimescale: 600),
+                toleranceBefore: .zero,
+                toleranceAfter: .zero
+            )
+        }
         lastProgressSaveTime = target
         PlaybackProgressStore.save(position: target, duration: localDuration, for: mediaKey)
         updateNowPlayingInfo(
             elapsedTime: target,
-            playbackRate: player?.rate ?? 0 > 0 ? playbackRate : 0
+            playbackRate: isPlaybackActive ? playbackRate : 0
         )
     }
 
     var duration: Double { localDuration }
+
+    /// 切换通用播放内核的系统画中画状态。
+    /// - Returns: 当前由通用内核处理画中画时返回 true。
+    func toggleUniversalPictureInPicture() -> Bool {
+        guard let universalPlayerLayer else { return false }
+        universalPlayerLayer.isPipActive.toggle()
+        return true
+    }
+
+    /// 当前播放内核报告的实际时间。
+    private var currentPlaybackTime: Double {
+        if let universalPlayerLayer { return universalPlayerLayer.player.currentPlaybackTime }
+        return player?.currentTime().seconds ?? 0
+    }
+
+    /// 当前任一播放内核是否正在播放。
+    private var isPlaybackActive: Bool {
+        if let universalPlayerLayer { return universalPlayerLayer.player.isPlaying }
+        return player?.rate ?? 0 > 0
+    }
+
+    /// 把 FFmpeg 内核识别到的音轨和字幕轨转换成设置面板选项。
+    /// - Parameter layer: 已创建的通用播放层。
+    private func loadUniversalMediaOptions(from layer: KSPlayerLayer) {
+        let audio = layer.player.tracks(mediaType: .audio)
+        universalAudioOptions = Dictionary(uniqueKeysWithValues: audio.map { track in
+            ("audio-\(track.trackID)", track)
+        })
+        audioTracks = audio.map { track in
+            MediaTrackOption(id: "audio-\(track.trackID)", title: track.name)
+        }
+        selectedAudioTrackID = audio.first(where: \.isEnabled).map { "audio-\($0.trackID)" }
+
+        let subtitles = layer.player.tracks(mediaType: .subtitle)
+        universalSubtitleOptions = Dictionary(uniqueKeysWithValues: subtitles.map { track in
+            ("subtitle-\(track.trackID)", track)
+        })
+        subtitleTracks = [MediaTrackOption(id: "off", title: "关闭")] + subtitles.map { track in
+            MediaTrackOption(id: "subtitle-\(track.trackID)", title: track.name)
+        }
+        selectedSubtitleTrackID = subtitles.first(where: \.isEnabled).map { "subtitle-\($0.trackID)" } ?? "off"
+    }
 
     /// 每 0.1 秒把播放时间同步给弹幕层，两次同步之间由渲染层自行插值
     private func installTimeObserver(on player: AVPlayer) {
@@ -872,7 +1009,7 @@ final class PlayerViewModel {
         let toggleTarget = center.togglePlayPauseCommand.addTarget { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if self.player?.rate ?? 0 > 0 {
+                if self.isPlaybackActive {
                     self.pause()
                 } else {
                     self.play()
@@ -893,7 +1030,7 @@ final class PlayerViewModel {
             let interval = (event as? MPSkipIntervalCommandEvent)?.interval ?? 10
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.seek(to: (self.player?.currentTime().seconds ?? 0) + interval)
+                self.seek(to: self.currentPlaybackTime + interval)
             }
             return .success
         }
@@ -903,7 +1040,7 @@ final class PlayerViewModel {
             let interval = (event as? MPSkipIntervalCommandEvent)?.interval ?? 10
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.seek(to: (self.player?.currentTime().seconds ?? 0) - interval)
+                self.seek(to: self.currentPlaybackTime - interval)
             }
             return .success
         }
@@ -1086,7 +1223,7 @@ final class PlayerViewModel {
     ///   - force: 是否忽略五秒节流。
     private func saveProgressIfNeeded(currentTime: Double? = nil, force: Bool = false) {
         guard !mediaKey.isEmpty else { return }
-        let value = currentTime ?? player?.currentTime().seconds ?? 0
+        let value = currentTime ?? currentPlaybackTime
         guard force || abs(value - lastProgressSaveTime) >= 5 else { return }
         lastProgressSaveTime = value
         PlaybackProgressStore.save(position: value, duration: localDuration, for: mediaKey)
@@ -1104,5 +1241,84 @@ final class PlayerViewModel {
         return hours > 0
             ? String(format: "%d:%02d:%02d", hours, minutes, remaining)
             : String(format: "%02d:%02d", minutes, remaining)
+    }
+}
+
+/// 接收通用 FFmpeg 播放内核的状态与时间回调。
+extension PlayerViewModel: KSPlayerLayerDelegate {
+    /// 同步准备、缓冲、暂停与结束状态到统一播放器界面。
+    /// - Parameters:
+    ///   - layer: 当前通用播放层。
+    ///   - state: 内核播放状态。
+    func player(layer: KSPlayerLayer, state: KSPlayerState) {
+        guard layer === universalPlayerLayer else { return }
+        switch state {
+        case .readyToPlay:
+            localDuration = max(layer.player.duration, localDuration)
+            mediaInfo.duration = Self.timeLabel(localDuration)
+            loadUniversalMediaOptions(from: layer)
+            self.state = .ready
+            isBuffering = true
+        case .buffering, .preparing:
+            isBuffering = true
+            onPlaybackStateChanged?(true)
+        case .bufferFinished:
+            localDuration = max(layer.player.duration, localDuration)
+            mediaInfo.duration = Self.timeLabel(localDuration)
+            isBuffering = false
+            self.state = .ready
+            onPlaybackStateChanged?(true)
+        case .paused:
+            isBuffering = false
+            onPlaybackStateChanged?(false)
+        case .playedToTheEnd:
+            isBuffering = false
+            PlaybackProgressStore.remove(for: mediaKey)
+            onPlaybackStateChanged?(false)
+            onPlaybackEnded?()
+        case .error, .initialized:
+            break
+        }
+    }
+
+    /// 同步 FFmpeg 内核进度并保存断点，继续驱动弹幕时间轴。
+    /// - Parameters:
+    ///   - layer: 当前通用播放层。
+    ///   - currentTime: 当前播放秒数。
+    ///   - totalTime: 媒体总时长。
+    func player(layer: KSPlayerLayer, currentTime: TimeInterval, totalTime: TimeInterval) {
+        guard layer === universalPlayerLayer else { return }
+        if totalTime.isFinite, totalTime > 0 {
+            localDuration = totalTime
+            mediaInfo.duration = Self.timeLabel(totalTime)
+        }
+        let rate = layer.player.isPlaying ? Double(layer.player.playbackRate) : 0
+        onTimeChanged?(currentTime, rate)
+        saveProgressIfNeeded(currentTime: currentTime)
+        updateNowPlayingInfoIfNeeded(elapsedTime: currentTime, playbackRate: rate)
+    }
+
+    /// 在系统播放器与 FFmpeg 内核均失败后显示可执行的错误，并允许媒体服务器转码兜底。
+    /// - Parameters:
+    ///   - layer: 当前通用播放层。
+    ///   - error: 最终解码或读取错误。
+    func player(layer: KSPlayerLayer, finish error: Error?) {
+        guard layer === universalPlayerLayer, let error, !playbackHasFailed else { return }
+        let detail = error.localizedDescription
+        let message = "通用解码器无法读取该媒体：\(detail)。请检查文件是否完整，以及服务器是否允许 Range 分段读取。"
+        stopDanmakuMatchingForPlaybackFailure()
+        state = .failed(message)
+        isBuffering = false
+        onPlaybackStateChanged?(false)
+        onPlaybackFailed?(message)
+    }
+
+    /// 接收缓冲统计；界面只展示统一的缓冲指示器，无需额外处理。
+    /// - Parameters:
+    ///   - layer: 当前通用播放层。
+    ///   - bufferedCount: 已完成的缓冲次数。
+    ///   - consumeTime: 本次缓冲耗时。
+    func player(layer: KSPlayerLayer, bufferedCount: Int, consumeTime: TimeInterval) {
+        guard layer === universalPlayerLayer else { return }
     }
 }

@@ -2,6 +2,7 @@ import AVFoundation
 import AVKit
 import KanataCore
 import KanataRender
+import KSPlayer
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -134,6 +135,49 @@ struct VideoSurface: UIViewRepresentable {
             uiView.playerLayer.videoGravity = videoGravity
         }
         uiView.preparePictureInPicture()
+    }
+}
+
+/// 承载 KSPlayer/FFmpeg 视频画面的 SwiftUI 容器，用于 MKV 等系统播放器不稳定支持的格式。
+struct UniversalVideoSurface: UIViewRepresentable {
+    let playerLayer: KSPlayerLayer?
+    let contentMode: UIView.ContentMode
+
+    /// 创建透明容器，实际渲染视图由播放内核提供。
+    /// - Parameter context: SwiftUI 表示层上下文。
+    /// - Returns: 用于固定内核视图约束的容器。
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .black
+        attachPlayerView(to: view)
+        return view
+    }
+
+    /// 播放内核或缩放模式变化时更新实际渲染视图。
+    /// - Parameters:
+    ///   - uiView: 当前 SwiftUI 容器。
+    ///   - context: SwiftUI 表示层上下文。
+    func updateUIView(_ uiView: UIView, context: Context) {
+        attachPlayerView(to: uiView)
+        playerLayer?.player.contentMode = contentMode
+    }
+
+    /// 把内核 UIView 约束到整个播放器容器，避免切换解码器后尺寸漂移。
+    /// - Parameter container: SwiftUI 创建的外层容器。
+    private func attachPlayerView(to container: UIView) {
+        guard let playerView = playerLayer?.player.view else { return }
+        playerLayer?.player.contentMode = contentMode
+        guard playerView.superview !== container else { return }
+        container.subviews.forEach { $0.removeFromSuperview() }
+        playerView.removeFromSuperview()
+        playerView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(playerView)
+        NSLayoutConstraint.activate([
+            playerView.topAnchor.constraint(equalTo: container.topAnchor),
+            playerView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            playerView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            playerView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
     }
 }
 
@@ -390,6 +434,9 @@ struct DanmakuSettingsPanel: View {
                 Section {
                     Button("恢复默认弹幕样式", role: .destructive) {
                         config = DanmakuRenderConfig()
+                        #if os(tvOS)
+                        config.fontScale = 1.3
+                        #endif
                         offset = 0
                         onOffsetChanged()
                     }
@@ -429,7 +476,11 @@ struct DanmakuSettingsPanel: View {
     /// 应用参考主流视频网站观感的常规字重、细描边和柔和阴影配置。
     private func applyReadableDanmakuStyle() {
         config.fontName = nil
+        #if os(tvOS)
+        config.fontScale = 1.3
+        #else
         config.fontScale = 0.9
+        #endif
         config.opacity = 1
         config.lineSpacing = 7
         config.bold = false

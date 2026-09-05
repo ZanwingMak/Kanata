@@ -85,7 +85,19 @@ struct LibraryView: View {
     @State private var recentScrollRequest = 0
 
     #if os(tvOS)
+    @FocusState private var tvFocusedControl: TVLibraryFocus?
     private let columns = [GridItem(.adaptive(minimum: 380, maximum: 520), spacing: 34)]
+
+    /// Apple TV 媒体库中需要显式连接的焦点目标。
+    private enum TVLibraryFocus: Hashable {
+        case settings
+        case search
+        case organize
+        case add
+        case source(String)
+        case collection(String)
+        case item(String)
+    }
     #else
     private let columns = [GridItem(.adaptive(minimum: 170, maximum: 320), spacing: 16)]
     #endif
@@ -486,10 +498,14 @@ struct LibraryView: View {
                 Label("设置", systemImage: "gearshape")
             }
             .buttonStyle(KanataTVActionButtonStyle())
+            .focused($tvFocusedControl, equals: .settings)
+            .onMoveCommand(perform: moveFromTVHeader)
             Button { isSearching = true } label: {
                 Label("搜索", systemImage: "magnifyingglass")
             }
             .buttonStyle(KanataTVActionButtonStyle())
+            .focused($tvFocusedControl, equals: .search)
+            .onMoveCommand(perform: moveFromTVHeader)
             Menu {
                 Picker("筛选", selection: $filterMode) {
                     ForEach(LibraryFilterMode.allCases) { mode in
@@ -505,6 +521,8 @@ struct LibraryView: View {
                 Label("整理", systemImage: "arrow.up.arrow.down")
             }
             .buttonStyle(KanataTVActionButtonStyle())
+            .focused($tvFocusedControl, equals: .organize)
+            .onMoveCommand(perform: moveFromTVHeader)
             Menu {
                 Button {
                     isAddingMediaSource = true
@@ -515,9 +533,53 @@ struct LibraryView: View {
                 Label("添加", systemImage: "plus")
             }
             .buttonStyle(KanataTVActionButtonStyle())
+            .focused($tvFocusedControl, equals: .add)
+            .onMoveCommand(perform: moveFromTVHeader)
         }
         .padding(.top, 28)
         .focusSection()
+    }
+
+    /// 让顶部任一操作按钮按向下时进入首个可操作媒体内容。
+    /// - Parameter direction: Siri Remote 当前移动方向。
+    private func moveFromTVHeader(_ direction: MoveCommandDirection) {
+        switch direction {
+        case .left:
+            switch tvFocusedControl {
+            case .search: tvFocusedControl = .settings
+            case .organize: tvFocusedControl = .search
+            case .add: tvFocusedControl = .organize
+            default: break
+            }
+        case .right:
+            switch tvFocusedControl {
+            case .settings: tvFocusedControl = .search
+            case .search: tvFocusedControl = .organize
+            case .organize: tvFocusedControl = .add
+            default: break
+            }
+        case .down:
+            if let source = mediaSources.first {
+                tvFocusedControl = .source(source.id)
+                return
+            }
+            if let entry = recentlyAddedEntries.first {
+                switch entry {
+                case .item(let item): tvFocusedControl = .item(item.id)
+                case .collection(let collection, _): tvFocusedControl = .collection(collection.id)
+                }
+                return
+            }
+            if let item = continueWatchingItems.first ?? favoriteItems.first ?? filteredItems.first {
+                tvFocusedControl = .item(item.id)
+            } else if let collection = mediaCollections.first {
+                tvFocusedControl = .collection(collection.id)
+            }
+        case .up:
+            break
+        @unknown default:
+            break
+        }
     }
     #endif
 
@@ -666,6 +728,9 @@ struct LibraryView: View {
             .frame(width: collectionCardWidth, alignment: .leading)
         }
         .kanataTVFocus(cornerRadius: 18)
+        #if os(tvOS)
+        .focused($tvFocusedControl, equals: .collection(collection.id))
+        #endif
         .contextMenu {
             Button("从媒体库移除合集", systemImage: "trash", role: .destructive) {
                 removeCollection(collection.id)
@@ -744,6 +809,9 @@ struct LibraryView: View {
                             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
                         .kanataTVFocus(cornerRadius: 18)
+                        #if os(tvOS)
+                        .focused($tvFocusedControl, equals: .source(profile.id))
+                        #endif
                         .contextMenu {
                             Button("删除登录记录", systemImage: "trash", role: .destructive) {
                                 MediaSourceProfileStore.remove(profile)
@@ -854,6 +922,9 @@ struct LibraryView: View {
             .contentShape(Rectangle())
         }
         .kanataTVFocus(cornerRadius: 18)
+        #if os(tvOS)
+        .focused($tvFocusedControl, equals: .item(item.id))
+        #endif
         .contextMenu {
             Button(
                 favoriteIDs.contains(item.id) ? "取消收藏" : "加入收藏",
@@ -1099,7 +1170,10 @@ struct LibraryView: View {
 
     /// 判断 URL 是否为播放器当前支持导入的视频文件。
     private func isVideoFile(_ url: URL) -> Bool {
-        let supported: Set<String> = ["mp4", "mkv", "mov", "m4v", "ts", "avi", "flv", "webm"]
+        let supported: Set<String> = [
+            "mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "mts", "flv",
+            "mpg", "mpeg", "vob", "wmv", "ogv", "3gp", "3g2", "mxf", "rm", "rmvb",
+        ]
         return supported.contains(url.pathExtension.lowercased())
     }
 
@@ -1890,6 +1964,29 @@ private struct CollectionDetailView: View {
 
     var body: some View {
         List {
+            #if os(tvOS)
+            Section {
+                HStack(alignment: .center, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("合集详情")
+                            .font(.largeTitle.bold())
+                        Text("查看剧集、调整顺序并管理连播")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        pendingTitle = collectionTitle
+                        isRenaming = true
+                    } label: {
+                        Label("重命名合集", systemImage: "pencil")
+                    }
+                    .buttonStyle(KanataTVActionButtonStyle())
+                }
+                .padding(.vertical, 10)
+            }
+            .listRowBackground(Color.clear)
+            #endif
             Section {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 14) {
@@ -1982,6 +2079,7 @@ private struct CollectionDetailView: View {
         }
         .navigationTitle(collectionNavigationTitle)
         .kanataInlineNavigationTitle()
+        #if !os(tvOS)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -1991,10 +2089,9 @@ private struct CollectionDetailView: View {
                     Label("重命名", systemImage: "pencil")
                 }
             }
-            #if !os(tvOS)
             ToolbarItem(placement: .topBarTrailing) { EditButton() }
-            #endif
         }
+        #endif
         .alert("重命名合集", isPresented: $isRenaming) {
             TextField("合集名称", text: $pendingTitle)
             Button("取消", role: .cancel) {}
@@ -2007,7 +2104,7 @@ private struct CollectionDetailView: View {
     /// 返回 tvOS 避免与详情正文重复的导航标题。
     private var collectionNavigationTitle: String {
         #if os(tvOS)
-        "合集详情"
+        ""
         #else
         collectionTitle
         #endif

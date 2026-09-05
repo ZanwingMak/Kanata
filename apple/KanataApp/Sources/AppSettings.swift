@@ -180,9 +180,11 @@ final class AppSettings {
             config.densityLimit = 100
         }
         #if os(tvOS)
-        if storedVisualStyleVersion < 6,
-           storedFontScale == nil || abs(config.fontScale - 0.9) < 0.001 {
-            config.fontScale = 1.15
+        if storedVisualStyleVersion < 7,
+           storedFontScale == nil
+            || abs(config.fontScale - 0.9) < 0.001
+            || abs(config.fontScale - 1.15) < 0.001 {
+            config.fontScale = 1.3
         }
         #endif
         self.danmakuConfig = config
@@ -191,8 +193,8 @@ final class AppSettings {
             KeychainStore.setString(legacyGatewayToken, account: KeychainAccounts.gatewayToken)
             defaults.removeObject(forKey: Keys.gatewayToken)
         }
-        if storedVisualStyleVersion < 6 {
-            defaults.set(6, forKey: Keys.visualStyleVersion)
+        if storedVisualStyleVersion < 7 {
+            defaults.set(7, forKey: Keys.visualStyleVersion)
             suppressesCloudPush = true
             persistDanmakuConfig()
             suppressesCloudPush = false
