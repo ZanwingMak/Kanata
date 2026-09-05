@@ -197,12 +197,13 @@ struct LibraryView: View {
                       let snapshot = PlaybackProgressStore.snapshot(for: key) else { return nil }
                 return (item, snapshot.updatedAt)
             }
-            .max { $0.1 < $1.1 }?.0
+            .max { $0.1 < $1.1 }
             return MediaCollection(
                 id: id,
                 title: first.collectionTitle ?? first.title,
                 items: allSorted,
-                nextItem: resumable ?? active.first ?? first
+                nextItem: resumable?.0 ?? active.first ?? first,
+                hasResumeProgress: resumable != nil
             )
         }
         .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
@@ -657,7 +658,7 @@ struct LibraryView: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                Text(detail ?? "接着播放 · \(collection.nextItem.episodeLabel ?? collection.nextItem.displayName)")
+                Text(detail ?? collectionPlaybackDetail(collection))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -670,6 +671,14 @@ struct LibraryView: View {
                 removeCollection(collection.id)
             }
         }
+    }
+
+    /// 生成合集卡片的播放状态，未看过时不再误写成“接着播放”。
+    /// - Parameter collection: 要显示状态的合集。
+    /// - Returns: 从头播放或继续具体集数的简短说明。
+    private func collectionPlaybackDetail(_ collection: MediaCollection) -> String {
+        let episode = collection.nextItem.episodeLabel ?? collection.nextItem.displayName
+        return collection.hasResumeProgress ? "继续播放 · \(episode)" : "播放 · \(episode)"
     }
 
     /// 首页的媒体服务器频道区域，保留用户已登录的入口。
@@ -1716,6 +1725,7 @@ private struct MediaCollection: Identifiable {
     let title: String
     let items: [LibraryItem]
     let nextItem: LibraryItem
+    let hasResumeProgress: Bool
 }
 
 /// 合集详情与剧集编排页面，播放前让用户确认顺序和忽略项。
@@ -1766,6 +1776,30 @@ private struct CollectionDetailView: View {
         orderedItems.filter { !ignoredIDs.contains($0.id) }
     }
 
+    /// 返回当前合集应从断点继续或从头开始的剧集。
+    private var primaryPlaybackItem: LibraryItem? {
+        let resumable = activeItems.compactMap { item -> (LibraryItem, Date)? in
+            guard let key = item.mediaKey,
+                  let snapshot = PlaybackProgressStore.snapshot(for: key) else { return nil }
+            return (item, snapshot.updatedAt)
+        }
+        .max { $0.1 < $1.1 }?.0
+        return resumable ?? activeItems.first
+    }
+
+    /// 根据断点与合集集数生成主播放按钮文案。
+    private var primaryPlaybackTitle: String {
+        guard let item = primaryPlaybackItem,
+              let key = item.mediaKey,
+              PlaybackProgressStore.snapshot(for: key) != nil else {
+            return "播放"
+        }
+        guard activeItems.count > 1 else { return "继续播放" }
+        let fallbackIndex = activeItems.firstIndex(where: { $0.id == item.id }).map { $0 + 1 }
+        let episode = item.episode ?? item.collectionIndex ?? fallbackIndex
+        return episode.map { "继续播放第 \($0) 集" } ?? "继续播放"
+    }
+
     var body: some View {
         List {
             Section {
@@ -1785,10 +1819,10 @@ private struct CollectionDetailView: View {
                         }
                     }
                     Button {
-                        guard let item = activeItems.first(where: { $0.id == collection.nextItem.id }) ?? activeItems.first else { return }
+                        guard let item = primaryPlaybackItem else { return }
                         onPlay(activeItems, item)
                     } label: {
-                        Label("继续播放", systemImage: "play.fill")
+                        Label(primaryPlaybackTitle, systemImage: "play.fill")
                     }
                     .buttonStyle(KanataPrimaryButtonStyle())
                     .disabled(activeItems.isEmpty)

@@ -1481,126 +1481,408 @@ struct CandidatePicker: View {
     @State private var keyword = ""
     @State private var operationError: String?
     @Environment(\.dismiss) private var dismiss
+    #if os(tvOS)
+    @FocusState private var focusedControl: TVCandidateFocus?
+
+    /// Apple TV 弹幕来源弹窗中的可聚焦控件。
+    private enum TVCandidateFocus: Hashable {
+        case close
+        case searchField
+        case searchButton
+        case removeBinding
+        case removeLocal
+        case candidate(String)
+    }
+    #endif
 
     var body: some View {
         NavigationStack {
-            List {
-                if let binding = viewModel.currentBinding {
-                    Section("当前绑定") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(binding.title)
-                            HStack(spacing: 8) {
-                                Text(binding.sourceInstanceName ?? binding.source.displayName)
-                                if let episodeTitle = binding.episodeTitle, !episodeTitle.isEmpty {
-                                    Text(normalizedEpisodeTitle(episodeTitle))
-                                }
+            #if os(tvOS)
+            tvContent
+            #else
+            compactContent
+            #endif
+        }
+        .onAppear {
+            keyword = viewModel.parsed?.title ?? ""
+            #if os(tvOS)
+            focusInitialTVControl()
+            #endif
+        }
+        #if os(tvOS)
+        .onChange(of: viewModel.candidates.map(\.id)) { _, ids in
+            if let id = ids.first { focusedControl = .candidate(id) }
+        }
+        #endif
+        .alert(
+            "弹幕操作失败",
+            isPresented: Binding(
+                get: { operationError != nil },
+                set: { if !$0 { operationError = nil } }
+            )
+        ) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(operationError ?? "未知错误")
+        }
+    }
+
+    #if !os(tvOS)
+    /// 构建 iPhone 与 iPad 使用的紧凑分组列表。
+    private var compactContent: some View {
+        List {
+            if let binding = viewModel.currentBinding {
+                Section("当前绑定") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(binding.title)
+                        HStack(spacing: 8) {
+                            Text(binding.sourceInstanceName ?? binding.source.displayName)
+                            if let episodeTitle = binding.episodeTitle, !episodeTitle.isEmpty {
+                                Text(normalizedEpisodeTitle(episodeTitle))
                             }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        Label(viewModel.episodeAlignment.title, systemImage: viewModel.episodeAlignment.symbol)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(bindingAlignmentColor)
+                    }
+                    Button("解除绑定", role: .destructive) {
+                        viewModel.removeCurrentBinding()
+                    }
+                }
+            }
+            if viewModel.hasLocalDanmaku {
+                Section("本地弹幕") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(viewModel.localDanmakuFileName ?? "已导入文件")
+                        Text("\(viewModel.localDanmakuCount) 条 · 离线可用")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            Label(viewModel.episodeAlignment.title, systemImage: viewModel.episodeAlignment.symbol)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(bindingAlignmentColor)
+                    }
+                    Button("移除本地弹幕", role: .destructive) {
+                        removeLocalDanmaku()
+                    }
+                }
+            }
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("剧名、集数或平台播放页链接", text: $keyword)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .onSubmit { searchCandidates() }
+                        if viewModel.isSearchingCandidates { ProgressView() }
+                    }
+                    Button("搜索") { searchCandidates() }
+                        .buttonStyle(KanataPrimaryButtonStyle())
+                        .disabled(isSearchDisabled)
+                    Text("搜索不会再强制使用文件名推断的集号；选择正确分集后会记住，下次自动加载。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section("候选（\(viewModel.candidates.count)）") {
+                if viewModel.candidates.isEmpty {
+                    Text(emptyCandidateMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(viewModel.candidates) { candidate in
+                    Button { selectCandidate(candidate) } label: {
+                        candidateDetails(candidate)
+                    }
+                }
+            }
+        }
+        .navigationTitle("选择弹幕来源")
+        .kanataInlineNavigationTitle()
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("关闭") { dismiss() }
+                    .kanataToolbarTextButton()
+            }
+        }
+    }
+    #endif
+
+    #if os(tvOS)
+    /// 构建 Apple TV 双栏弹幕来源选择界面，减少默认列表的大片高亮与焦点跳跃。
+    private var tvContent: some View {
+        ZStack {
+            LinearGradient(
+                colors: [KanataTheme.backgroundTop, KanataTheme.background],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 28) {
+                HStack(spacing: 20) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("选择弹幕来源")
+                            .font(.largeTitle.bold())
+                        Text("确认当前视频对应的作品与集数")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Label("关闭", systemImage: "xmark")
+                    }
+                    .buttonStyle(KanataTVActionButtonStyle())
+                    .focused($focusedControl, equals: .close)
+                }
+                .focusSection()
+
+                HStack(alignment: .top, spacing: 30) {
+                    tvSearchColumn
+                        .frame(width: 520)
+                    tvCandidateColumn
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+            }
+            .frame(maxWidth: 1720, maxHeight: 940)
+            .padding(.horizontal, 72)
+            .padding(.vertical, 50)
+        }
+        .navigationBarHidden(true)
+    }
+
+    /// 构建 Apple TV 左侧搜索、当前绑定与本地弹幕信息栏。
+    private var tvSearchColumn: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("搜索作品", systemImage: "magnifyingglass")
+                        .font(.title2.bold())
+                    HStack(spacing: 12) {
+                        Image(systemName: "text.magnifyingglass")
+                            .foregroundStyle(KanataTheme.accent)
+                        TextField("剧名、集数或播放页链接", text: $keyword)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .focused($focusedControl, equals: .searchField)
+                            .onSubmit { searchCandidates() }
+                        if viewModel.isSearchingCandidates { ProgressView() }
+                    }
+                    .padding(.horizontal, 18)
+                    .frame(minHeight: 64)
+                    .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(KanataTheme.separator, lineWidth: 1)
+                    }
+                    Button { searchCandidates() } label: {
+                        Label(viewModel.isSearchingCandidates ? "正在搜索" : "搜索弹幕", systemImage: "magnifyingglass")
+                    }
+                    .buttonStyle(KanataPrimaryButtonStyle())
+                    .focused($focusedControl, equals: .searchButton)
+                    .disabled(isSearchDisabled)
+                    Text("选择正确分集后会保存匹配，下次播放自动加载。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(24)
+                .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+
+                if let binding = viewModel.currentBinding {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label("当前绑定", systemImage: "link.circle.fill")
+                            .font(.title3.bold())
+                            .foregroundStyle(KanataTheme.accent)
+                        Text(binding.title)
+                            .font(.headline)
+                            .lineLimit(2)
+                        HStack(spacing: 8) {
+                            Text(binding.sourceInstanceName ?? binding.source.displayName)
+                            if let episodeTitle = binding.episodeTitle, !episodeTitle.isEmpty {
+                                Text(normalizedEpisodeTitle(episodeTitle))
+                            }
                         }
-                        Button("解除绑定", role: .destructive) {
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        Label(viewModel.episodeAlignment.title, systemImage: viewModel.episodeAlignment.symbol)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(bindingAlignmentColor)
+                        Button("解除当前绑定", role: .destructive) {
                             viewModel.removeCurrentBinding()
                         }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        .focused($focusedControl, equals: .removeBinding)
                     }
+                    .padding(24)
+                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
+
                 if viewModel.hasLocalDanmaku {
-                    Section("本地弹幕") {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(viewModel.localDanmakuFileName ?? "已导入文件")
-                            Text("\(viewModel.localDanmakuCount) 条 · 离线可用")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("本地弹幕", systemImage: "doc.text.fill")
+                            .font(.title3.bold())
+                        Text(viewModel.localDanmakuFileName ?? "已导入文件")
+                            .font(.headline)
+                            .lineLimit(2)
+                        Text("\(viewModel.localDanmakuCount) 条 · 离线可用")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                         Button("移除本地弹幕", role: .destructive) {
-                            Task {
-                                do {
-                                    try await viewModel.removeLocalDanmaku()
-                                } catch {
-                                    operationError = error.localizedDescription
-                                }
-                            }
+                            removeLocalDanmaku()
                         }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        .focused($focusedControl, equals: .removeLocal)
                     }
+                    .padding(24)
+                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                            TextField("剧名、集数或平台播放页链接", text: $keyword)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .onSubmit { Task { await viewModel.search(keyword: keyword) } }
-                            if viewModel.isSearchingCandidates { ProgressView() }
-                        }
-                        Button("搜索") {
-                            Task { await viewModel.search(keyword: keyword) }
-                        }
-                        .buttonStyle(KanataPrimaryButtonStyle())
-                        .disabled(keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSearchingCandidates)
-                        Text("搜索不会再强制使用文件名推断的集号；选择正确分集后会记住，下次自动加载。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+            }
+            .padding(6)
+        }
+        .scrollIndicators(.hidden)
+        .scrollClipDisabled()
+        .focusSection()
+    }
+
+    /// 构建 Apple TV 右侧候选列表与空状态。
+    private var tvCandidateColumn: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("匹配结果")
+                    .font(.title2.bold())
+                Spacer()
+                Text("\(viewModel.candidates.count) 个候选")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
+            if viewModel.candidates.isEmpty {
+                VStack(spacing: 18) {
+                    Image(systemName: viewModel.isSearchingCandidates ? "hourglass" : "text.magnifyingglass")
+                        .font(.system(size: 54, weight: .light))
+                        .foregroundStyle(KanataTheme.accent)
+                    Text(viewModel.isSearchingCandidates ? "正在查找弹幕…" : emptyCandidateMessage)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 620)
                 }
-                Section("候选（\(viewModel.candidates.count)）") {
-                    if viewModel.candidates.isEmpty {
-                        Text(viewModel.danmakuStats.isEmpty ? "输入作品关键词开始搜索" : viewModel.danmakuStats)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(viewModel.candidates) { candidate in
-                        Button {
-                            Task {
-                                if await viewModel.loadDanmaku(for: candidate) {
-                                    dismiss()
-                                }
-                            }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(candidate.title).font(.body)
-                                HStack(spacing: 8) {
-                                    Text(candidate.sourceInstanceName ?? candidate.source.displayName)
-                                    if let episodeTitle = candidate.episodeTitle, !episodeTitle.isEmpty {
-                                        Text(normalizedEpisodeTitle(episodeTitle))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(viewModel.candidates) { candidate in
+                            Button { selectCandidate(candidate) } label: {
+                                HStack(spacing: 20) {
+                                    Image(systemName: viewModel.episodeAlignment(for: candidate).symbol)
+                                        .font(.title2)
+                                        .foregroundStyle(candidateAlignmentColor(candidate))
+                                        .frame(width: 42)
+                                    candidateDetails(candidate)
+                                    Spacer(minLength: 16)
+                                    VStack(alignment: .trailing, spacing: 6) {
+                                        Text("\(Int(candidate.confidence * 100))%")
+                                            .font(.title3.monospacedDigit().bold())
+                                        Text("匹配度")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                     }
-                                    Text("匹配度 \(Int(candidate.confidence * 100))%")
+                                    Image(systemName: "chevron.right")
+                                        .font(.headline)
+                                        .foregroundStyle(.secondary)
                                 }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                Label(
-                                    viewModel.episodeAlignment(for: candidate).title,
-                                    systemImage: viewModel.episodeAlignment(for: candidate).symbol
+                                .padding(.horizontal, 22)
+                                .padding(.vertical, 18)
+                                .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
+                                .background(
+                                    KanataTheme.elevatedSurface,
+                                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
                                 )
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(candidateAlignmentColor(candidate))
                             }
+                            .kanataTVFocus(cornerRadius: 22)
+                            .focused($focusedControl, equals: .candidate(candidate.id))
                         }
                     }
+                    .padding(6)
                 }
+                .scrollIndicators(.hidden)
+                .scrollClipDisabled()
             }
-            .navigationTitle("选择弹幕来源")
-            .kanataInlineNavigationTitle()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("关闭") { dismiss() }
-                        .kanataToolbarTextButton()
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(KanataTheme.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .focusSection()
+    }
+
+    /// 将 Apple TV 初始焦点放到首个候选；无候选时落到搜索按钮。
+    private func focusInitialTVControl() {
+        Task { @MainActor in
+            await Task.yield()
+            focusedControl = viewModel.candidates.first.map { .candidate($0.id) } ?? .searchButton
+        }
+    }
+    #endif
+
+    /// 返回候选列表没有内容时的状态说明。
+    private var emptyCandidateMessage: String {
+        viewModel.danmakuStats.isEmpty ? "输入作品关键词开始搜索" : viewModel.danmakuStats
+    }
+
+    /// 返回搜索按钮当前是否不可用。
+    private var isSearchDisabled: Bool {
+        keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSearchingCandidates
+    }
+
+    /// 发起一次手动弹幕搜索。
+    private func searchCandidates() {
+        Task { await viewModel.search(keyword: keyword) }
+    }
+
+    /// 加载用户选择的弹幕来源，成功后关闭弹窗。
+    /// - Parameter candidate: 用户确认的候选分集。
+    private func selectCandidate(_ candidate: ProviderCandidate) {
+        Task {
+            if await viewModel.loadDanmaku(for: candidate) { dismiss() }
+        }
+    }
+
+    /// 移除当前视频关联的本地弹幕，并显示失败原因。
+    private func removeLocalDanmaku() {
+        Task {
+            do {
+                try await viewModel.removeLocalDanmaku()
+            } catch {
+                operationError = error.localizedDescription
+            }
+        }
+    }
+
+    /// 生成 iOS 与 tvOS 共用的候选标题、来源和集数信息。
+    /// - Parameter candidate: 要展示的候选弹幕分集。
+    /// - Returns: 不包含操作按钮的候选说明视图。
+    private func candidateDetails(_ candidate: ProviderCandidate) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(candidate.title)
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+            HStack(spacing: 8) {
+                Text(candidate.sourceInstanceName ?? candidate.source.displayName)
+                if let episodeTitle = candidate.episodeTitle, !episodeTitle.isEmpty {
+                    Text(normalizedEpisodeTitle(episodeTitle))
                 }
+                #if !os(tvOS)
+                Text("匹配度 \(Int(candidate.confidence * 100))%")
+                #endif
             }
-            .onAppear { keyword = viewModel.parsed?.title ?? "" }
-            .alert(
-                "弹幕操作失败",
-                isPresented: Binding(
-                    get: { operationError != nil },
-                    set: { if !$0 { operationError = nil } }
-                )
-            ) {
-                Button("好", role: .cancel) {}
-            } message: {
-                Text(operationError ?? "未知错误")
-            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Label(
+                viewModel.episodeAlignment(for: candidate).title,
+                systemImage: viewModel.episodeAlignment(for: candidate).symbol
+            )
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(candidateAlignmentColor(candidate))
         }
     }
 

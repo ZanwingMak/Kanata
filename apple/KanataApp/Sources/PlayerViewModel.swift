@@ -114,6 +114,7 @@ final class PlayerViewModel {
     private var itemStatusObservation: NSKeyValueObservation?
     private var matchingTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
+    private var playbackHasFailed = false
     private var securityScopedURL: URL?
     private var seasonKey: String?
     private var localDuration: Double = 0
@@ -218,6 +219,7 @@ final class PlayerViewModel {
         nowPlaying: PlaybackNowPlayingMetadata? = nil
     ) async {
         configurePlaybackAudioSession()
+        playbackHasFailed = false
         resetDanmakuState()
         state = .preparing("正在读取视频…")
         client = settings.makeClient()
@@ -301,6 +303,7 @@ final class PlayerViewModel {
         if let fingerprint {
             await loadPersistedLocalDanmaku(for: fingerprint)
         }
+        guard canContinueDanmakuWork else { return }
 
         let savedCandidate = fingerprint.flatMap { DanmakuBindingStore.candidate(for: $0) }
         currentBinding = savedCandidate
@@ -327,6 +330,7 @@ final class PlayerViewModel {
             if await loadDanmaku(for: savedCandidate, persistBinding: false) {
                 return
             }
+            guard canContinueDanmakuWork else { return }
             isShowingCandidates = false
             danmakuStats = "已保存来源不可用，正在重新匹配…"
         }
@@ -340,6 +344,7 @@ final class PlayerViewModel {
                 fingerprint: fingerprint
             )
         )
+        guard canContinueDanmakuWork else { return }
         candidates = result.candidates
         guard let best = result.candidates.first else {
             let detail = result.errors.isEmpty ? "" : "（\(result.errors.joined(separator: "；"))）"
@@ -443,6 +448,7 @@ final class PlayerViewModel {
         for candidate: ProviderCandidate,
         persistBinding: Bool = true
     ) async -> Bool {
+        guard canContinueDanmakuWork else { return false }
         danmakuStats = "正在加载弹幕…"
         var errors: [String] = []
         if candidate.source == .bilibili, let builtInClient {
@@ -527,6 +533,7 @@ final class PlayerViewModel {
                 errors.append("网关连接失败")
             }
         }
+        guard canContinueDanmakuWork else { return false }
         danmakuStats = failureMessage("弹幕加载失败：\(errors.joined(separator: "；"))")
         isShowingCandidates = true
         return false
@@ -546,6 +553,7 @@ final class PlayerViewModel {
         fallback: Bool,
         persistBinding: Bool
     ) async {
+        guard canContinueDanmakuWork else { return }
         onlineItems = items
         rebuildRawItems()
         if persistBinding, let currentFingerprint {
@@ -624,7 +632,8 @@ final class PlayerViewModel {
     /// 手动搜索并刷新候选列表
     func search(keyword: String) async {
         let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty,
+        guard canContinueDanmakuWork,
+              !query.isEmpty,
               client != nil
                 || builtInClient != nil
                 || builtInPublicClient != nil
@@ -639,6 +648,7 @@ final class PlayerViewModel {
         let result = await resolveCandidates(
             ResolveRequest(title: query, duration: localDuration)
         )
+        guard canContinueDanmakuWork else { return }
         candidates = result.candidates
         danmakuStats = result.candidates.isEmpty
             ? "没有找到结果\(result.errors.isEmpty ? "" : "：\(result.errors.joined(separator: "；"))")"
@@ -969,6 +979,7 @@ final class PlayerViewModel {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let message = self.playbackFailureMessage(error: item.error)
+                self.stopDanmakuMatchingForPlaybackFailure()
                 self.state = .failed(message)
                 self.onPlaybackStateChanged?(false)
                 self.onPlaybackFailed?(message)
@@ -986,6 +997,20 @@ final class PlayerViewModel {
                 self.onPlaybackEnded?()
             }
         }
+    }
+
+    /// 标记媒体不可播放，并终止所有可能再次打开候选弹窗的弹幕任务。
+    private func stopDanmakuMatchingForPlaybackFailure() {
+        playbackHasFailed = true
+        matchingTask?.cancel()
+        matchingTask = nil
+        candidates = []
+        isShowingCandidates = false
+    }
+
+    /// 返回当前弹幕异步任务是否仍属于可播放媒体。
+    private var canContinueDanmakuWork: Bool {
+        !playbackHasFailed && !Task.isCancelled
     }
 
     /// 把底层 AVPlayer 错误转换为用户可执行的播放建议，避免只显示 Cannot Open。
