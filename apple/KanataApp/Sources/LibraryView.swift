@@ -81,6 +81,7 @@ struct LibraryView: View {
     @State private var favoriteIDs = LibraryFavoriteStore.load()
     @State private var selectedCollectionID: String?
     @State private var libraryNotice: String?
+    @State private var mediaSourceNotice: String?
     @State private var pendingLocalImport: MediaImportDraft?
     @State private var recentScrollRequest = 0
 
@@ -387,6 +388,18 @@ struct LibraryView: View {
             } message: {
                 Text(libraryNotice ?? "")
             }
+            .alert(
+                "已加入媒体库",
+                isPresented: Binding(
+                    get: { mediaSourceNotice != nil },
+                    set: { if !$0 { mediaSourceNotice = nil } }
+                )
+            ) {
+                Button("继续添加") { mediaSourceNotice = nil }
+                Button("返回首页", role: .cancel) { returnToLibraryAfterAddingSource() }
+            } message: {
+                Text(mediaSourceNotice ?? "")
+            }
             .fullScreenCover(item: $playing, onDismiss: {
                 progressRevision += 1
             }) { queue in
@@ -412,7 +425,7 @@ struct LibraryView: View {
             }
             .navigationDestination(isPresented: $isAddingMediaSource) {
                 MediaSourceSheet(
-                    onAdd: addMediaItems,
+                    onAdd: addMediaSourceItems,
                     onSourcesChanged: reloadMediaSources,
                     usesParentNavigation: true
                 )
@@ -424,7 +437,7 @@ struct LibraryView: View {
                 )
             ) {
                 if let profile = browsingSource {
-                    MediaSourceChannelView(profile: profile, onAdd: addMediaItems)
+                    MediaSourceChannelView(profile: profile, onAdd: addMediaSourceItems)
                 }
             }
             #else
@@ -433,13 +446,13 @@ struct LibraryView: View {
             }
             .sheet(isPresented: $isAddingMediaSource) {
                 MediaSourceSheet(
-                    onAdd: addMediaItems,
+                    onAdd: addMediaSourceItems,
                     onSourcesChanged: reloadMediaSources
                 )
             }
             .sheet(item: $browsingSource) { profile in
                 NavigationStack {
-                    MediaSourceChannelView(profile: profile, onAdd: addMediaItems)
+                    MediaSourceChannelView(profile: profile, onAdd: addMediaSourceItems)
                         .toolbar {
                             ToolbarItem(placement: .cancellationAction) {
                                 Button("关闭") { browsingSource = nil }
@@ -885,8 +898,7 @@ struct LibraryView: View {
             play(item)
         } label: {
             VStack(alignment: .leading, spacing: 10) {
-                MediaArtworkView(item: item)
-                    .aspectRatio(16 / 9, contentMode: .fit)
+                MediaArtworkFrame(item: item)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(alignment: .bottomLeading) {
                         Label(
@@ -1035,6 +1047,21 @@ struct LibraryView: View {
         libraryNotice = collectionCount > 0
             ? "已加入 \(collectionCount) 个合集、共 \(newItems.count) 个视频，并已定位到“最近添加”。"
             : "已加入 \(newItems.count) 个视频，并已定位到“最近添加”。"
+    }
+
+    /// 合并从网络媒体源选择的条目，并展示继续添加或返回首页的下一步操作。
+    /// - Parameter newItems: 媒体源浏览器生成的条目。
+    private func addMediaSourceItems(_ newItems: [LibraryItem]) {
+        addMediaItems(newItems)
+        mediaSourceNotice = libraryNotice
+        libraryNotice = nil
+    }
+
+    /// 关闭当前媒体源浏览或添加流程并回到媒体库首页。
+    private func returnToLibraryAfterAddingSource() {
+        mediaSourceNotice = nil
+        browsingSource = nil
+        isAddingMediaSource = false
     }
 
     /// 从历史存储刷新首页媒体源频道。
@@ -1407,6 +1434,21 @@ private struct TVLibrarySearchSheet: View {
     }
 }
 #endif
+
+/// 用无固有尺寸的底板锁定媒体卡片为 16:9，避免竖版海报撑高横向列表。
+private struct MediaArtworkFrame: View {
+    let item: LibraryItem
+
+    var body: some View {
+        Color.clear
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .overlay {
+                MediaArtworkView(item: item)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .clipped()
+    }
+}
 
 /// 媒体卡片的异步视频缩略图；优先使用服务器海报，本地视频截取第一秒。
 private struct MediaArtworkView: View {

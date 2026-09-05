@@ -271,12 +271,11 @@ struct MediaSourceSheet: View {
         return "\(profile.kind.title) · \(endpoint)"
     }
 
-    /// 把选中的单个视频或合集交给首页并关闭添加窗口。
+    /// 把选中的单个视频或合集交给首页，并保留当前流程供用户决定是否继续添加。
     /// - Parameter items: 已带来源和合集信息的媒体条目。
     private func finish(_ items: [LibraryItem]) {
         guard !items.isEmpty else { return }
         onAdd(items)
-        dismiss()
     }
 
     /// 重新读取媒体源历史并通知首页刷新频道。
@@ -889,9 +888,7 @@ private struct PlexAuthorizationView: View {
     @State private var errorMessage: String?
     @State private var didOpenBrowser = false
     @State private var renderedQRCode: UIImage?
-    #if os(tvOS)
-    @State private var authorizationMode = AuthorizationMode.qrCode
-    #else
+    #if !os(tvOS)
     @State private var authorizationMode = AuthorizationMode.web
     #endif
     private let client = PlexAccountClient()
@@ -901,7 +898,6 @@ private struct PlexAuthorizationView: View {
     /// Apple TV Plex 授权页中的焦点目标。
     private enum PlexAuthorizationFocus: Hashable {
         case close
-        case authorizationMode
         case retry
         case connection(String)
     }
@@ -959,22 +955,7 @@ private struct PlexAuthorizationView: View {
                 if !connections.isEmpty {
                     tvConnectionList
                 } else if let pin, errorMessage == nil {
-                    VStack(spacing: 24) {
-                        Picker("登录方式", selection: $authorizationMode) {
-                            ForEach(AuthorizationMode.allCases) { mode in
-                                Label(mode.title, systemImage: mode.symbol).tag(mode)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 620)
-                        .focused($focusedControl, equals: .authorizationMode)
-
-                        if authorizationMode == .qrCode {
-                            tvQRCodeAuthorization(pin)
-                        } else {
-                            tvWebAuthorization(pin)
-                        }
-                    }
+                    tvQRCodeAuthorization(pin)
                 } else if let errorMessage {
                     VStack(spacing: 24) {
                         Image(systemName: "exclamationmark.triangle")
@@ -1014,7 +995,7 @@ private struct PlexAuthorizationView: View {
     /// 返回 Apple TV Plex 授权页当前模式对应的副标题。
     private var tvSubtitle: String {
         guard connections.isEmpty else { return "选择要连接的媒体服务器" }
-        return authorizationMode == .qrCode ? "使用手机扫描二维码完成授权" : "在另一台设备输入授权码"
+        return "使用手机扫描二维码完成授权"
     }
 
     /// 构建 Apple TV 默认展示的 Plex 扫码授权内容。
@@ -1054,9 +1035,12 @@ private struct PlexAuthorizationView: View {
                     Image(systemName: "qrcode")
                         .font(.system(size: 100, weight: .light))
                         .foregroundStyle(.secondary)
-                    Text("二维码生成失败，请切换到网页登录")
+                    Text("二维码生成失败，请重新生成登录会话")
                         .font(.headline)
                         .foregroundStyle(.secondary)
+                    Button("重新生成") { Task { await beginAuthorization() } }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        .focused($focusedControl, equals: .retry)
                 }
                 Label(statusText, systemImage: "person.badge.key")
                     .font(.title3.bold())
@@ -1064,51 +1048,6 @@ private struct PlexAuthorizationView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(36)
-            .frame(maxWidth: .infinity, minHeight: 540)
-            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        }
-    }
-
-    /// 构建 Apple TV 可切换使用的 Plex 授权码内容。
-    /// - Parameter pin: 当前 Plex 官方授权会话。
-    /// - Returns: 网页操作说明、授权码与授权状态。
-    private func tvWebAuthorization(_ pin: PlexAuthorizationPin) -> some View {
-        HStack(spacing: 42) {
-            VStack(alignment: .leading, spacing: 28) {
-                Label("在手机或电脑上操作", systemImage: "desktopcomputer")
-                    .font(.title2.bold())
-                    .foregroundStyle(KanataTheme.accent)
-                plexInstructionRow(number: 1, text: "打开 plex.tv/link")
-                plexInstructionRow(number: 2, text: "登录同一个 Plex 账号")
-                plexInstructionRow(number: 3, text: "输入右侧授权码")
-                Divider()
-                Text("授权成功后会自动发现服务器并测试可用线路。")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(40)
-            .frame(width: 650, alignment: .topLeading)
-            .frame(minHeight: 540, alignment: .topLeading)
-            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-
-            VStack(spacing: 28) {
-                Text("授权码")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Text(pin.code)
-                    .font(.system(size: 64, weight: .bold, design: .monospaced))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                    .foregroundStyle(KanataTheme.accent)
-                    .padding(.horizontal, 36)
-                    .frame(maxWidth: .infinity, minHeight: 128)
-                    .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 22))
-                Label(statusText, systemImage: "person.badge.key")
-                    .font(.title3.bold())
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(40)
             .frame(maxWidth: .infinity, minHeight: 540)
             .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         }

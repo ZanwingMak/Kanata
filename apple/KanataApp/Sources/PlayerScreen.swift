@@ -149,7 +149,7 @@ private struct TVSeekBar: View {
     let value: Double
     let duration: Double
     let onSeek: (Double) -> Void
-    @FocusState private var isFocused: Bool
+    @Environment(\.isFocused) private var isFocused
 
     var body: some View {
         GeometryReader { proxy in
@@ -172,7 +172,6 @@ private struct TVSeekBar: View {
         .frame(height: 38)
         .contentShape(Rectangle())
         .focusable()
-        .focused($isFocused)
         .focusEffectDisabled()
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -221,6 +220,24 @@ private struct TVSeekBar: View {
         }
     }
 }
+
+/// 电视播放器内可由 Siri Remote 到达的焦点目标。
+private enum TVPlayerFocus: Hashable {
+    case background
+    case back
+    case rematch
+    case more
+    case progress
+    case rewind
+    case previousEpisode
+    case playPause
+    case forward
+    case nextEpisode
+    case playlist
+    case danmakuToggle
+    case danmakuSettings
+    case manualMatch
+}
 #endif
 
 #if os(iOS)
@@ -265,14 +282,21 @@ struct PlayerScreen: View {
     @State private var isInteractionLocked = false
     @State private var externalSubtitleCues: [ExternalSubtitleCue] = []
     @State private var externalSubtitleName: String?
+    @State private var externalSubtitleResources: [ExternalSubtitleResource] = []
+    @State private var selectedExternalSubtitleID: String?
     @State private var externalSubtitleOffset = 0.0
     @State private var isExternalSubtitleEnabled = true
+    @State private var isFetchingExternalSubtitles = false
+    @State private var subtitleFetchTask: Task<Void, Never>?
     @State private var skipSegment = PlaybackSkipSegment()
     @State private var isConfirmingExit = false
     @State private var resumesAfterExitCancellation = false
     @State private var isUsingCompatibilityStream = false
     @State private var forcesUniversalPlayer = false
     @State private var playbackRouteMode = PlaybackRouteMode.automatic
+    #if os(tvOS)
+    @FocusState private var tvFocusedControl: TVPlayerFocus?
+    #endif
     #if os(iOS)
     @State private var gestureMode: PlayerGestureMode?
     @State private var gestureStartValue: Double = 0
@@ -365,7 +389,13 @@ struct PlayerScreen: View {
             togglePlayback()
             setControlsVisible(true)
         }
-        .onMoveCommand(perform: handleTVRemoteMove)
+        .onExitCommand(perform: handleTVExitCommand)
+        .onChange(of: shouldShowPlayerControls) { _, visible in
+            synchronizeTVPlayerFocus(isVisible: visible)
+        }
+        .onChange(of: tvFocusedControl) { _, focus in
+            handleTVControlFocusChange(focus)
+        }
         #endif
         .kanataStatusBarHidden()
         .interactiveDismissDisabled()
@@ -382,6 +412,7 @@ struct PlayerScreen: View {
             osdTask?.cancel()
             controlsTask?.cancel()
             sleepTask?.cancel()
+            subtitleFetchTask?.cancel()
             viewModel.teardown()
             setIdleTimerDisabled(false)
             #if os(iOS)
@@ -409,8 +440,11 @@ struct PlayerScreen: View {
                 isCompatibilityAvailable: isCompatibilityAvailable,
                 hasExternalSubtitle: !externalSubtitleCues.isEmpty,
                 externalSubtitleName: externalSubtitleName,
+                externalSubtitleResources: externalSubtitleResources,
+                selectedExternalSubtitleID: selectedExternalSubtitleID,
                 externalSubtitleEnabled: $isExternalSubtitleEnabled,
                 externalSubtitleOffset: $externalSubtitleOffset,
+                isFetchingExternalSubtitles: isFetchingExternalSubtitles,
                 skipSegment: skipSegment,
                 onImportDanmaku: {
                     isShowingPlaybackPanel = false
@@ -424,6 +458,8 @@ struct PlayerScreen: View {
                     isShowingPlaybackPanel = false
                     isImportingSubtitle = true
                 },
+                onFetchExternalSubtitles: fetchExternalSubtitles,
+                onSelectExternalSubtitle: selectExternalSubtitle,
                 onMarkIntro: { updateSkipSegment(introEnd: currentTime) },
                 onMarkOutro: { updateSkipSegment(outroStart: currentTime) },
                 onClearSkipSegment: { clearSkipSegment() },
@@ -459,7 +495,7 @@ struct PlayerScreen: View {
             onCompletion: handleSubtitleImport
         )
         .alert(
-            "弹幕操作失败",
+            "播放操作失败",
             isPresented: Binding(
                 get: { danmakuOperationError != nil },
                 set: { if !$0 { danmakuOperationError = nil } }
@@ -594,6 +630,8 @@ struct PlayerScreen: View {
                 .onTapGesture { setControlsVisible(!isShowingControls) }
                 #if os(tvOS)
                 .focusable(!shouldShowPlayerControls)
+                .focused($tvFocusedControl, equals: .background)
+                .onMoveCommand(perform: handleTVRemoteMove)
                 #endif
         } else {
             Color.clear
@@ -610,6 +648,8 @@ struct PlayerScreen: View {
                 #endif
                 #if os(tvOS)
                 .focusable(!shouldShowPlayerControls)
+                .focused($tvFocusedControl, equals: .background)
+                .onMoveCommand(perform: handleTVRemoteMove)
                 #endif
         }
     }
@@ -748,6 +788,9 @@ struct PlayerScreen: View {
                     controlSymbol("chevron.left", prominent: false)
                 }
                 .buttonStyle(PlayerControlButtonStyle())
+                #if os(tvOS)
+                .focused($tvFocusedControl, equals: .back)
+                #endif
                 .accessibilityLabel(isFullscreenBackAction ? "退出横屏全屏" : "返回媒体库")
                 VStack(alignment: .leading, spacing: 3) {
                     Text(playerDisplayTitle)
@@ -770,6 +813,9 @@ struct PlayerScreen: View {
                     controlSymbol("text.magnifyingglass", prominent: false)
                 }
                 .buttonStyle(PlayerControlButtonStyle())
+                #if os(tvOS)
+                .focused($tvFocusedControl, equals: .rematch)
+                #endif
                 .accessibilityLabel("重新匹配弹幕")
                 Button {
                     isShowingPlaybackPanel = true
@@ -777,8 +823,14 @@ struct PlayerScreen: View {
                     controlSymbol("ellipsis", prominent: false)
                 }
                 .buttonStyle(PlayerControlButtonStyle())
+                #if os(tvOS)
+                .focused($tvFocusedControl, equals: .more)
+                #endif
                 .accessibilityLabel("更多播放设置")
             }
+            #if os(tvOS)
+            .focusSection()
+            #endif
             .frame(maxWidth: 1660)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, playerControlHorizontalPadding)
@@ -806,6 +858,7 @@ struct PlayerScreen: View {
                         commitSeek(to: target)
                         setControlsVisible(true)
                     }
+                    .focused($tvFocusedControl, equals: .progress)
                     #else
                     Slider(
                         value: $currentTime,
@@ -824,11 +877,19 @@ struct PlayerScreen: View {
                     Text(timeLabel(viewModel.duration)).font(.caption.monospacedDigit())
                 }
 
+                #if os(tvOS)
+                playbackControlRow(showAllActions: true, compact: false)
+                    .focusSection()
+                #else
                 ViewThatFits(in: .horizontal) {
                     playbackControlRow(showAllActions: true, compact: false)
                     playbackControlRow(showAllActions: false, compact: true)
                 }
+                #endif
             }
+            #if os(tvOS)
+            .focusSection()
+            #endif
             .frame(maxWidth: 1660)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, playerControlHorizontalPadding)
@@ -865,6 +926,9 @@ struct PlayerScreen: View {
                         controlSymbol("gobackward.10", prominent: false, compact: compact)
                     }
                     .buttonStyle(PlayerControlButtonStyle())
+                    #if os(tvOS)
+                    .focused($tvFocusedControl, equals: .rewind)
+                    #endif
                     .accessibilityLabel("后退 10 秒")
                     if items.count > 1 {
                         Button {
@@ -873,6 +937,9 @@ struct PlayerScreen: View {
                             controlSymbol("backward.end.fill", prominent: false, compact: compact)
                         }
                         .buttonStyle(PlayerControlButtonStyle())
+                        #if os(tvOS)
+                        .focused($tvFocusedControl, equals: .previousEpisode)
+                        #endif
                         .disabled(activeIndex == 0)
                         .accessibilityLabel("上一集")
                     }
@@ -882,6 +949,9 @@ struct PlayerScreen: View {
                         controlSymbol(isPlaying ? "pause.fill" : "play.fill", prominent: true, compact: compact)
                     }
                     .buttonStyle(PlayerControlButtonStyle())
+                    #if os(tvOS)
+                    .focused($tvFocusedControl, equals: .playPause)
+                    #endif
                     .accessibilityLabel(isPlaying ? "暂停" : "播放")
                     Button {
                         commitSeek(to: currentTime + 10)
@@ -890,6 +960,9 @@ struct PlayerScreen: View {
                         controlSymbol("goforward.10", prominent: false, compact: compact)
                     }
                     .buttonStyle(PlayerControlButtonStyle())
+                    #if os(tvOS)
+                    .focused($tvFocusedControl, equals: .forward)
+                    #endif
                     .accessibilityLabel("前进 10 秒")
                     if items.count > 1 {
                         Button {
@@ -898,6 +971,9 @@ struct PlayerScreen: View {
                             controlSymbol("forward.end.fill", prominent: false, compact: compact)
                         }
                         .buttonStyle(PlayerControlButtonStyle())
+                        #if os(tvOS)
+                        .focused($tvFocusedControl, equals: .nextEpisode)
+                        #endif
                         .disabled(activeIndex >= items.count - 1)
                         .accessibilityLabel("下一集")
                     }
@@ -909,6 +985,9 @@ struct PlayerScreen: View {
                             controlSymbol("list.number", prominent: false, compact: compact)
                         }
                         .buttonStyle(PlayerControlButtonStyle())
+                        #if os(tvOS)
+                        .focused($tvFocusedControl, equals: .playlist)
+                        #endif
                         .accessibilityLabel("选择分集")
                     }
                     if showAllActions {
@@ -923,6 +1002,9 @@ struct PlayerScreen: View {
                             )
                         }
                         .buttonStyle(PlayerControlButtonStyle())
+                        #if os(tvOS)
+                        .focused($tvFocusedControl, equals: .danmakuToggle)
+                        #endif
                         .accessibilityLabel(settings.danmakuConfig.enabled ? "关闭弹幕" : "开启弹幕")
                     }
                     Button {
@@ -931,6 +1013,9 @@ struct PlayerScreen: View {
                         controlSymbol("slider.horizontal.3", prominent: false, compact: compact)
                     }
                     .buttonStyle(PlayerControlButtonStyle())
+                    #if os(tvOS)
+                    .focused($tvFocusedControl, equals: .danmakuSettings)
+                    #endif
                     .accessibilityLabel("弹幕设置")
                     #if os(iOS)
                     Button {
@@ -954,6 +1039,9 @@ struct PlayerScreen: View {
                             controlSymbol("text.magnifyingglass", prominent: false, compact: compact)
                         }
                         .buttonStyle(PlayerControlButtonStyle())
+                        #if os(tvOS)
+                        .focused($tvFocusedControl, equals: .manualMatch)
+                        #endif
                         .accessibilityLabel("手动匹配弹幕")
                         #if os(iOS)
                         Button {
@@ -1005,23 +1093,42 @@ struct PlayerScreen: View {
     }
 
     #if os(tvOS)
-    /// 播放中控制层隐藏时，任意方向键都先唤回控件；左右键同时执行十秒跳转。
+    /// 控制层隐藏时只负责唤出控件，后续方向事件交给 tvOS 焦点引擎。
     /// - Parameter direction: Siri Remote 当前移动方向。
     private func handleTVRemoteMove(_ direction: MoveCommandDirection) {
         guard !shouldShowPlayerControls else { return }
         setControlsVisible(true)
-        switch direction {
-        case .left:
-            commitSeek(to: currentTime - 10)
-            showOSD("后退 10 秒")
-        case .right:
-            commitSeek(to: currentTime + 10)
-            showOSD("前进 10 秒")
-        case .up, .down:
-            break
-        @unknown default:
-            break
+    }
+
+    /// 菜单键第一次隐藏播放控件，控件已隐藏时再执行返回。
+    private func handleTVExitCommand() {
+        if shouldShowPlayerControls {
+            setControlsVisible(false)
+        } else {
+            handleBack()
         }
+    }
+
+    /// 控制层出现后把焦点交给中央播放按钮，隐藏后交回透明视频层。
+    /// - Parameter isVisible: 控制层当前是否可见且可操作。
+    private func synchronizeTVPlayerFocus(isVisible: Bool) {
+        Task { @MainActor in
+            await Task.yield()
+            if isVisible {
+                if tvFocusedControl == nil || tvFocusedControl == .background {
+                    tvFocusedControl = .playPause
+                }
+            } else {
+                tvFocusedControl = .background
+            }
+        }
+    }
+
+    /// 用户在控件之间移动时刷新自动隐藏计时，避免操作过程中控制层消失。
+    /// - Parameter focus: 当前获得焦点的播放器控件。
+    private func handleTVControlFocusChange(_ focus: TVPlayerFocus?) {
+        guard shouldShowPlayerControls, focus != nil, focus != .background else { return }
+        scheduleControlsHide()
     }
     #endif
 
@@ -1077,6 +1184,7 @@ struct PlayerScreen: View {
         }
         viewModel.onPlaybackStateChanged = { playing in
             isPlaying = playing
+            bridge.sync(time: currentTime, rate: playing ? viewModel.playbackRate : 0)
             if playing {
                 scheduleControlsHide()
             } else {
@@ -1140,6 +1248,7 @@ struct PlayerScreen: View {
     private func finishPlayback(message: String) {
         isPlaying = false
         currentTime = viewModel.duration
+        canvasBridge.sync(time: currentTime, rate: 0)
         setControlsVisible(true)
         showOSD(message)
     }
@@ -1150,7 +1259,10 @@ struct PlayerScreen: View {
         canvasBridge.load(items: [])
         externalSubtitleCues = []
         externalSubtitleName = nil
+        externalSubtitleResources = []
+        selectedExternalSubtitleID = nil
         externalSubtitleOffset = 0
+        subtitleFetchTask?.cancel()
         skipSegment = PlaybackSkipSegmentStore.segment(for: skipSegmentKey)
         currentTime = 0
         pendingSeekTarget = nil
@@ -1177,7 +1289,7 @@ struct PlayerScreen: View {
             }
             return
         }
-        await autoLoadSiblingSubtitle(for: url)
+        scheduleExternalSubtitleDiscovery(for: directURL ?? url)
         wireCallbacks()
         await viewModel.open(
             url: url,
@@ -1360,11 +1472,13 @@ struct PlayerScreen: View {
     private func togglePlayback() {
         if isPlaying {
             viewModel.pause()
+            isPlaying = false
             canvasBridge.sync(time: currentTime, rate: 0)
         } else {
             viewModel.play()
+            isPlaying = true
+            canvasBridge.sync(time: currentTime, rate: viewModel.playbackRate)
         }
-        isPlaying.toggle()
         scheduleControlsHide()
     }
 
@@ -1522,6 +1636,8 @@ struct PlayerScreen: View {
                     }.value
                     externalSubtitleCues = cues
                     externalSubtitleName = fileName
+                    externalSubtitleResources = []
+                    selectedExternalSubtitleID = nil
                     isExternalSubtitleEnabled = true
                     showOSD("已载入 \(cues.count) 条外挂字幕")
                 } catch {
@@ -1533,33 +1649,179 @@ struct PlayerScreen: View {
         }
     }
 
-    /// 为本地视频自动查找并载入同目录、同文件名的外挂字幕。
-    /// - Parameter videoURL: 当前本地视频地址；网络视频不会扫描。
-    private func autoLoadSiblingSubtitle(for videoURL: URL) async {
-        guard videoURL.isFileURL else { return }
+    /// 用户主动重新获取当前视频的同目录或媒体服务器字幕。
+    private func fetchExternalSubtitles() {
+        guard let videoURL = activeItem.resolveURL() else {
+            danmakuOperationError = ExternalSubtitleError.notFound.localizedDescription
+            return
+        }
+        scheduleExternalSubtitleDiscovery(for: videoURL, announcesResult: true)
+    }
+
+    /// 启动可取消的外挂字幕发现任务，切集时不会把旧结果写入新视频。
+    /// - Parameters:
+    ///   - videoURL: 当前视频原始地址。
+    ///   - announcesResult: 是否向用户反馈未找到、成功或失败。
+    private func scheduleExternalSubtitleDiscovery(
+        for videoURL: URL,
+        announcesResult: Bool = false
+    ) {
+        subtitleFetchTask?.cancel()
+        let item = activeItem
+        isFetchingExternalSubtitles = true
+        subtitleFetchTask = Task {
+            defer {
+                if activeItem.id == item.id { isFetchingExternalSubtitles = false }
+            }
+            do {
+                let resources = try await externalSubtitleResources(for: item, videoURL: videoURL)
+                guard !Task.isCancelled, activeItem.id == item.id else { return }
+                externalSubtitleResources = resources
+                guard let preferred = resources.first else {
+                    if announcesResult { danmakuOperationError = ExternalSubtitleError.notFound.localizedDescription }
+                    return
+                }
+                _ = await loadExternalSubtitle(preferred, for: item.id, announcesResult: announcesResult)
+            } catch {
+                guard !Task.isCancelled, activeItem.id == item.id, announcesResult else { return }
+                danmakuOperationError = "外挂字幕获取失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// 汇总本地、WebDAV、DSM、Jellyfin、Emby 与 Plex 提供的外挂字幕。
+    /// - Parameters:
+    ///   - item: 当前媒体库条目。
+    ///   - videoURL: 当前视频原始地址。
+    /// - Returns: 已按设备语言优先级排序的可用字幕。
+    private func externalSubtitleResources(
+        for item: LibraryItem,
+        videoURL: URL
+    ) async throws -> [ExternalSubtitleResource] {
+        let resources: [ExternalSubtitleResource]
+        if videoURL.isFileURL {
+            resources = try localSubtitleResources(beside: videoURL, videoName: item.displayName)
+        } else if let profileID = item.sourceProfileID,
+                  let profile = MediaSourceProfileStore.profile(id: profileID) {
+            switch profile.kind {
+            case .webDAV:
+                let values = try await WebDAVClient(profile: profile).subtitleFiles(
+                    directory: videoURL.deletingLastPathComponent()
+                )
+                resources = values.filter {
+                    ExternalSubtitlePreference.matches(subtitleName: $0.name, videoName: item.displayName)
+                }
+            case .synology:
+                let storedPath = item.serverItemID?.replacingOccurrences(of: "synology:", with: "")
+                    ?? URLComponents(url: videoURL, resolvingAgainstBaseURL: false)?.queryItems?
+                        .first(where: { $0.name == "path" })?.value
+                guard let storedPath else { return [] }
+                let values = try await SynologyFileStationClient().subtitleFiles(
+                    profile: profile,
+                    videoPath: storedPath
+                )
+                resources = values.filter {
+                    ExternalSubtitlePreference.matches(subtitleName: $0.name, videoName: item.displayName)
+                }
+            case .jellyfin, .emby:
+                guard let itemID = item.serverItemID else { return [] }
+                resources = try await MediaBrowserClient().subtitleFiles(
+                    profile: profile,
+                    itemID: itemID,
+                    preferredMediaSourceID: item.serverMediaSourceID
+                )
+            case .plex:
+                guard let rawID = item.serverItemID else { return [] }
+                let itemID = rawID.replacingOccurrences(of: "plex-video:", with: "")
+                resources = try await PlexClient().subtitleFiles(profile: profile, itemID: itemID)
+            }
+        } else {
+            resources = []
+        }
+        let unique = Dictionary(resources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return ExternalSubtitlePreference.sorted(Array(unique.values))
+    }
+
+    /// 扫描本地视频同目录并保留同名及带语言后缀的字幕。
+    /// - Parameters:
+    ///   - videoURL: 本地视频地址。
+    ///   - videoName: 媒体库保存的原始视频名。
+    /// - Returns: 可在安全作用域内读取的字幕资源。
+    private func localSubtitleResources(beside videoURL: URL, videoName: String) throws -> [ExternalSubtitleResource] {
         let hasAccess = videoURL.startAccessingSecurityScopedResource()
         defer { if hasAccess { videoURL.stopAccessingSecurityScopedResource() } }
-        let directory = videoURL.deletingLastPathComponent()
-        let stem = videoURL.deletingPathExtension().lastPathComponent.lowercased()
-        let supported = Set(["srt", "vtt", "ass", "ssa"])
-        guard let candidate = try? FileManager.default.contentsOfDirectory(
-            at: directory,
+        return try FileManager.default.contentsOfDirectory(
+            at: videoURL.deletingLastPathComponent(),
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
-        ).first(where: {
-            supported.contains($0.pathExtension.lowercased())
-                && $0.deletingPathExtension().lastPathComponent.lowercased() == stem
-        }), let data = try? Data(contentsOf: candidate) else { return }
-        do {
-            let cues = try await Task.detached(priority: .utility) {
-                try ExternalSubtitleParser.parse(data: data, fileName: candidate.lastPathComponent)
-            }.value
-            externalSubtitleCues = cues
-            externalSubtitleName = candidate.lastPathComponent
-            isExternalSubtitleEnabled = true
-        } catch {
-            danmakuOperationError = "同名字幕读取失败：\(error.localizedDescription)"
+        )
+        .filter {
+            ExternalSubtitlePreference.supportedExtensions.contains($0.pathExtension.lowercased())
+                && ExternalSubtitlePreference.matches(subtitleName: $0.lastPathComponent, videoName: videoName)
         }
+        .map { ExternalSubtitleResource(url: $0, name: $0.lastPathComponent, requestHeaders: [:]) }
+    }
+
+    /// 选择已发现的另一份外挂字幕并立即载入。
+    /// - Parameter id: 字幕资源 URL 标识。
+    private func selectExternalSubtitle(_ id: String) {
+        guard let resource = externalSubtitleResources.first(where: { $0.id == id }) else { return }
+        let itemID = activeItem.id
+        subtitleFetchTask?.cancel()
+        isFetchingExternalSubtitles = true
+        subtitleFetchTask = Task {
+            defer { if activeItem.id == itemID { isFetchingExternalSubtitles = false } }
+            _ = await loadExternalSubtitle(resource, for: itemID, announcesResult: true)
+        }
+    }
+
+    /// 下载并解析一份外挂字幕，成功后切换当前字幕轨。
+    /// - Parameters:
+    ///   - resource: 本地或远程字幕资源。
+    ///   - itemID: 发起加载时的视频标识。
+    ///   - announcesResult: 是否显示成功与失败反馈。
+    /// - Returns: 字幕成功应用时返回 true。
+    private func loadExternalSubtitle(
+        _ resource: ExternalSubtitleResource,
+        for itemID: String,
+        announcesResult: Bool
+    ) async -> Bool {
+        do {
+            let data = try await externalSubtitleData(from: resource)
+            let cues = try await Task.detached(priority: .utility) {
+                try ExternalSubtitleParser.parse(data: data, fileName: resource.name)
+            }.value
+            guard !Task.isCancelled, activeItem.id == itemID else { return false }
+            externalSubtitleCues = cues
+            externalSubtitleName = resource.name
+            selectedExternalSubtitleID = resource.id
+            isExternalSubtitleEnabled = true
+            if announcesResult { showOSD("已载入 \(resource.name)") }
+            return true
+        } catch {
+            guard !Task.isCancelled, activeItem.id == itemID, announcesResult else { return false }
+            danmakuOperationError = "外挂字幕读取失败：\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// 从本地安全作用域或带认证头的网络地址读取字幕数据。
+    /// - Parameter resource: 待读取字幕资源。
+    /// - Returns: 字幕原始数据。
+    private func externalSubtitleData(from resource: ExternalSubtitleResource) async throws -> Data {
+        if resource.url.isFileURL {
+            let hasAccess = resource.url.startAccessingSecurityScopedResource()
+            defer { if hasAccess { resource.url.stopAccessingSecurityScopedResource() } }
+            return try await Task.detached(priority: .utility) {
+                try Data(contentsOf: resource.url)
+            }.value
+        }
+        var request = URLRequest(url: resource.url)
+        resource.requestHeaders.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw ExternalSubtitleError.http(-1) }
+        guard (200..<300).contains(http.statusCode) else { throw ExternalSubtitleError.http(http.statusCode) }
+        return data
     }
 
     /// 返回文件选择器允许显示的本地弹幕类型。
@@ -2178,12 +2440,17 @@ struct PlaybackOptionsPanel: View {
     let isCompatibilityAvailable: Bool
     let hasExternalSubtitle: Bool
     let externalSubtitleName: String?
+    let externalSubtitleResources: [ExternalSubtitleResource]
+    let selectedExternalSubtitleID: String?
     @Binding var externalSubtitleEnabled: Bool
     @Binding var externalSubtitleOffset: Double
+    let isFetchingExternalSubtitles: Bool
     let skipSegment: PlaybackSkipSegment
     let onImportDanmaku: () -> Void
     let onMatchDanmaku: () -> Void
     let onImportSubtitle: () -> Void
+    let onFetchExternalSubtitles: () -> Void
+    let onSelectExternalSubtitle: (String) -> Void
     let onMarkIntro: () -> Void
     let onMarkOutro: () -> Void
     let onClearSkipSegment: () -> Void
@@ -2273,6 +2540,13 @@ struct PlaybackOptionsPanel: View {
                             Text(track.title).tag(track.id)
                         }
                     }
+                    Button(action: onFetchExternalSubtitles) {
+                        Label(
+                            isFetchingExternalSubtitles ? "正在获取外挂字幕…" : "获取外部字幕",
+                            systemImage: "text.badge.plus"
+                        )
+                    }
+                    .disabled(isFetchingExternalSubtitles)
                     #if !os(tvOS)
                     Button(action: onImportSubtitle) {
                         Label("导入 SRT / VTT / ASS / SSA", systemImage: "captions.bubble")
@@ -2280,6 +2554,19 @@ struct PlaybackOptionsPanel: View {
                     #endif
                     if hasExternalSubtitle {
                         Toggle("显示外挂字幕", isOn: $externalSubtitleEnabled)
+                        if externalSubtitleResources.count > 1 {
+                            Picker(
+                                "外挂字幕语言",
+                                selection: Binding(
+                                    get: { selectedExternalSubtitleID ?? externalSubtitleResources[0].id },
+                                    set: { value in onSelectExternalSubtitle(value) }
+                                )
+                            ) {
+                                ForEach(externalSubtitleResources) { resource in
+                                    Text(resource.name).tag(resource.id)
+                                }
+                            }
+                        }
                         LabeledContent("当前文件", value: externalSubtitleName ?? "已导入")
                         #if !os(tvOS)
                         Stepper(

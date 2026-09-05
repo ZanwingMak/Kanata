@@ -9,6 +9,140 @@ struct ExternalSubtitleCue: Identifiable, Sendable {
     let text: String
 }
 
+/// 可由本地目录或网络媒体源读取的一份外挂字幕。
+struct ExternalSubtitleResource: Identifiable, Hashable, Sendable {
+    let url: URL
+    let name: String
+    let requestHeaders: [String: String]
+
+    var id: String { url.absoluteString }
+}
+
+/// 按视频文件名与设备首选语言筛选、排序外挂字幕。
+enum ExternalSubtitlePreference {
+    static let supportedExtensions = Set(["srt", "vtt", "ass", "ssa"])
+
+    /// 判断字幕文件是否属于当前视频，允许 `.zh-Hans`、`.chs` 等语言后缀。
+    /// - Parameters:
+    ///   - subtitleName: 字幕文件名。
+    ///   - videoName: 视频文件名。
+    /// - Returns: 主文件名相同或字幕名带视频名前缀时返回 true。
+    static func matches(subtitleName: String, videoName: String) -> Bool {
+        let subtitleStem = URL(fileURLWithPath: subtitleName).deletingPathExtension().lastPathComponent.lowercased()
+        let videoStem = URL(fileURLWithPath: videoName).deletingPathExtension().lastPathComponent.lowercased()
+        guard !videoStem.isEmpty else { return false }
+        return subtitleStem == videoStem
+            || subtitleStem.hasPrefix("\(videoStem).")
+            || subtitleStem.hasPrefix("\(videoStem)-")
+            || subtitleStem.hasPrefix("\(videoStem)_")
+    }
+
+    /// 将候选字幕按设备语言、字幕类型和文件名稳定排序。
+    /// - Parameters:
+    ///   - resources: 待排序字幕。
+    ///   - preferredLanguages: 系统语言标识，默认使用设备语言顺序。
+    /// - Returns: 最适合本机语言的字幕排在首位。
+    static func sorted(
+        _ resources: [ExternalSubtitleResource],
+        preferredLanguages: [String] = Locale.preferredLanguages
+    ) -> [ExternalSubtitleResource] {
+        resources.sorted { left, right in
+            let leftRank = languageRank(fileName: left.name, preferredLanguages: preferredLanguages)
+            let rightRank = languageRank(fileName: right.name, preferredLanguages: preferredLanguages)
+            if leftRank != rightRank { return leftRank < rightRank }
+            let leftFormat = formatRank(left.url.pathExtension)
+            let rightFormat = formatRank(right.url.pathExtension)
+            if leftFormat != rightFormat { return leftFormat < rightFormat }
+            return left.name.localizedStandardCompare(right.name) == .orderedAscending
+        }
+    }
+
+    /// 返回字幕语言相对设备语言的优先级，数值越小越优先。
+    /// - Parameters:
+    ///   - fileName: 字幕文件名、轨道名或语言代码。
+    ///   - preferredLanguages: 系统首选语言顺序。
+    /// - Returns: 可用于升序排序的语言分值。
+    static func languageRank(
+        fileName: String,
+        preferredLanguages: [String] = Locale.preferredLanguages
+    ) -> Int {
+        let normalized = normalizedLanguageText(fileName)
+        for (index, language) in preferredLanguages.enumerated() {
+            if languageAliases(for: language).contains(where: { containsLanguage($0, in: normalized) }) {
+                return index
+            }
+        }
+        let fallbacks = ["zh-hans", "zh-hant", "en"]
+        for (index, language) in fallbacks.enumerated() {
+            if languageAliases(for: language).contains(where: { containsLanguage($0, in: normalized) }) {
+                return preferredLanguages.count + index
+            }
+        }
+        return preferredLanguages.count + fallbacks.count + 1
+    }
+
+    /// 返回语言标识常见的文件名别名。
+    /// - Parameter identifier: BCP-47 或简写语言标识。
+    /// - Returns: 可用于字幕文件名匹配的别名。
+    private static func languageAliases(for identifier: String) -> [String] {
+        let language = identifier.lowercased().replacingOccurrences(of: "_", with: "-")
+        if language.hasPrefix("zh-hans") || language.hasPrefix("zh-cn") || language.hasPrefix("zh-sg") {
+            return ["zh-hans", "zh-cn", "zh-sg", "zho", "chi", "chs", "sc", "chinese", "中文", "简体", "简中"]
+        }
+        if language.hasPrefix("zh-hant") || language.hasPrefix("zh-tw") || language.hasPrefix("zh-hk") {
+            return ["zh-hant", "zh-tw", "zh-hk", "zho", "chi", "cht", "tc", "chinese", "中文", "繁体", "繁中"]
+        }
+        let code = language.split(separator: "-").first.map(String.init) ?? language
+        var aliases = [language, code]
+        let common: [String: [String]] = [
+            "en": ["eng", "english", "英语", "英文"],
+            "ja": ["jpn", "japanese", "日语", "日本語"],
+            "ko": ["kor", "korean", "韩语", "한국어"],
+        ]
+        aliases.append(contentsOf: common[code] ?? [])
+        if let englishName = Locale(identifier: "en").localizedString(forLanguageCode: code) {
+            aliases.append(englishName.lowercased())
+        }
+        if let localName = Locale.current.localizedString(forLanguageCode: code) {
+            aliases.append(localName.lowercased())
+        }
+        return aliases
+    }
+
+    /// 统一文件名分隔符，避免大小写和下划线影响语言识别。
+    /// - Parameter value: 原始文件名或语言标签。
+    /// - Returns: 小写且使用短横线分隔的文本。
+    private static func normalizedLanguageText(_ value: String) -> String {
+        value.lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+    }
+
+    /// 判断语言别名是否作为独立片段出现在字幕描述中。
+    /// - Parameters:
+    ///   - alias: 语言别名。
+    ///   - value: 已规范化的字幕描述。
+    /// - Returns: 命中完整标签或文字别名时返回 true。
+    private static func containsLanguage(_ alias: String, in value: String) -> Bool {
+        if alias.unicodeScalars.contains(where: { !$0.isASCII }) { return value.contains(alias) }
+        let escaped = NSRegularExpression.escapedPattern(for: alias)
+        return value.range(of: "(^|[^a-z0-9])\(escaped)([^a-z0-9]|$)", options: .regularExpression) != nil
+    }
+
+    /// 返回字幕格式优先级，保留 ASS 样式后依次选择 SRT、VTT 与 SSA。
+    /// - Parameter value: 文件扩展名。
+    /// - Returns: 可用于升序排序的格式分值。
+    private static func formatRank(_ value: String) -> Int {
+        switch value.lowercased() {
+        case "ass": 0
+        case "srt": 1
+        case "vtt": 2
+        case "ssa": 3
+        default: 4
+        }
+    }
+}
+
 /// SRT、WebVTT 与基础 ASS/SSA 字幕解析器。
 enum ExternalSubtitleParser {
     /// 根据扩展名解析外挂字幕，并兼容常见中文编码。
@@ -103,11 +237,15 @@ enum ExternalSubtitleParser {
 enum ExternalSubtitleError: LocalizedError {
     case invalidEncoding
     case noCues
+    case notFound
+    case http(Int)
 
     var errorDescription: String? {
         switch self {
         case .invalidEncoding: "字幕编码无法识别，请转换为 UTF-8、GB18030 或 Big5"
         case .noCues: "没有解析到有效字幕时间轴"
+        case .notFound: "当前视频旁没有找到可用的外挂字幕"
+        case .http(let statusCode): "外挂字幕下载失败（HTTP \(statusCode)）"
         }
     }
 }

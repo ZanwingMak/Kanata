@@ -40,6 +40,26 @@ actor WebDAVClient {
     /// - Parameter directory: 要发送 Depth: 1 请求的目录。
     /// - Returns: 已过滤为文件夹和常见视频格式的条目。
     func list(directory: URL) async throws -> [WebDAVEntry] {
+        try await rawEntries(directory: directory)
+            .filter { $0.isDirectory || Self.isVideo($0.url) }
+            .sorted(by: Self.sortEntries)
+    }
+
+    /// 列出 WebDAV 目录中的外挂字幕，供播放器按设备语言自动选择。
+    /// - Parameter directory: 当前视频所在目录。
+    /// - Returns: 支持的字幕文件及其临时认证请求头。
+    func subtitleFiles(directory: URL) async throws -> [ExternalSubtitleResource] {
+        try await rawEntries(directory: directory)
+            .filter { !$0.isDirectory && Self.isSubtitle($0.url) }
+            .map { entry in
+                ExternalSubtitleResource(url: entry.url, name: entry.name, requestHeaders: headers)
+            }
+    }
+
+    /// 发送 PROPFIND 并返回未按媒体类型过滤的直接子项。
+    /// - Parameter directory: 要读取的 WebDAV 目录。
+    /// - Returns: 排除目录自身后的原始条目。
+    private func rawEntries(directory: URL) async throws -> [WebDAVEntry] {
         var request = URLRequest(url: directory)
         request.httpMethod = "PROPFIND"
         request.setValue("1", forHTTPHeaderField: "Depth")
@@ -63,8 +83,6 @@ actor WebDAVClient {
         let root = Self.normalizedPath(directory.path)
         return delegate.entries
             .filter { Self.normalizedPath($0.url.path) != root }
-            .filter { $0.isDirectory || Self.isVideo($0.url) }
-            .sorted(by: Self.sortEntries)
     }
 
     /// 创建短超时、无持久 Cookie 的网络会话。
@@ -83,6 +101,13 @@ actor WebDAVClient {
         ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "mts", "m3u8", "flv",
          "mpg", "mpeg", "vob", "wmv", "ogv", "3gp", "3g2", "mxf", "rm", "rmvb"]
             .contains(url.pathExtension.lowercased())
+    }
+
+    /// 判断 WebDAV 文件是否是播放器可解析的外挂字幕。
+    /// - Parameter url: WebDAV 文件地址。
+    /// - Returns: SRT、VTT、ASS 或 SSA 时返回 true。
+    private static func isSubtitle(_ url: URL) -> Bool {
+        ExternalSubtitlePreference.supportedExtensions.contains(url.pathExtension.lowercased())
     }
 
     /// 先显示目录，再按自然语言文件名排序。
@@ -265,6 +290,44 @@ actor SynologyFileStationClient {
         }
     }
 
+    /// 读取 DSM 视频同目录中的外挂字幕文件。
+    /// - Parameters:
+    ///   - profile: 已保存的 DSM 连接。
+    ///   - videoPath: File Station 中的视频绝对路径。
+    /// - Returns: 带本次会话认证的字幕下载资源。
+    func subtitleFiles(profile: MediaSourceProfile, videoPath: String) async throws -> [ExternalSubtitleResource] {
+        guard let server = profile.serverURL,
+              let sid = MediaSourceProfileStore.secret(for: profile)?.token,
+              !sid.isEmpty else { throw MediaSourceError.missingCredential }
+        let parentPath = (videoPath as NSString).deletingLastPathComponent
+        let fields = [
+            "api": "SYNO.FileStation.List",
+            "version": "2",
+            "method": "list",
+            "folder_path": parentPath,
+            "_sid": sid,
+        ]
+        let data = try await request(server: server, path: "entry.cgi", fields: fields)
+        let response = try JSONDecoder().decode(SynologyListEnvelope.self, from: data)
+        guard response.success, let files = response.data?.files else {
+            throw Self.error(code: response.error?.code)
+        }
+        return files.compactMap { file in
+            guard !file.isdir, Self.isSubtitle(path: file.path),
+                  let downloadURL = try? streamURL(profile: profile, path: file.path),
+                  var components = URLComponents(
+                    url: downloadURL,
+                    resolvingAgainstBaseURL: false
+                  ) else { return nil }
+            var queryItems = components.queryItems ?? []
+            queryItems.removeAll { $0.name == "_sid" }
+            queryItems.append(URLQueryItem(name: "_sid", value: sid))
+            components.queryItems = queryItems
+            guard let url = components.url else { return nil }
+            return ExternalSubtitleResource(url: url, name: file.name, requestHeaders: [:])
+        }
+    }
+
     /// 构建不含 sid 的 File Station 下载地址，播放时由 LibraryItem 动态注入会话。
     /// - Parameters:
     ///   - profile: DSM 媒体源。
@@ -315,6 +378,14 @@ actor SynologyFileStationClient {
         let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
         return ["mp4", "m4v", "mov", "mkv", "webm", "avi", "ts", "m2ts", "mts", "flv",
                 "mpg", "mpeg", "vob", "wmv", "ogv", "3gp", "3g2", "mxf", "rm", "rmvb"].contains(ext)
+    }
+
+    /// 判断 File Station 路径是否属于支持的外挂字幕格式。
+    /// - Parameter path: DSM 文件路径。
+    /// - Returns: SRT、VTT、ASS 或 SSA 时返回 true。
+    private static func isSubtitle(path: String) -> Bool {
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        return ExternalSubtitlePreference.supportedExtensions.contains(ext)
     }
 
     /// 把 DSM API 错误码转换为可操作提示。
@@ -483,6 +554,51 @@ actor MediaBrowserClient {
         return url
     }
 
+    /// 从 Jellyfin 或 Emby 获取当前视频可单独下载的文本字幕轨。
+    /// - Parameters:
+    ///   - profile: 媒体服务器连接。
+    ///   - itemID: 服务端视频条目 ID。
+    ///   - preferredMediaSourceID: 媒体库保存的媒体版本 ID。
+    /// - Returns: 可按 VTT 下载并由 Kanata 独立渲染的字幕资源。
+    func subtitleFiles(
+        profile: MediaSourceProfile,
+        itemID: String,
+        preferredMediaSourceID: String?
+    ) async throws -> [ExternalSubtitleResource] {
+        guard let server = profile.serverURL else { throw MediaSourceError.invalidResponse }
+        var components = URLComponents(
+            url: server.appendingPathComponent("Items/\(itemID)"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [URLQueryItem(name: "Fields", value: "MediaSources")]
+        guard let url = components?.url else { throw MediaSourceError.invalidResponse }
+        var request = URLRequest(url: url)
+        let headers = MediaSourceProfileStore.playbackHeaders(for: profile)
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response)
+        let item = try JSONDecoder().decode(MediaBrowserSubtitleItem.self, from: data)
+        let source = item.mediaSources?.first(where: { $0.id == preferredMediaSourceID })
+            ?? item.mediaSources?.first
+        guard let source else { return [] }
+        return (source.mediaStreams ?? []).compactMap { stream in
+            guard stream.type.caseInsensitiveCompare("Subtitle") == .orderedSame,
+                  stream.isTextSubtitleStream != false,
+                  !["pgs", "dvdsub", "dvbsub", "hdmv_pgs_subtitle"].contains(stream.codec?.lowercased() ?? "") else {
+                return nil
+            }
+            let subtitleURL = server.appendingPathComponent(
+                "Videos/\(itemID)/\(source.id)/Subtitles/\(stream.index)/Stream.vtt"
+            )
+            let title = stream.displayTitle ?? stream.title ?? stream.language ?? "字幕 \(stream.index)"
+            return ExternalSubtitleResource(
+                url: subtitleURL,
+                name: "\(title).vtt",
+                requestHeaders: headers
+            )
+        }
+    }
+
     /// 先显示文件夹，再按显式集号和自然语言名称排序。
     /// - Parameters:
     ///   - left: 左侧条目。
@@ -548,6 +664,45 @@ private struct MediaBrowserItemsResponse: Decodable {
         }
     }
     let Items: [Item]
+}
+
+/// Jellyfin/Emby 单个项目中与外挂字幕有关的最小字段。
+private struct MediaBrowserSubtitleItem: Decodable {
+    struct MediaSource: Decodable {
+        struct MediaStream: Decodable {
+            let index: Int
+            let type: String
+            let codec: String?
+            let language: String?
+            let title: String?
+            let displayTitle: String?
+            let isTextSubtitleStream: Bool?
+
+            private enum CodingKeys: String, CodingKey {
+                case index = "Index"
+                case type = "Type"
+                case codec = "Codec"
+                case language = "Language"
+                case title = "Title"
+                case displayTitle = "DisplayTitle"
+                case isTextSubtitleStream = "IsTextSubtitleStream"
+            }
+        }
+
+        let id: String
+        let mediaStreams: [MediaStream]?
+
+        private enum CodingKeys: String, CodingKey {
+            case id = "Id"
+            case mediaStreams = "MediaStreams"
+        }
+    }
+
+    let mediaSources: [MediaSource]?
+
+    private enum CodingKeys: String, CodingKey {
+        case mediaSources = "MediaSources"
+    }
 }
 
 /// 一次 Plex 官方网页授权会话。
@@ -900,6 +1055,30 @@ actor PlexClient {
         return url
     }
 
+    /// 从 Plex 视频元数据读取可独立下载的文字字幕流。
+    /// - Parameters:
+    ///   - profile: Plex 服务器连接。
+    ///   - itemID: Plex ratingKey。
+    /// - Returns: 服务器暴露的外挂字幕资源。
+    func subtitleFiles(profile: MediaSourceProfile, itemID: String) async throws -> [ExternalSubtitleResource] {
+        guard let server = profile.serverURL,
+              let token = MediaSourceProfileStore.secret(for: profile)?.token,
+              !token.isEmpty else { throw MediaSourceError.missingCredential }
+        let url = server.appendingPathComponent("library/metadata/\(itemID)")
+        let headers = Self.headers(token: token)
+        var request = URLRequest(url: url)
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw MediaSourceError.invalidResponse }
+        if http.statusCode == 401 { throw MediaSourceError.authenticationFailed }
+        guard (200..<300).contains(http.statusCode) else { throw MediaSourceError.http(http.statusCode) }
+        let delegate = PlexSubtitleXMLDelegate(baseURL: server, headers: headers)
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        guard parser.parse() else { throw MediaSourceError.invalidResponse }
+        return delegate.resources
+    }
+
     /// 下载并解析 Plex XML 响应。
     /// - Parameters:
     ///   - url: API 地址。
@@ -944,6 +1123,50 @@ actor PlexClient {
     }
 }
 
+/// 解析 Plex 视频元数据中的文字字幕 Stream 节点。
+private final class PlexSubtitleXMLDelegate: NSObject, XMLParserDelegate {
+    private let baseURL: URL
+    private let headers: [String: String]
+    var resources: [ExternalSubtitleResource] = []
+
+    /// 创建 Plex 字幕节点解析器。
+    /// - Parameters:
+    ///   - baseURL: Plex Media Server 根地址。
+    ///   - headers: 下载字幕时复用的认证头。
+    init(baseURL: URL, headers: [String: String]) {
+        self.baseURL = baseURL
+        self.headers = headers
+    }
+
+    /// 将 streamType=3 且带下载 key 的文字字幕转换为统一资源。
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String] = [:]
+    ) {
+        guard elementName == "Stream",
+              attributeDict["streamType"] == "3",
+              let path = attributeDict["key"],
+              let url = URL(string: path, relativeTo: baseURL)?.absoluteURL else { return }
+        let rawCodec = attributeDict["codec"]?.lowercased() ?? url.pathExtension.lowercased()
+        let codec: String
+        switch rawCodec {
+        case "subrip": codec = "srt"
+        case "webvtt": codec = "vtt"
+        default: codec = rawCodec
+        }
+        guard ExternalSubtitlePreference.supportedExtensions.contains(codec) else { return }
+        let title = attributeDict["displayTitle"]
+            ?? attributeDict["title"]
+            ?? attributeDict["language"]
+            ?? "Plex 字幕"
+        let fileName = URL(fileURLWithPath: title).pathExtension.isEmpty ? "\(title).\(codec)" : title
+        resources.append(ExternalSubtitleResource(url: url, name: fileName, requestHeaders: headers))
+    }
+}
+
 /// 把 Plex 的 Directory、Video 和 Part XML 转成统一媒体条目。
 private final class PlexXMLDelegate: NSObject, XMLParserDelegate {
     let isSections: Bool
@@ -982,7 +1205,7 @@ private final class PlexXMLDelegate: NSObject, XMLParserDelegate {
                 mediaSourceID: nil,
                 index: attributeDict["index"].flatMap(Int.init),
                 seasonIndex: attributeDict["parentIndex"].flatMap(Int.init),
-                artworkPath: attributeDict["thumb"] ?? attributeDict["art"]
+                artworkPath: attributeDict["art"] ?? attributeDict["thumb"]
             ))
         case "Video":
             currentVideo = attributeDict
@@ -1014,7 +1237,7 @@ private final class PlexXMLDelegate: NSObject, XMLParserDelegate {
             mediaSourceID: nil,
             index: video["index"].flatMap(Int.init),
             seasonIndex: video["parentIndex"].flatMap(Int.init),
-            artworkPath: video["thumb"] ?? video["grandparentThumb"] ?? video["art"]
+            artworkPath: video["art"] ?? video["thumb"] ?? video["grandparentThumb"]
         ))
         currentVideo = nil
         currentPartPath = nil
