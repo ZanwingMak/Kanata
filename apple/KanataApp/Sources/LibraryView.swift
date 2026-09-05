@@ -516,6 +516,7 @@ struct LibraryView: View {
             .buttonStyle(KanataTVActionButtonStyle())
         }
         .padding(.top, 28)
+        .focusSection()
     }
     #endif
 
@@ -539,6 +540,9 @@ struct LibraryView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            #if os(tvOS)
+            .scrollClipDisabled()
+            #endif
         }
     }
 
@@ -567,6 +571,9 @@ struct LibraryView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            #if os(tvOS)
+            .scrollClipDisabled()
+            #endif
         }
     }
 
@@ -584,6 +591,9 @@ struct LibraryView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            #if os(tvOS)
+            .scrollClipDisabled()
+            #endif
         }
     }
 
@@ -606,6 +616,9 @@ struct LibraryView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            #if os(tvOS)
+            .scrollClipDisabled()
+            #endif
         }
     }
 
@@ -733,6 +746,9 @@ struct LibraryView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            #if os(tvOS)
+            .scrollClipDisabled()
+            #endif
         }
     }
 

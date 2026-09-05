@@ -317,11 +317,12 @@ private struct KanataTVFocusButtonStyle: ButtonStyle {
     /// - Returns: 仅使用主题色描边、轻微提亮和阴影的按钮。
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .padding(6)
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .focusEffectDisabled()
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(isFocused ? KanataTheme.accent.opacity(0.92) : Color.clear, lineWidth: 2)
+                    .strokeBorder(isFocused ? KanataTheme.accent.opacity(0.92) : Color.clear, lineWidth: 2)
             }
             .shadow(color: .black.opacity(isFocused ? 0.34 : 0), radius: 18, y: 10)
             .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.20 : 0), radius: 12)
