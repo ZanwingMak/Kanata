@@ -32,6 +32,31 @@ enum PlayerScalingMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// 当前视频使用的读取路径；自动模式会在原始流失败后切换服务器兼容流。
+enum PlaybackRouteMode: String, CaseIterable, Identifiable {
+    case automatic
+    case direct
+    case compatible
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: "自动（推荐）"
+        case .direct: "原始流"
+        case .compatible: "兼容流"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .automatic: "优先直放，失败时自动请求媒体服务器转码"
+        case .direct: "只读取原始文件，保留最高画质且不使用服务器转码"
+        case .compatible: "直接请求 Jellyfin、Emby 或 Plex 的兼容 HLS"
+        }
+    }
+}
+
 /// 合集播放结束后的处理方式。
 enum PlaybackQueueMode: String, CaseIterable, Identifiable {
     case continuous
@@ -83,14 +108,30 @@ enum SleepTimerMode: String, CaseIterable, Identifiable {
 
 /// 播放器专用按钮样式；保留按压反馈但不改变尺寸，避免焦点或触控造成画面缩放。
 private struct PlayerControlButtonStyle: ButtonStyle {
+    #if os(tvOS)
+    @Environment(\.isFocused) private var isFocused
+    #endif
+
     /// 构建不带缩放动画的播放器按钮。
     /// - Parameter configuration: SwiftUI 按钮按压状态。
     /// - Returns: 仅改变透明度的按钮内容。
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(configuration.isPressed ? 0.72 : 1)
+            #if os(tvOS)
+            .focusEffectDisabled()
+            .overlay {
+                Circle()
+                    .stroke(isFocused ? KanataTheme.accent : Color.clear, lineWidth: 4)
+                    .padding(-4)
+            }
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.48 : 0), radius: 18)
+            .scaleEffect(isFocused ? 1.1 : 1)
+            .animation(.easeOut(duration: 0.14), value: isFocused)
+            #else
             .scaleEffect(1)
             .animation(nil, value: configuration.isPressed)
+            #endif
     }
 }
 
@@ -141,6 +182,8 @@ struct PlayerScreen: View {
     @State private var skipSegment = PlaybackSkipSegment()
     @State private var isConfirmingExit = false
     @State private var resumesAfterExitCancellation = false
+    @State private var isUsingCompatibilityStream = false
+    @State private var playbackRouteMode = PlaybackRouteMode.automatic
     #if os(iOS)
     @State private var gestureMode: PlayerGestureMode?
     @State private var gestureStartValue: Double = 0
@@ -195,7 +238,7 @@ struct PlayerScreen: View {
 
             skipSegmentOverlay
 
-            if isShowingControls {
+            if shouldShowPlayerControls {
                 if isInteractionLocked {
                     lockedControlsLayer
                 } else {
@@ -223,7 +266,10 @@ struct PlayerScreen: View {
         .kanataStatusBarHidden()
         .interactiveDismissDisabled()
         .onAppear { setIdleTimerDisabled(true) }
-        .task(id: activeItem.id) { await openActiveItem() }
+        .task(id: activeItem.id) {
+            isUsingCompatibilityStream = playbackRouteMode == .compatible
+            await openActiveItem()
+        }
         .onChange(of: sleepMode) { _, value in
             configureSleepTimer(value)
         }
@@ -253,6 +299,9 @@ struct PlayerScreen: View {
                 scalingMode: $scalingMode,
                 queueMode: $queueMode,
                 sleepMode: $sleepMode,
+                playbackRouteMode: playbackRouteMode,
+                playbackPathLabel: playbackPathLabel,
+                isCompatibilityAvailable: isCompatibilityAvailable,
                 hasExternalSubtitle: !externalSubtitleCues.isEmpty,
                 externalSubtitleName: externalSubtitleName,
                 externalSubtitleEnabled: $isExternalSubtitleEnabled,
@@ -273,6 +322,7 @@ struct PlayerScreen: View {
                 onMarkIntro: { updateSkipSegment(introEnd: currentTime) },
                 onMarkOutro: { updateSkipSegment(outroStart: currentTime) },
                 onClearSkipSegment: { clearSkipSegment() },
+                onSelectPlaybackRoute: selectPlaybackRoute,
                 onPictureInPicture: { surfaceController.togglePictureInPicture() }
             )
             .presentationDetents([.medium, .large])
@@ -316,6 +366,13 @@ struct PlayerScreen: View {
         } message: {
             Text("当前播放进度会自动保存，下次可以继续观看。")
         }
+    }
+
+    /// 仅在播放器已经准备完成时显示控制层，避免错误页底部残留不可用按钮。
+    private var shouldShowPlayerControls: Bool {
+        guard isShowingControls else { return false }
+        if case .ready = viewModel.state { return true }
+        return false
     }
 
     /// 计算弹幕可用画布；竖屏避开顶部栏，横屏只保留上下间距且不改变左右范围。
@@ -530,19 +587,37 @@ struct PlayerScreen: View {
             .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
             .foregroundStyle(.white)
         case .failed(let message):
-            ContentUnavailableView {
-                Label("无法播放视频", systemImage: "exclamationmark.triangle")
-            } description: {
+            VStack(spacing: 18) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 54, weight: .semibold))
+                    .foregroundStyle(KanataTheme.warning)
+                Text("无法播放视频")
+                    .font(.title.bold())
                 Text(message)
-            } actions: {
-                Button("重试") {
-                    Task { await openActiveItem() }
+                    .font(.headline)
+                    .foregroundStyle(.white.opacity(0.74))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 760)
+                HStack(spacing: 16) {
+                    if !isUsingCompatibilityStream, isCompatibilityAvailable {
+                        Button("兼容播放") { retryWithCompatibilityStream() }
+                            .buttonStyle(KanataPrimaryButtonStyle())
+                            .frame(width: 220)
+                    }
+                    Button("重试") {
+                        Task { await openActiveItem() }
+                    }
+                    .buttonStyle(KanataSecondaryButtonStyle())
+                    .frame(width: 220)
+                    Button("返回") { handleBack() }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        .frame(width: 220)
                 }
-                    .buttonStyle(.borderedProminent)
-                Button("返回") { handleBack() }
-                    .buttonStyle(.bordered)
             }
+            .padding(.horizontal, 46)
+            .padding(.vertical, 38)
             .foregroundStyle(.white)
+            .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         case .idle, .ready:
             EmptyView()
         }
@@ -589,8 +664,10 @@ struct PlayerScreen: View {
                 .buttonStyle(PlayerControlButtonStyle())
                 .accessibilityLabel("更多播放设置")
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
+            .frame(maxWidth: 1660)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, playerControlHorizontalPadding)
+            .padding(.top, playerControlTopPadding)
             .padding(.bottom, 30)
             .background(
                 LinearGradient(
@@ -630,9 +707,11 @@ struct PlayerScreen: View {
                     playbackControlRow(showAllActions: false, compact: true)
                 }
             }
-            .padding(.horizontal, 16)
+            .frame(maxWidth: 1660)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, playerControlHorizontalPadding)
             .padding(.top, 28)
-            .padding(.bottom, 12)
+            .padding(.bottom, playerControlBottomPadding)
             .background(
                 LinearGradient(
                     colors: [.clear, .black.opacity(0.4), .black.opacity(0.82)],
@@ -651,7 +730,12 @@ struct PlayerScreen: View {
     ///   - compact: 是否使用更小的触控图标尺寸。
     /// - Returns: 不会超出安全宽度的控制按钮行。
     private func playbackControlRow(showAllActions: Bool, compact: Bool) -> some View {
-        HStack(spacing: compact ? 6 : 10) {
+        #if os(tvOS)
+        let spacing: CGFloat = 22
+        #else
+        let spacing: CGFloat = compact ? 6 : 10
+        #endif
+        return HStack(spacing: spacing) {
                     Button {
                         commitSeek(to: currentTime - 10)
                         showOSD("后退 10 秒")
@@ -770,10 +854,19 @@ struct PlayerScreen: View {
     ///   - prominent: 是否为中心播放主按钮。
     /// - Returns: 可直接放进 Button label 的图标视图。
     private func controlSymbol(_ name: String, prominent: Bool, compact: Bool = false) -> some View {
+        #if os(tvOS)
+        let regularSize: CGFloat = 68
+        let primarySize: CGFloat = 82
+        #else
         let regularSize: CGFloat = compact ? 38 : 44
         let primarySize: CGFloat = compact ? 46 : 52
+        #endif
         return Image(systemName: name)
+            #if os(tvOS)
+            .font(prominent ? .title.weight(.semibold) : .title2.weight(.semibold))
+            #else
             .font(prominent ? .title2.weight(.semibold) : .body.weight(.semibold))
+            #endif
             .frame(
                 width: prominent ? primarySize : regularSize,
                 height: prominent ? primarySize : regularSize
@@ -784,6 +877,33 @@ struct PlayerScreen: View {
             )
             .overlay(Circle().stroke(.white.opacity(prominent ? 0.25 : 0.12), lineWidth: 1))
             .contentShape(Circle())
+    }
+
+    /// 返回播放器控制层在电视与触控设备上的水平安全间距。
+    private var playerControlHorizontalPadding: CGFloat {
+        #if os(tvOS)
+        72
+        #else
+        16
+        #endif
+    }
+
+    /// 返回播放器顶部信息与电视边框之间的安全间距。
+    private var playerControlTopPadding: CGFloat {
+        #if os(tvOS)
+        42
+        #else
+        8
+        #endif
+    }
+
+    /// 返回播放器底部控制与电视边框之间的安全间距。
+    private var playerControlBottomPadding: CGFloat {
+        #if os(tvOS)
+        46
+        #else
+        12
+        #endif
     }
 
     /// 当前集数对应状态使用的高对比度提示色。
@@ -819,6 +939,19 @@ struct PlayerScreen: View {
         }
         viewModel.onPlaybackEnded = {
             handlePlaybackEnded()
+        }
+        viewModel.onPlaybackFailed = { message in
+            handlePlaybackFailure(message)
+        }
+        viewModel.onPreviousTrackRequested = {
+            if currentTime > 5 {
+                commitSeek(to: 0)
+            } else {
+                moveEpisode(by: -1)
+            }
+        }
+        viewModel.onNextTrackRequested = {
+            moveEpisode(by: 1)
         }
     }
 
@@ -877,8 +1010,25 @@ struct PlayerScreen: View {
         pendingSeekTarget = nil
         isSeeking = false
         isPlaying = false
-        guard let url = activeItem.resolveURL() else {
-            danmakuOperationError = "无法访问 \(activeItem.displayName)，请重新连接媒体源"
+        let directURL = activeItem.resolveURL()
+        let compatibilityURL = activeItem.compatibilityPlaybackURL()
+        let url: URL?
+        switch playbackRouteMode {
+        case .automatic:
+            url = isUsingCompatibilityStream ? (compatibilityURL ?? directURL) : directURL
+        case .direct:
+            isUsingCompatibilityStream = false
+            url = directURL
+        case .compatible:
+            isUsingCompatibilityStream = compatibilityURL != nil
+            url = compatibilityURL
+        }
+        guard let url else {
+            if playbackRouteMode == .compatible {
+                danmakuOperationError = "当前视频源不提供服务器兼容流，请切换为自动或原始流"
+            } else {
+                danmakuOperationError = "无法访问 \(activeItem.displayName)，请重新连接媒体源"
+            }
             return
         }
         await autoLoadSiblingSubtitle(for: url)
@@ -887,7 +1037,17 @@ struct PlayerScreen: View {
             url: url,
             displayName: automaticMatchName,
             settings: settings,
-            requestHeaders: activeItem.requestHeaders()
+            requestHeaders: activeItem.requestHeaders(),
+            progressKey: activeItem.mediaKey,
+            nowPlaying: PlaybackNowPlayingMetadata(
+                title: activeItem.libraryTitle,
+                collectionTitle: activeItem.collectionTitle,
+                subtitle: activeItem.episodeLabel,
+                sourceName: activeItem.sourceName,
+                queueIndex: activeIndex,
+                queueCount: items.count,
+                identifier: activeItem.id
+            )
         )
         if case .ready = viewModel.state {
             viewModel.play()
@@ -900,6 +1060,56 @@ struct PlayerScreen: View {
             }
             scheduleControlsHide()
         }
+    }
+
+    /// 原始媒体流失败时自动切换 Jellyfin、Emby 或 Plex 的服务端兼容 HLS。
+    /// - Parameter message: 原始播放器返回的错误说明。
+    private func handlePlaybackFailure(_ message: String) {
+        guard playbackRouteMode == .automatic,
+              !isUsingCompatibilityStream,
+              activeItem.compatibilityPlaybackURL() != nil else { return }
+        isUsingCompatibilityStream = true
+        showOSD("原始文件不兼容，正在切换服务器转码…")
+        Task { await openActiveItem() }
+    }
+
+    /// 当前媒体是否提供由媒体服务器生成的兼容播放地址。
+    private var isCompatibilityAvailable: Bool {
+        activeItem.compatibilityPlaybackURL() != nil
+    }
+
+    /// 设置面板显示的实际播放路径。
+    private var playbackPathLabel: String {
+        switch playbackRouteMode {
+        case .automatic:
+            return isUsingCompatibilityStream ? "自动 · 兼容流" : "自动 · 原始流"
+        case .direct:
+            return "原始流"
+        case .compatible:
+            return isCompatibilityAvailable ? "兼容流" : "不可用"
+        }
+    }
+
+    /// 应用用户选择的播放路径，并从当前集的断点重新打开视频。
+    /// - Parameter mode: 自动、原始流或服务器兼容流。
+    private func selectPlaybackRoute(_ mode: PlaybackRouteMode) {
+        guard mode != .compatible || isCompatibilityAvailable else {
+            showOSD("当前视频源不提供兼容流")
+            return
+        }
+        guard mode != playbackRouteMode || (mode == .automatic && isUsingCompatibilityStream) else { return }
+        playbackRouteMode = mode
+        isUsingCompatibilityStream = mode == .compatible
+        showOSD("播放路径 · \(mode.title)")
+        Task { await openActiveItem() }
+    }
+
+    /// 在播放失败页直接改用媒体服务器兼容流。
+    private func retryWithCompatibilityStream() {
+        playbackRouteMode = .compatible
+        isUsingCompatibilityStream = true
+        showOSD("正在请求服务器兼容流…")
+        Task { await openActiveItem() }
     }
 
     /// 返回当前节目各分集共享的片头片尾存储键。
@@ -1438,6 +1648,9 @@ struct PlaybackOptionsPanel: View {
     @Binding var scalingMode: PlayerScalingMode
     @Binding var queueMode: PlaybackQueueMode
     @Binding var sleepMode: SleepTimerMode
+    let playbackRouteMode: PlaybackRouteMode
+    let playbackPathLabel: String
+    let isCompatibilityAvailable: Bool
     let hasExternalSubtitle: Bool
     let externalSubtitleName: String?
     @Binding var externalSubtitleEnabled: Bool
@@ -1449,6 +1662,7 @@ struct PlaybackOptionsPanel: View {
     let onMarkIntro: () -> Void
     let onMarkOutro: () -> Void
     let onClearSkipSegment: () -> Void
+    let onSelectPlaybackRoute: (PlaybackRouteMode) -> Void
     let onPictureInPicture: () -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -1456,6 +1670,15 @@ struct PlaybackOptionsPanel: View {
         NavigationStack {
             Form {
                 Section("播放") {
+                    NavigationLink {
+                        PlaybackRouteSelectionView(
+                            selection: playbackRouteMode,
+                            isCompatibilityAvailable: isCompatibilityAvailable,
+                            onSelect: onSelectPlaybackRoute
+                        )
+                    } label: {
+                        LabeledContent("播放路径", value: playbackPathLabel)
+                    }
                     NavigationLink {
                         PlaybackRateSelectionView(viewModel: viewModel)
                     } label: {
@@ -1590,6 +1813,7 @@ struct PlaybackOptionsPanel: View {
                 }
 
                 Section("媒体信息") {
+                    LabeledContent("播放路径", value: playbackPathLabel)
                     LabeledContent("分辨率", value: viewModel.mediaInfo.resolution)
                     LabeledContent("时长", value: viewModel.mediaInfo.duration)
                     LabeledContent("来源", value: viewModel.mediaInfo.source)
@@ -1625,6 +1849,56 @@ struct PlaybackOptionsPanel: View {
     /// - Returns: 1 倍显示“正常”，其他倍率显示数字与乘号。
     private func playbackRateLabel(_ rate: Double) -> String {
         abs(rate - 1) < 0.001 ? "正常" : "\(rate.formatted())×"
+    }
+}
+
+/// 使用独立页面选择播放路径，并说明直放与服务器兼容流的区别。
+private struct PlaybackRouteSelectionView: View {
+    let selection: PlaybackRouteMode
+    let isCompatibilityAvailable: Bool
+    let onSelect: (PlaybackRouteMode) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List(PlaybackRouteMode.allCases) { mode in
+            Button {
+                onSelect(mode)
+                dismiss()
+            } label: {
+                HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(mode.title)
+                            .foregroundStyle(.primary)
+                        Text(routeDetail(for: mode))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if selection == mode {
+                        Image(systemName: "checkmark")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.tint)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(mode == .compatible && !isCompatibilityAvailable)
+            .kanataTVFocus(cornerRadius: 12)
+        }
+        .navigationTitle("播放路径")
+        .kanataInlineNavigationTitle()
+    }
+
+    /// 为不可用的兼容流补充明确原因。
+    /// - Parameter mode: 当前播放路径选项。
+    /// - Returns: 可直接显示在选项下方的说明。
+    private func routeDetail(for mode: PlaybackRouteMode) -> String {
+        if mode == .compatible, !isCompatibilityAvailable {
+            return "当前来源不支持；仅媒体服务器条目可用"
+        }
+        return mode.detail
     }
 }
 

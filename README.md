@@ -1,98 +1,150 @@
-# Kanata — 跨端弹幕播放器
+# Kanata
 
-> 项目代号 **Kanata**（可替换）。一款支持 **iOS / iPadOS / tvOS / Web** 的自有片源播放器：
-> 用户导入自己的视频资源（本地文件、NAS、媒体库服务器），应用自动从 B 站 / 爱奇艺 / 腾讯 / 优酷 / 芒果 / 弹弹play
-> 等来源匹配并拉取同一集内容的弹幕，边播边显示。定位类似「弹弹play」，但覆盖 Apple 全端 + Web。
+Kanata 是一款面向 iPhone、iPad、Apple TV 与浏览器的自有媒体弹幕播放器。它不提供影视内容；用户连接自己的本地文件、NAS 或媒体服务器，应用负责整理剧集、播放视频，并为当前分集匹配和渲染弹幕。
 
----
+项目正在通过 TestFlight 持续进行真机迭代。Apple 端使用 SwiftUI 与 AVPlayer，Web 端使用 React 与 ArtPlayer，并附带一个可自托管的弹幕网关。
 
-## 0. 本仓库是什么
+## 主要能力
 
-这是包含方案、网关、Apple 端与 Web 端实现的开源项目。当前已完成本地视频播放、文件指纹匹配、在线/本地弹幕合并、持久缓存、自定义来源故障回退、Apple 安全凭证存储和 Web 播放闭环；后续进度以开发记录为准。所有文档按「可被不同 AI 接手」的标准编写：
+### 媒体库与导入
 
-- 每条需求有唯一 ID（`FR-*` / `NFR-*`），每条测试用例有唯一 ID（`TC-*`）并**反向映射需求 ID**；
-- 所有跨模块交互都以**接口契约**（JSON Schema / TypeScript 类型 / HTTP 端点表）定义，而非自然语言描述；
-- 所有待定事项集中在 `#决策点` 表，不散落在正文；
-- 任何 AI 接手前，**先读 `CLAUDE.md`**（项目级硬约束），再读本文件的文档索引。
+- 支持本地文件、系统文件夹、iCloud Drive、系统 Files 中已连接的 SMB、HTTP/HTTPS 直链与 HLS。
+- 支持 WebDAV、Jellyfin、Emby、Plex 和群晖 DSM File Station；账号、密码与令牌只保存在本机 Keychain。
+- 目录导入前提供确认页，可按当前列表或全部内容多选，支持拖动排序、去重、忽略、恢复及手工修改季号和集号。
+- 可把多个季度或目录合并为一个合集，也可保留独立合集；首页会聚合显示“最近添加”，不会用大量单集卡片淹没媒体库。
+- 合集支持重命名、剧集排序、忽略、恢复和移出媒体库。移除只删除 Kanata 索引，不删除 NAS 或服务器上的原文件。
+- 文件名识别覆盖常见的 `S01E02`、`1x02`、`EP02`、中文季集、绝对集数、特别篇与季度目录；无法可靠判断时允许用户手工覆盖。
 
-## 1. 文档索引
+### 播放器
 
-| 文件 | 内容 | 主要读者 |
-| --- | --- | --- |
-| [`CLAUDE.md`](CLAUDE.md) | 项目级硬约束、命名规范、AI 协作规则 | 所有 AI / 开发者 |
-| [`docs/00-方案总览.md`](docs/00-方案总览.md) | 需求扩展后的完整方案、技术选型、里程碑 | 产品 / 架构 |
-| [`docs/01-需求文档-PRD.md`](docs/01-需求文档-PRD.md) | 完整功能需求（FR）与非功能需求（NFR） | 开发 / 测试 |
-| [`docs/02-架构与接口契约.md`](docs/02-架构与接口契约.md) | 分层架构、统一数据模型、网关 API、SDK 接口 | 开发 |
-| [`docs/03-弹幕源适配矩阵.md`](docs/03-弹幕源适配矩阵.md) | 各平台弹幕获取方式、参数、凭证、登录流程 | 后端 / 适配器开发 |
-| [`docs/04-视频源接入矩阵.md`](docs/04-视频源接入矩阵.md) | 本地 / NAS / 媒体库 / 直链 的接入方式与端上差异 | 客户端开发 |
-| [`docs/05-测试文档.md`](docs/05-测试文档.md) | 测试策略、用例库、性能阈值、源探活自动化 | 测试 / CI |
-| [`docs/06-Skill评估与AI协作.md`](docs/06-Skill评估与AI协作.md) | 需要哪些 Skill、缺口、AI 分工与交接协议 | 编排者 |
-| [`docs/07-合规与风险.md`](docs/07-合规与风险.md) | 法务红线、平台协议、分发策略、风险登记册 | 全员 |
-| [`docs/08-播放器功能基准.md`](docs/08-播放器功能基准.md) | 市面播放器对标、视频/音频/字幕/弹幕完整能力清单 | 产品 / 客户端开发 |
-| [`docs/09-开发记录与功能计划.md`](docs/09-开发记录与功能计划.md) | 已实现功能、验证结果、已知限制与后续计划 | 全员 |
+- 支持播放/暂停、精确进度拖动、快进后退、0.25×–4× 倍速、画面适应/填充/拉伸、音轨与内封字幕选择。
+- 支持导入 SRT、VTT、ASS、SSA 字幕，支持字幕延迟、睡眠定时器、连续播放、单集/列表循环及片头片尾标记。
+- iOS 支持画中画、AirPlay、横屏全屏、亮度/音量/进度手势与防误触。
+- 向系统发布节目名、集数、时长、队列和进度；锁屏、控制中心、耳机与 Apple TV 遥控器可控制播放、暂停、跳转、上一集和下一集。
+- Jellyfin、Emby、Plex 可在“自动、原始流、兼容流”之间切换。自动模式优先直放，原始流不兼容时改用媒体服务器 HLS 转码。
+- 播放失败会区分容器、网络与解码问题，并在可用时直接提供“兼容播放”。
 
-## 2. 一句话架构
+### 弹幕
 
+- Apple 端内置哔哩哔哩、爱奇艺、腾讯视频、巴哈姆特动画疯和弹弹play来源；每个来源可单独启用与测试。
+- 弹弹play开放平台由于基础额度有限，默认作为低频备用来源，不是应用运行的必需依赖。
+- 支持作品搜索、候选分集选择、重新匹配、持久绑定，并明确显示“视频第几集”和“弹幕源第几集”是否一致。
+- 支持导入本地 XML、JSON 与 ASS 弹幕，与在线弹幕合并、去重和持久缓存；断网时可使用最近缓存。
+- 支持字号、透明度、描边、阴影、速度、密度、显示区域、字体和时间偏移调整。Apple TV 使用更适合观看距离的独立默认字号。
+- 可选自托管网关提供统一接口、来源故障回退、缓存和弹弹play v2 兼容路由。
+
+### 跨设备与电视体验
+
+- iCloud KVS 同步网络媒体库索引、非敏感媒体源配置、播放进度、收藏、合集编排、弹幕绑定与显示偏好。
+- 密码、令牌、Cookie、本地文件书签、视频内容和弹幕缓存不会上传 iCloud。
+- Apple TV 使用十英尺界面、电视安全边距、遥控器焦点样式和大字号控件；也可显示一次性二维码，由手机浏览器辅助填写媒体源。
+- 支持跟随系统、浅色和深色外观，多套强调色，以及 iOS 备用 App 图标。
+
+## 播放兼容性
+
+Kanata 当前以 Apple 原生 AVPlayer 为播放内核。MP4、MOV 和 HLS，以及设备硬件支持的 H.264/HEVC 通常可直接播放。Jellyfin、Emby 与 Plex 可把不兼容媒体转换为 HLS，因此更适合包含多种封装和编码的媒体库。
+
+WebDAV、DSM 直链和系统文件夹没有服务端转码能力。MKV、WebM、AVI、FLV，或 HEVC 10-bit + FLAC 等组合是否能播放，仍受 AVPlayer 与具体设备能力限制；失败时应用会说明原因，但目前不会假装已经通过第三方内核解码。
+
+## 架构
+
+```text
+自有媒体
+├─ 本地 / iCloud Drive / Files 中的 SMB
+├─ HTTP / HLS / WebDAV / DSM
+└─ Jellyfin / Emby / Plex
+              │
+              ▼
+┌─────────────────────────────────────┐
+│ Apple App                           │
+│ SwiftUI 媒体库 + AVPlayer + 弹幕渲染 │
+│ 内置来源 / 本地缓存 / Keychain / iCloud│
+└──────────────────┬──────────────────┘
+                   │ 可选
+                   ▼
+┌─────────────────────────────────────┐
+│ Kanata Gateway（Node.js / TypeScript）│
+│ 来源适配、统一模型、故障回退、持久缓存 │
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────┐
+│ Web App（React + ArtPlayer）          │
+└─────────────────────────────────────┘
 ```
-┌──────────── 客户端（同一套契约） ────────────┐
-│  iOS / iPadOS / tvOS (Swift, 共享 Core)     │
-│  Web (TypeScript + React + ArtPlayer)      │
-└───────────────┬────────────────────────────┘
-                │  Kanata Gateway API（弹弹play v2 兼容 + 扩展）
-┌───────────────▼────────────────────────────┐
-│  Danmaku Gateway（Node/TS，可自托管 Docker） │
-│  ├─ 识别层：文件 hash / 文件名 / TMDB 归一   │
-│  ├─ 适配器：bilibili / iqiyi / qq / youku…  │
-│  ├─ 归一化：统一弹幕模型 + 时轴对齐          │
-│  └─ 缓存：内存 + 文件持久化 + 客户端本地     │
-└────────────────────────────────────────────┘
+
+Apple App 可以直接使用内置弹幕来源，也可以连接自托管网关。网关不是播放代理，不接收或转存用户的视频文件。
+
+## 仓库结构
+
+```text
+apple/
+  KanataApp/       iOS、iPadOS、tvOS 应用
+  KanataCore/      标题识别、指纹、模型、缓存与时间轴
+  KanataRender/    Apple 端弹幕布局与绘制
+gateway/           可自托管弹幕网关
+web/               浏览器播放器
+docs/              产品、架构、来源矩阵、测试与开发记录
 ```
 
-**关键设计**：所有平台差异（接口逆向、签名、分片、加解压）收敛在 **网关**，客户端永远只面对一套稳定契约。
-平台接口一改，只需更新网关，客户端不必发版。
+## 本地运行
 
-## 3. 本地运行
+### Apple App
+
+需要 Xcode 16 或更高版本。打开 `apple/KanataApp/KanataApp.xcodeproj`，选择：
+
+- `KanataApp`：iOS / iPadOS
+- `KanataTV`：tvOS
+
+最低系统版本为 iOS 17 与 tvOS 17。若需要跨设备同步，请在自己的 Apple Developer App ID 和签名描述文件中启用 iCloud Key-Value Storage。
+
+### 弹幕网关
 
 ```bash
-# 终端 1：启动网关（先复制并修改 gateway/.env.example 中的 Token）
 cd gateway
-npm install
-npm run build
+npm ci
 cp .env.example .env
-node --env-file=.env dist/index.js
+npm run build
+npm start
+```
 
-# 终端 2：启动 Web 播放器
+网关要求 Node.js 20 或更高版本。令牌、平台 Cookie 和第三方密钥只应写入本机 `.env` 或部署平台的 Secret，不要提交到 Git。
+
+### Web App
+
+```bash
 cd web
-npm install
+npm ci
 npm run dev
 ```
 
-Apple 端使用 Xcode 打开 `apple/KanataApp/KanataApp.xcodeproj`，选择 `KanataApp` 或 `KanataTV` Scheme。
+浏览器只能访问符合 CORS、Range 与浏览器编解码限制的媒体地址。本地文件通过浏览器文件选择器读取，不会上传到网关。
 
-## 4. 决策点（需用户确认，未确认则按「推荐值」执行）
+## 安全与隐私
 
-| ID | 决策 | 推荐值 | 影响面 |
-| --- | --- | --- | --- |
-| DEC-01 | 网关部署形态 | **双模式**：默认内置「用户自填 API 地址」，同时提供官方 Docker 镜像供自托管 | 架构 / 合规 / 成本 |
-| DEC-02 | 分发渠道 | App Store 上架版本**不内置**平台抓取逻辑（只带弹弹play 官方源 + 自定义 API 入口）；自托管网关承载全部平台适配器 | 合规 / 功能可见性 |
-| DEC-03 | 客户端技术栈 | Apple 端原生 Swift/SwiftUI 多平台；Web 独立 TS 栈（**不用** Flutter/RN，tvOS 支持不足） | 全部 |
-| DEC-04 | 播放内核 | 双内核：AVPlayer（原生格式，享硬解/PiP/AirPlay）+ VLCKit（MKV/特殊编码兜底） | 客户端 |
-| DEC-05 | 凭证存储位置 | 存客户端 Keychain，按请求加密透传给网关；网关**默认不落盘**用户凭证 | 安全 / 合规 |
-| DEC-06 | 是否支持发送弹幕 | 一期只读（不回传弹幕到第三方平台） | 合规 |
+- Kanata 不提供、解析或下载第三方视频平台的影视流，不绕过 DRM，也不提供 VIP 内容解析。
+- Apple 端敏感凭证存放在 Keychain；媒体库和 iCloud 快照只保存必要的非敏感索引。
+- 弹弹play AppSecret、App Store Connect 私钥、媒体服务器令牌和平台 Cookie 均不得写入源码、README、构建日志或提交历史。
+- 公共弹幕接口可能随平台规则变化而失效；单个来源失败不应阻断视频播放。
 
-## 5. 红线（不做）
+## 开发状态与文档
 
-- ❌ 不解析 / 不下载 / 不播放第三方平台的**视频流**，不破解 DRM，不做 VIP 去广告解析；
-- ❌ 不做规模化、商业化的弹幕抓取与转售；
-- ❌ 不代管用户第三方平台账号密码（仅走扫码 / Cookie 授权，且本地存储）。
+当前重点是 Apple TV 实机焦点和 4K 性能、真实 NAS 与媒体服务器兼容性、iCloud 跨设备到达时序，以及平台来源变化后的稳定降级。完整记录见：
 
-应用只承担两件事：**播放用户自己合法拥有的视频** + **拉取公开弹幕数据用于个人观看**。详见 `docs/07-合规与风险.md`。
+- [`docs/09-开发记录与功能计划.md`](docs/09-开发记录与功能计划.md)：已实现内容、验证结果、限制与下一步
+- [`docs/01-需求文档-PRD.md`](docs/01-需求文档-PRD.md)：功能需求与验收口径
+- [`docs/02-架构与接口契约.md`](docs/02-架构与接口契约.md)：客户端、网关与统一数据模型
+- [`docs/03-弹幕源适配矩阵.md`](docs/03-弹幕源适配矩阵.md)：来源能力、凭证与风险
+- [`docs/04-视频源接入矩阵.md`](docs/04-视频源接入矩阵.md)：媒体源协议与平台差异
+- [`docs/05-测试文档.md`](docs/05-测试文档.md)：验证矩阵与性能阈值
+- [`docs/07-合规与风险.md`](docs/07-合规与风险.md)：能力边界与风险登记
+- [`docs/08-播放器功能基准.md`](docs/08-播放器功能基准.md)：播放器能力对标
 
-## 6. 参考资料
+## 参考资料
 
-- [弹弹play 开放弹幕网络文档](https://doc.dandanplay.com/open/)
-- [huangxd-/danmu_api（多平台弹幕聚合，弹弹play 接口兼容）](https://github.com/huangxd-/danmu_api)
-- [alittlehuaji/bilibili-api-collect-mirror（protobuf 弹幕历史资料）](https://github.com/alittlehuaji/bilibili-api-collect-mirror/blob/master/docs/danmaku/danmaku_proto.md)
-- [ArtPlayer + artplayer-plugin-danmuku](https://artplayer.org/document/plugin/danmuku.html)
-- [virtualox/vlckit-spm（VLCKit 全 Apple 平台 SPM 包）](https://github.com/virtualox/vlckit-spm)
-- [OpenDanmakuCommunity/awesome-danmaku](https://github.com/OpenDanmakuCommunity/awesome-danmaku)
+- [Apple：Becoming a now playable app](https://developer.apple.com/documentation/MediaPlayer/becoming-a-now-playable-app)
+- [Apple：MPRemoteCommandCenter](https://developer.apple.com/documentation/mediaplayer/mpremotecommandcenter)
+- [Apple：AVPlayerItem](https://developer.apple.com/documentation/avfoundation/avplayeritem)
+- [Jellyfin：Transcoding](https://jellyfin.org/docs/general/post-install/transcoding/)
+- [弹弹play 开放弹幕网络](https://doc.dandanplay.com/open/)
+- [ArtPlayer 弹幕插件](https://artplayer.org/document/plugin/danmuku.html)

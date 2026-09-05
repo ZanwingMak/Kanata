@@ -1069,6 +1069,7 @@ private struct WebDAVChannelView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
+                .padding(.vertical, 8)
                 Button {
                     addCurrentDirectory()
                 } label: {
@@ -1108,6 +1109,8 @@ private struct WebDAVChannelView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             .frame(maxWidth: .infinity, minHeight: tvDirectoryRowHeight, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -1116,20 +1119,33 @@ private struct WebDAVChannelView: View {
                             Button {
                                 Task { await addDirectory(url: entry.url, title: entry.name) }
                             } label: {
+                                #if os(tvOS)
+                                Label("加入", systemImage: "rectangle.stack.badge.plus")
+                                    .font(.headline.weight(.semibold))
+                                    .frame(minWidth: 132, minHeight: 64)
+                                #else
                                 Image(systemName: "rectangle.stack.badge.plus")
                                     .frame(width: 44, height: 44)
+                                #endif
                             }
                             .buttonStyle(.plain)
-                            .kanataTVFocus(cornerRadius: 22)
+                            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .kanataTVFocus(cornerRadius: 14)
                             .accessibilityLabel("把 \(entry.name) 添加为合集")
                         }
                     }
+                    .listRowBackground(Color.clear)
+                    #if !os(tvOS)
+                    .listRowSeparator(.hidden)
+                    #endif
                 }
             }
             if !isLoading && entries.isEmpty && errorMessage == nil {
                 ContentUnavailableView("没有视频", systemImage: "film", description: Text("该目录没有支持的视频文件"))
             }
         }
+        .listStyle(.plain)
+        .kanataFormBackground()
         .overlay {
             if isLoading {
                 ProgressView("正在读取目录…")
@@ -1424,6 +1440,7 @@ private struct MediaServerChannelView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
+                .padding(.vertical, 8)
                 Button {
                     Task { await addCurrentDirectory() }
                 } label: {
@@ -1465,6 +1482,8 @@ private struct MediaServerChannelView: View {
                                     .foregroundStyle(.tertiary)
                             }
                             .frame(maxWidth: .infinity, minHeight: tvServerRowHeight, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -1473,20 +1492,33 @@ private struct MediaServerChannelView: View {
                             Button {
                                 Task { await addDirectory(entry) }
                             } label: {
+                                #if os(tvOS)
+                                Label("加入", systemImage: "rectangle.stack.badge.plus")
+                                    .font(.headline.weight(.semibold))
+                                    .frame(minWidth: 132, minHeight: 68)
+                                #else
                                 Image(systemName: "rectangle.stack.badge.plus")
                                     .frame(width: 44, height: 44)
+                                #endif
                             }
                             .buttonStyle(.plain)
-                            .kanataTVFocus(cornerRadius: 22)
+                            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .kanataTVFocus(cornerRadius: 14)
                             .accessibilityLabel("把 \(entry.name) 添加为合集")
                         }
                     }
+                    .listRowBackground(Color.clear)
+                    #if !os(tvOS)
+                    .listRowSeparator(.hidden)
+                    #endif
                 }
             }
             if !isLoading && visibleEntries.isEmpty && errorMessage == nil {
                 ContentUnavailableView("没有匹配内容", systemImage: "film.stack", description: Text("切换分类或搜索其他名称"))
             }
         }
+        .listStyle(.plain)
+        .kanataFormBackground()
         .overlay {
             if isLoading {
                 ProgressView("正在读取 \(profile.kind.title)…")
@@ -1698,6 +1730,8 @@ private struct MediaServerChannelView: View {
                 sourceName: profile.kind.title,
                 artworkURL: artworkURL(for: entry),
                 sourceProfileID: profile.id,
+                serverItemID: entry.id,
+                serverMediaSourceID: entry.mediaSourceID,
                 collectionID: collectionID,
                 collectionTitle: collectionTitle,
                 collectionIndex: index,

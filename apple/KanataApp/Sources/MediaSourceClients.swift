@@ -252,6 +252,7 @@ actor SynologyFileStationClient {
                 isDirectory: item.isdir,
                 navigationKey: item.isdir ? item.path : nil,
                 streamPath: item.isdir ? nil : item.path,
+                mediaSourceID: nil,
                 index: nil,
                 seasonIndex: nil,
                 artworkPath: nil
@@ -360,6 +361,7 @@ struct MediaSourceEntry: Identifiable, Sendable {
     let isDirectory: Bool
     let navigationKey: String?
     let streamPath: String?
+    let mediaSourceID: String?
     let index: Int?
     let seasonIndex: Int?
     let artworkPath: String?
@@ -454,6 +456,7 @@ actor MediaBrowserClient {
                 isDirectory: isDirectory,
                 navigationKey: isDirectory ? item.id : nil,
                 streamPath: isDirectory ? nil : item.id,
+                mediaSourceID: item.mediaSources?.first?.id,
                 index: item.indexNumber,
                 seasonIndex: item.parentIndexNumber,
                 artworkPath: "/Items/\(item.id)/Images/Primary?maxWidth=640&quality=85"
@@ -522,6 +525,15 @@ private struct MediaBrowserItemsResponse: Decodable {
         let isFolder: Bool?
         let indexNumber: Int?
         let parentIndexNumber: Int?
+        let mediaSources: [MediaSource]?
+
+        struct MediaSource: Decodable {
+            let id: String
+
+            private enum CodingKeys: String, CodingKey {
+                case id = "Id"
+            }
+        }
 
         private enum CodingKeys: String, CodingKey {
             case id = "Id"
@@ -530,6 +542,7 @@ private struct MediaBrowserItemsResponse: Decodable {
             case isFolder = "IsFolder"
             case indexNumber = "IndexNumber"
             case parentIndexNumber = "ParentIndexNumber"
+            case mediaSources = "MediaSources"
         }
     }
     let Items: [Item]
@@ -964,6 +977,7 @@ private final class PlexXMLDelegate: NSObject, XMLParserDelegate {
                 isDirectory: true,
                 navigationKey: navigationKey,
                 streamPath: nil,
+                mediaSourceID: nil,
                 index: attributeDict["index"].flatMap(Int.init),
                 seasonIndex: attributeDict["parentIndex"].flatMap(Int.init),
                 artworkPath: attributeDict["thumb"] ?? attributeDict["art"]
@@ -995,6 +1009,7 @@ private final class PlexXMLDelegate: NSObject, XMLParserDelegate {
             isDirectory: false,
             navigationKey: nil,
             streamPath: currentPartPath,
+            mediaSourceID: nil,
             index: video["index"].flatMap(Int.init),
             seasonIndex: video["parentIndex"].flatMap(Int.init),
             artworkPath: video["thumb"] ?? video["grandparentThumb"] ?? video["art"]

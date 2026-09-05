@@ -241,7 +241,7 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     /// 返回次级按钮当前描边颜色。
     private var secondaryBorder: Color {
         #if os(tvOS)
-        if isFocused { return .white.opacity(0.92) }
+        if isFocused { return KanataTheme.accent }
         #endif
         return KanataTheme.separator
     }
@@ -266,29 +266,61 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
 }
 
 #if os(tvOS)
-/// Apple TV 上使用描边和底色表达焦点，避免系统放大遮挡相邻项目。
+/// Apple TV 顶部操作使用的紧凑文字按钮，保证图标、文案和焦点都清晰可见。
+struct KanataTVActionButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) private var isFocused
+
+    /// 绘制带文字的电视操作按钮，聚焦时仅轻微放大并使用主题色描边。
+    /// - Parameter configuration: SwiftUI 按钮状态。
+    /// - Returns: 适合遥控器焦点移动的操作按钮。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 20)
+            .frame(minHeight: 58)
+            .background(
+                isFocused ? KanataTheme.accent.opacity(0.28) : KanataTheme.elevatedSurface,
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(isFocused ? KanataTheme.accent : KanataTheme.separator, lineWidth: isFocused ? 3 : 1)
+            }
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.32 : 0), radius: 16)
+            .scaleEffect(isFocused ? 1.04 : 1)
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .focusEffectDisabled()
+            .animation(.easeOut(duration: 0.14), value: isFocused)
+    }
+}
+#endif
+
+#if os(tvOS)
+/// Apple TV 上使用主题色边界和轻微放大表达焦点，避免高亮变成刺眼白色光条。
 private struct KanataTVFocusModifier: ViewModifier {
     let cornerRadius: CGFloat
     @FocusState private var isFocused: Bool
 
-    /// 为可聚焦控件绘制稳定、不缩放的电视焦点反馈。
+    /// 为可聚焦控件绘制稳定、克制的电视焦点反馈。
     /// - Parameter content: 原始可聚焦控件。
-    /// - Returns: 禁用系统放大并带有高对比焦点框的控件。
+    /// - Returns: 禁用系统默认光晕并带主题色焦点框的控件。
     func body(content: Content) -> some View {
         content
             .focused($isFocused)
             .focusEffectDisabled()
             .background(
-                isFocused ? KanataTheme.accent.opacity(0.22) : Color.clear,
+                isFocused ? Color.white.opacity(0.10) : Color.clear,
                 in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(isFocused ? Color.white.opacity(0.96) : Color.clear, lineWidth: 4)
+                    .stroke(isFocused ? KanataTheme.accent : Color.clear, lineWidth: 3)
             }
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.5 : 0), radius: 14)
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.32 : 0), radius: 16)
+            .scaleEffect(isFocused ? 1.018 : 1)
             .zIndex(isFocused ? 1 : 0)
-            .animation(.easeOut(duration: 0.12), value: isFocused)
+            .animation(.easeOut(duration: 0.14), value: isFocused)
     }
 }
 #endif

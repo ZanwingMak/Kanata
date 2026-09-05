@@ -1,7 +1,19 @@
 import AVFoundation
 import Foundation
 import KanataCore
+import MediaPlayer
 import Observation
+
+/// 发布到系统“正在播放”界面的节目与队列信息。
+struct PlaybackNowPlayingMetadata {
+    let title: String
+    let collectionTitle: String?
+    let subtitle: String?
+    let sourceName: String?
+    let queueIndex: Int
+    let queueCount: Int
+    let identifier: String
+}
 
 /// 当前媒体集数与弹幕来源集数的对应状态。
 enum DanmakuEpisodeAlignment: Equatable {
@@ -31,7 +43,6 @@ enum DanmakuEpisodeAlignment: Equatable {
 }
 
 /// 播放页状态机：打开文件 → 识别 → 匹配弹幕 → 播放。
-/// M0 只覆盖本地文件与 AVPlayer 内核，VLCKit 兜底在 M1 接入（FR-PLY-001）。
 @MainActor
 @Observable
 final class PlayerViewModel {
@@ -86,6 +97,12 @@ final class PlayerViewModel {
     var onPlaybackStateChanged: ((Bool) -> Void)?
     /// 播放自然结束时通知界面恢复控制层。
     var onPlaybackEnded: (() -> Void)?
+    /// 原始播放流失败时通知播放页尝试媒体服务器兼容流。
+    var onPlaybackFailed: ((String) -> Void)?
+    /// 系统遥控器请求播放上一集时通知播放页更新队列。
+    var onPreviousTrackRequested: (() -> Void)?
+    /// 系统遥控器请求播放下一集时通知播放页更新队列。
+    var onNextTrackRequested: (() -> Void)?
 
     private var client: GatewayClient?
     private var builtInClient: BuiltInBilibiliClient?
@@ -109,7 +126,12 @@ final class PlayerViewModel {
     private var audioOptions: [String: AVMediaSelectionOption] = [:]
     private var subtitleOptions: [String: AVMediaSelectionOption] = [:]
     private var mediaKey = ""
+    private var currentPlaybackURL: URL?
+    private var currentDisplayName = ""
     private var lastProgressSaveTime: Double = 0
+    private var nowPlayingMetadata: PlaybackNowPlayingMetadata?
+    private var remoteCommandTargets: [(command: MPRemoteCommand, target: Any)] = []
+    private var lastNowPlayingUpdateTime: Double = 0
 
     /// 当前视频是否已关联本地弹幕文件。
     var hasLocalDanmaku: Bool { !localItems.isEmpty }
@@ -170,6 +192,11 @@ final class PlayerViewModel {
         itemStatusObservation = nil
         player?.pause()
         player = nil
+        currentPlaybackURL = nil
+        currentDisplayName = ""
+        uninstallSystemPlaybackControls()
+        nowPlayingMetadata = nil
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         securityScopedURL?.stopAccessingSecurityScopedResource()
         securityScopedURL = nil
     }
@@ -180,11 +207,15 @@ final class PlayerViewModel {
     ///   - displayName: 媒体库保存的原始文件名或剧集名。
     ///   - settings: 应用设置，提供网关配置。
     ///   - requestHeaders: WebDAV 或媒体服务器播放所需的临时请求头。
+    ///   - progressKey: 不含临时令牌的稳定断点标识。
+    ///   - nowPlaying: 发布给锁屏、控制中心与遥控器的节目队列信息。
     func open(
         url: URL,
         displayName: String,
         settings: AppSettings,
-        requestHeaders: [String: String] = [:]
+        requestHeaders: [String: String] = [:],
+        progressKey: String? = nil,
+        nowPlaying: PlaybackNowPlayingMetadata? = nil
     ) async {
         configurePlaybackAudioSession()
         resetDanmakuState()
@@ -194,7 +225,10 @@ final class PlayerViewModel {
         builtInPublicClient = settings.makeBuiltInPublicDanmakuClient()
         builtInDandanplayClient = settings.makeBuiltInDandanplayClient()
         onlineCacheLimitBytes = Int64(settings.onlineDanmakuCacheLimitMB) * 1024 * 1024
-        mediaKey = url.absoluteString
+        mediaKey = progressKey ?? url.absoluteString
+        currentPlaybackURL = url
+        currentDisplayName = displayName
+        nowPlayingMetadata = nowPlaying
         mediaInfo.source = url.isFileURL ? "本地文件" : (url.host ?? "网络视频")
 
         // 文件选择器返回的地址需要显式申请访问权（FR-IMP-001）
@@ -206,12 +240,8 @@ final class PlayerViewModel {
             ? nil
             : ["AVURLAssetHTTPHeaderFieldsKey": requestHeaders]
         let asset = AVURLAsset(url: url, options: assetOptions)
-        do {
-            let duration = try await asset.load(.duration)
+        if let duration = try? await asset.load(.duration) {
             localDuration = duration.seconds.isFinite ? duration.seconds : 0
-        } catch {
-            state = .failed("无法读取视频信息：\(error.localizedDescription)")
-            return
         }
 
         let item = AVPlayerItem(asset: asset)
@@ -222,12 +252,14 @@ final class PlayerViewModel {
         self.player = player
         installTimeObserver(on: player)
         installPlaybackObservers(on: player, item: item)
+        installSystemPlaybackControls()
         resumePosition = PlaybackProgressStore.position(for: mediaKey, duration: localDuration)
         if let resumePosition {
             await player.seek(to: CMTime(seconds: resumePosition, preferredTimescale: 600))
         }
         state = .ready
         mediaInfo.duration = Self.timeLabel(localDuration)
+        updateNowPlayingInfo(elapsedTime: resumePosition ?? 0, playbackRate: 0)
 
         mediaTask = Task { [weak self] in
             await self?.loadMediaOptions(asset: asset, item: item)
@@ -717,6 +749,7 @@ final class PlayerViewModel {
     func play() {
         guard let player else { return }
         player.playImmediately(atRate: Float(playbackRate))
+        updateNowPlayingInfo(elapsedTime: player.currentTime().seconds, playbackRate: playbackRate)
         onPlaybackStateChanged?(true)
     }
 
@@ -724,6 +757,7 @@ final class PlayerViewModel {
     func pause() {
         player?.pause()
         saveProgressIfNeeded(force: true)
+        updateNowPlayingInfo(elapsedTime: player?.currentTime().seconds ?? 0, playbackRate: 0)
         onPlaybackStateChanged?(false)
     }
 
@@ -734,6 +768,10 @@ final class PlayerViewModel {
         if player?.rate ?? 0 > 0 {
             player?.rate = Float(playbackRate)
         }
+        updateNowPlayingInfo(
+            elapsedTime: player?.currentTime().seconds ?? 0,
+            playbackRate: player?.rate ?? 0 > 0 ? playbackRate : 0
+        )
     }
 
     /// 设置播放器输出音量。
@@ -773,6 +811,10 @@ final class PlayerViewModel {
         )
         lastProgressSaveTime = target
         PlaybackProgressStore.save(position: target, duration: localDuration, for: mediaKey)
+        updateNowPlayingInfo(
+            elapsedTime: target,
+            playbackRate: player?.rate ?? 0 > 0 ? playbackRate : 0
+        )
     }
 
     var duration: Double { localDuration }
@@ -785,8 +827,129 @@ final class PlayerViewModel {
                 guard let self else { return }
                 self.onTimeChanged?(time.seconds, Double(player.rate))
                 self.saveProgressIfNeeded(currentTime: time.seconds)
+                self.updateNowPlayingInfoIfNeeded(elapsedTime: time.seconds, playbackRate: Double(player.rate))
             }
         }
+    }
+
+    /// 注册锁屏、控制中心、耳机与 Apple TV 遥控器的播放命令。
+    private func installSystemPlaybackControls() {
+        uninstallSystemPlaybackControls()
+        let center = MPRemoteCommandCenter.shared()
+        center.playCommand.isEnabled = true
+        center.pauseCommand.isEnabled = true
+        center.togglePlayPauseCommand.isEnabled = true
+        center.changePlaybackPositionCommand.isEnabled = true
+        center.skipForwardCommand.isEnabled = true
+        center.skipBackwardCommand.isEnabled = true
+        center.skipForwardCommand.preferredIntervals = [10]
+        center.skipBackwardCommand.preferredIntervals = [10]
+        center.nextTrackCommand.isEnabled = (nowPlayingMetadata?.queueIndex ?? 0) + 1 < (nowPlayingMetadata?.queueCount ?? 0)
+        center.previousTrackCommand.isEnabled = (nowPlayingMetadata?.queueIndex ?? 0) > 0
+
+        let playTarget = center.playCommand.addTarget { [weak self] _ in
+            Task { @MainActor [weak self] in self?.play() }
+            return .success
+        }
+        remoteCommandTargets.append((center.playCommand, playTarget))
+
+        let pauseTarget = center.pauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor [weak self] in self?.pause() }
+            return .success
+        }
+        remoteCommandTargets.append((center.pauseCommand, pauseTarget))
+
+        let toggleTarget = center.togglePlayPauseCommand.addTarget { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.player?.rate ?? 0 > 0 {
+                    self.pause()
+                } else {
+                    self.play()
+                }
+            }
+            return .success
+        }
+        remoteCommandTargets.append((center.togglePlayPauseCommand, toggleTarget))
+
+        let seekTarget = center.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            Task { @MainActor [weak self] in self?.seek(to: event.positionTime) }
+            return .success
+        }
+        remoteCommandTargets.append((center.changePlaybackPositionCommand, seekTarget))
+
+        let forwardTarget = center.skipForwardCommand.addTarget { [weak self] event in
+            let interval = (event as? MPSkipIntervalCommandEvent)?.interval ?? 10
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.seek(to: (self.player?.currentTime().seconds ?? 0) + interval)
+            }
+            return .success
+        }
+        remoteCommandTargets.append((center.skipForwardCommand, forwardTarget))
+
+        let backwardTarget = center.skipBackwardCommand.addTarget { [weak self] event in
+            let interval = (event as? MPSkipIntervalCommandEvent)?.interval ?? 10
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.seek(to: (self.player?.currentTime().seconds ?? 0) - interval)
+            }
+            return .success
+        }
+        remoteCommandTargets.append((center.skipBackwardCommand, backwardTarget))
+
+        let nextTarget = center.nextTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor [weak self] in self?.onNextTrackRequested?() }
+            return .success
+        }
+        remoteCommandTargets.append((center.nextTrackCommand, nextTarget))
+
+        let previousTarget = center.previousTrackCommand.addTarget { [weak self] _ in
+            Task { @MainActor [weak self] in self?.onPreviousTrackRequested?() }
+            return .success
+        }
+        remoteCommandTargets.append((center.previousTrackCommand, previousTarget))
+    }
+
+    /// 移除当前播放器注册的系统命令，避免切集后重复响应。
+    private func uninstallSystemPlaybackControls() {
+        remoteCommandTargets.forEach { entry in
+            entry.command.removeTarget(entry.target)
+        }
+        remoteCommandTargets.removeAll()
+    }
+
+    /// 把节目、集数、队列、进度与倍速同步到系统“正在播放”。
+    /// - Parameters:
+    ///   - elapsedTime: 当前播放秒数。
+    ///   - playbackRate: 当前实际播放倍率，暂停时为零。
+    private func updateNowPlayingInfo(elapsedTime: Double, playbackRate: Double) {
+        guard let metadata = nowPlayingMetadata else { return }
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: metadata.title,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: max(elapsedTime.isFinite ? elapsedTime : 0, 0),
+            MPNowPlayingInfoPropertyPlaybackRate: playbackRate,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: self.playbackRate,
+            MPNowPlayingInfoPropertyPlaybackQueueIndex: metadata.queueIndex,
+            MPNowPlayingInfoPropertyPlaybackQueueCount: metadata.queueCount,
+            MPNowPlayingInfoPropertyExternalContentIdentifier: metadata.identifier,
+        ]
+        if localDuration > 0 { info[MPMediaItemPropertyPlaybackDuration] = localDuration }
+        if let collectionTitle = metadata.collectionTitle { info[MPMediaItemPropertyAlbumTitle] = collectionTitle }
+        if let subtitle = metadata.subtitle { info[MPMediaItemPropertyArtist] = subtitle }
+        if let sourceName = metadata.sourceName { info[MPMediaItemPropertyComments] = sourceName }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    /// 每五秒刷新一次系统进度，其余时间由系统根据倍速自行推算。
+    /// - Parameters:
+    ///   - elapsedTime: 当前播放秒数。
+    ///   - playbackRate: 当前实际播放倍率。
+    private func updateNowPlayingInfoIfNeeded(elapsedTime: Double, playbackRate: Double) {
+        guard abs(elapsedTime - lastNowPlayingUpdateTime) >= 5 else { return }
+        lastNowPlayingUpdateTime = elapsedTime
+        updateNowPlayingInfo(elapsedTime: elapsedTime, playbackRate: playbackRate)
     }
 
     /// 监听播放缓冲、失败和自然结束状态。
@@ -804,8 +967,11 @@ final class PlayerViewModel {
         itemStatusObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
             guard item.status == .failed else { return }
             Task { @MainActor [weak self] in
-                self?.state = .failed(item.error?.localizedDescription ?? "播放器无法解码该视频")
-                self?.onPlaybackStateChanged?(false)
+                guard let self else { return }
+                let message = self.playbackFailureMessage(error: item.error)
+                self.state = .failed(message)
+                self.onPlaybackStateChanged?(false)
+                self.onPlaybackFailed?(message)
             }
         }
         endObserver = NotificationCenter.default.addObserver(
@@ -820,6 +986,24 @@ final class PlayerViewModel {
                 self.onPlaybackEnded?()
             }
         }
+    }
+
+    /// 把底层 AVPlayer 错误转换为用户可执行的播放建议，避免只显示 Cannot Open。
+    /// - Parameter error: AVPlayerItem 返回的底层错误。
+    /// - Returns: 不包含播放地址或认证信息的错误说明。
+    private func playbackFailureMessage(error: Error?) -> String {
+        let urlExtension = currentPlaybackURL?.pathExtension.lowercased() ?? ""
+        let nameExtension = URL(fileURLWithPath: currentDisplayName).pathExtension.lowercased()
+        let container = urlExtension.isEmpty ? nameExtension : urlExtension
+        let unsupportedContainers: Set<String> = ["mkv", "webm", "avi", "flv", "rm", "rmvb"]
+        if unsupportedContainers.contains(container) {
+            return "该视频是 \(container.uppercased()) 容器，Apple 系统播放器无法稳定解析。Jellyfin、Emby 或 Plex 媒体源会自动尝试服务端兼容流；WebDAV 直连请换用 MP4 / MOV / HLS，或先在服务器端转码。"
+        }
+        if let networkError = error as? URLError {
+            return "读取媒体源失败（\(networkError.localizedDescription)）。请检查服务器是否在线、账号是否仍有效，以及视频地址是否允许分段读取。"
+        }
+        let detail = error?.localizedDescription ?? "当前编码或媒体流无法由系统播放器解码"
+        return "\(detail)。请确认视频编码受 Apple 设备支持；媒体服务器来源可尝试开启转码后重试。"
     }
 
     /// 枚举内封音频、字幕与视频分辨率，供播放控制面板展示。

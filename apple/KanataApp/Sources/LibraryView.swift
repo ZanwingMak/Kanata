@@ -85,10 +85,34 @@ struct LibraryView: View {
     @State private var recentScrollRequest = 0
 
     #if os(tvOS)
-    private let columns = [GridItem(.adaptive(minimum: 300, maximum: 480), spacing: 36)]
+    private let columns = [GridItem(.adaptive(minimum: 380, maximum: 520), spacing: 34)]
     #else
     private let columns = [GridItem(.adaptive(minimum: 170, maximum: 320), spacing: 16)]
     #endif
+
+    private var libraryHorizontalPadding: CGFloat {
+        #if os(tvOS)
+        76
+        #else
+        18
+        #endif
+    }
+
+    private var librarySectionSpacing: CGFloat {
+        #if os(tvOS)
+        36
+        #else
+        18
+        #endif
+    }
+
+    private var libraryContentMaxWidth: CGFloat {
+        #if os(tvOS)
+        1760
+        #else
+        .infinity
+        #endif
+    }
 
     /// 按标题与解析信息过滤媒体库。
     private var filteredItems: [LibraryItem] {
@@ -214,7 +238,10 @@ struct LibraryView: View {
                 } else {
                     ScrollViewReader { proxy in
                         ScrollView {
-                            VStack(alignment: .leading, spacing: 18) {
+                            VStack(alignment: .leading, spacing: librarySectionSpacing) {
+                                #if os(tvOS)
+                                tvLibraryHeader
+                                #endif
                                 if !mediaSources.isEmpty {
                                     sourceChannels
                                 }
@@ -245,8 +272,10 @@ struct LibraryView: View {
                                     }
                                 }
                             }
-                            .padding(.horizontal, 18)
-                            .padding(.bottom, 32)
+                            .frame(maxWidth: libraryContentMaxWidth, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.horizontal, libraryHorizontalPadding)
+                            .padding(.bottom, 60)
                         }
                         .scrollIndicators(.hidden)
                         .onChange(of: recentScrollRequest) { _, value in
@@ -261,22 +290,19 @@ struct LibraryView: View {
                     }
                 }
             }
+            #if os(tvOS)
+            .navigationTitle("")
+            #else
             .navigationTitle("媒体库")
+            #endif
             .kanataLibrarySearch(text: $searchText, isPresented: $isSearching)
             .toolbar {
+                #if !os(tvOS)
                 ToolbarItem(placement: .topBarLeading) {
                     Button { isShowingSettings = true } label: {
                         Image(systemName: "gearshape")
                     }
                 }
-                #if os(tvOS)
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { isSearching = true } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .accessibilityLabel("搜索媒体库")
-                }
-                #endif
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Picker("筛选", selection: $filterMode) {
@@ -317,6 +343,7 @@ struct LibraryView: View {
                         .accessibilityLabel("导入视频和弹幕")
                     }
                 }
+                #endif
             }
             .kanataFileImporter(
                 isPresented: $isImporting,
@@ -441,6 +468,56 @@ struct LibraryView: View {
         }
         .tint(KanataTheme.accent)
     }
+
+    #if os(tvOS)
+    /// 构建 Apple TV 首页标题和带文字的主要操作，避免用户猜测小图标含义。
+    private var tvLibraryHeader: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("媒体库")
+                    .font(.largeTitle.bold())
+                Text("选择媒体源、继续观看，或整理剧集合集")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 40)
+            Button { isShowingSettings = true } label: {
+                Label("设置", systemImage: "gearshape")
+            }
+            .buttonStyle(KanataTVActionButtonStyle())
+            Button { isSearching = true } label: {
+                Label("搜索", systemImage: "magnifyingglass")
+            }
+            .buttonStyle(KanataTVActionButtonStyle())
+            Menu {
+                Picker("筛选", selection: $filterMode) {
+                    ForEach(LibraryFilterMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                Picker("排序", selection: $sortMode) {
+                    ForEach(LibrarySortMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+            } label: {
+                Label("整理", systemImage: "arrow.up.arrow.down")
+            }
+            .buttonStyle(KanataTVActionButtonStyle())
+            Menu {
+                Button {
+                    isAddingMediaSource = true
+                } label: {
+                    Label("添加媒体源", systemImage: "network")
+                }
+            } label: {
+                Label("添加", systemImage: "plus")
+            }
+            .buttonStyle(KanataTVActionButtonStyle())
+        }
+        .padding(.top, 28)
+    }
+    #endif
 
     /// 首页“继续观看”横向列表，按最后播放时间排序。
     private var continueWatchingSection: some View {
@@ -590,6 +667,7 @@ struct LibraryView: View {
                 Text("媒体源")
                     .font(.title2.bold())
                 Spacer()
+                #if !os(tvOS)
                 Button { isAddingMediaSource = true } label: {
                     Label("管理", systemImage: "slider.horizontal.3")
                         .font(.callout.weight(.semibold))
@@ -600,6 +678,7 @@ struct LibraryView: View {
                 }
                 .buttonStyle(.plain)
                 .kanataTVFocus(cornerRadius: 22)
+                #endif
             }
             ScrollView(.horizontal) {
                 HStack(spacing: 12) {
@@ -607,26 +686,41 @@ struct LibraryView: View {
                         Button {
                             browsingSource = profile
                         } label: {
-                            HStack(spacing: 12) {
+                            HStack(spacing: 16) {
                                 Image(systemName: profile.kind.symbol)
+                                    #if os(tvOS)
+                                    .font(.title.weight(.semibold))
+                                    .frame(width: 64, height: 64)
+                                    #else
                                     .font(.title2)
                                     .frame(width: 44, height: 44)
+                                    #endif
                                     .background(KanataTheme.accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(profile.name)
+                                        #if os(tvOS)
+                                        .font(.title3.weight(.semibold))
+                                        #else
                                         .font(.headline)
+                                        #endif
                                         .lineLimit(1)
                                     Text("\(profile.kind.title) · \(profile.subtitle)")
+                                        #if os(tvOS)
+                                        .font(.body)
+                                        #else
                                         .font(.caption)
+                                        #endif
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
                                     Text("最近使用 \(profile.updatedAt.formatted(.relative(presentation: .named)))")
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
                                 }
+                                Spacer(minLength: 12)
+                                sourceHealthBadge(sourceHealth[profile.id] ?? .checking)
                             }
                             .frame(width: sourceCardWidth, alignment: .leading)
-                            .padding(14)
+                            .padding(18)
                             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
                         .buttonStyle(.plain)
@@ -636,10 +730,6 @@ struct LibraryView: View {
                                 MediaSourceProfileStore.remove(profile)
                                 reloadMediaSources()
                             }
-                        }
-                        .overlay(alignment: .topTrailing) {
-                            sourceHealthBadge(sourceHealth[profile.id] ?? .checking)
-                                .padding(10)
                         }
                         .task(id: profile.updatedAt) { await checkSource(profile) }
                     }
@@ -666,8 +756,8 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 4)
-        .foregroundStyle(.white)
-        .background(.black.opacity(0.28), in: Capsule())
+        .foregroundStyle(health == .offline ? Color.red : Color.primary)
+        .background(KanataTheme.elevatedSurface, in: Capsule())
     }
 
     /// 读取媒体源根目录以验证连接与凭证是否仍有效。
@@ -765,7 +855,7 @@ struct LibraryView: View {
     /// 返回首页横向媒体卡片在当前平台上的宽度。
     private var horizontalCardWidth: CGFloat {
         #if os(tvOS)
-        360
+        420
         #else
         260
         #endif
@@ -774,7 +864,7 @@ struct LibraryView: View {
     /// 返回媒体源频道卡片在当前平台上的宽度。
     private var sourceCardWidth: CGFloat {
         #if os(tvOS)
-        380
+        520
         #else
         260
         #endif
@@ -783,7 +873,7 @@ struct LibraryView: View {
     /// 返回合集封面在当前平台上的宽度。
     private var collectionCardWidth: CGFloat {
         #if os(tvOS)
-        360
+        420
         #else
         250
         #endif
@@ -792,7 +882,7 @@ struct LibraryView: View {
     /// 返回合集封面在当前平台上的高度。
     private var collectionCardHeight: CGFloat {
         #if os(tvOS)
-        202
+        236
         #else
         140
         #endif
@@ -1204,6 +1294,10 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     let credentialAccount: String?
     /// 视频所属的持久化媒体源，用于从 Keychain 动态生成播放请求头。
     var sourceProfileID: String?
+    /// 媒体服务器上的原始条目 ID，用于运行时生成转码地址，不保存访问令牌。
+    let serverItemID: String?
+    /// Jellyfin/Emby 当前媒体版本 ID，用于生成准确的 HLS 转码会话。
+    let serverMediaSourceID: String?
     /// 同一目录、季度或剧集共享的播放合集标识。
     var collectionID: String?
     var collectionTitle: String?
@@ -1242,6 +1336,8 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.artworkURLString = nil
         self.credentialAccount = nil
         self.sourceProfileID = nil
+        self.serverItemID = nil
+        self.serverMediaSourceID = nil
         self.collectionID = collectionID
         self.collectionTitle = collectionTitle
         self.collectionIndex = collectionIndex
@@ -1264,6 +1360,8 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         artworkURL: URL? = nil,
         credentialAccount: String? = nil,
         sourceProfileID: String? = nil,
+        serverItemID: String? = nil,
+        serverMediaSourceID: String? = nil,
         collectionID: String? = nil,
         collectionTitle: String? = nil,
         collectionIndex: Int? = nil,
@@ -1292,6 +1390,8 @@ struct LibraryItem: Identifiable, Codable, Hashable {
         self.artworkURLString = artworkURL?.absoluteString
         self.credentialAccount = credentialAccount
         self.sourceProfileID = sourceProfileID
+        self.serverItemID = serverItemID
+        self.serverMediaSourceID = serverMediaSourceID
         self.collectionID = collectionID
         self.collectionTitle = collectionTitle
         self.collectionIndex = collectionIndex
@@ -1414,6 +1514,117 @@ struct LibraryItem: Identifiable, Codable, Hashable {
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         )
+    }
+
+    /// 返回媒体服务器的兼容 HLS 地址，用于原始文件播放失败后的自动重试。
+    /// - Returns: 不支持服务端转码或缺少凭证时返回 nil。
+    func compatibilityPlaybackURL() -> URL? {
+        guard let sourceProfileID,
+              let profile = MediaSourceProfileStore.profile(id: sourceProfileID),
+              let server = profile.serverURL else {
+            return nil
+        }
+        switch profile.kind {
+        case .jellyfin, .emby:
+            guard let itemID = serverItemID ?? mediaBrowserItemIDFromStoredURL(),
+                  let token = MediaSourceProfileStore.secret(for: profile)?.token,
+                  !token.isEmpty else { return nil }
+            return mediaBrowserHLSURL(
+                server: server,
+                itemID: itemID,
+                mediaSourceID: serverMediaSourceID ?? itemID,
+                token: token
+            )
+        case .plex:
+            guard let itemID = plexItemID,
+                  let token = MediaSourceProfileStore.secret(for: profile)?.token,
+                  !token.isEmpty else { return nil }
+            return plexHLSURL(server: server, itemID: itemID, token: token)
+        case .webDAV, .synology:
+            return nil
+        }
+    }
+
+    /// 从旧版 MediaBrowser 静态流地址恢复条目 ID。
+    /// - Returns: `/Videos/{id}/stream` 中的 id，无法识别时返回 nil。
+    private func mediaBrowserItemIDFromStoredURL() -> String? {
+        guard let remoteURLString, let url = URL(string: remoteURLString) else { return nil }
+        let parts = url.pathComponents
+        guard let videosIndex = parts.firstIndex(where: { $0.caseInsensitiveCompare("Videos") == .orderedSame }),
+              parts.indices.contains(videosIndex + 1) else { return nil }
+        return parts[videosIndex + 1]
+    }
+
+    /// 生成 Jellyfin/Emby 的 HLS 兼容流地址，让服务器处理 MKV、10-bit 和音频封装差异。
+    /// - Parameters:
+    ///   - server: 媒体服务器根地址。
+    ///   - itemID: 服务端媒体条目 ID。
+    ///   - mediaSourceID: 服务端媒体版本 ID。
+    ///   - token: 仅在运行时从 Keychain 读取的访问令牌。
+    /// - Returns: 可交给 AVPlayer 的 HLS 地址。
+    private func mediaBrowserHLSURL(
+        server: URL,
+        itemID: String,
+        mediaSourceID: String,
+        token: String
+    ) -> URL? {
+        var components = URLComponents(
+            url: server.appendingPathComponent("Videos/\(itemID)/master.m3u8"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "api_key", value: token),
+            URLQueryItem(name: "MediaSourceId", value: mediaSourceID),
+            URLQueryItem(name: "DeviceId", value: "kanata-apple"),
+            URLQueryItem(name: "PlaySessionId", value: UUID().uuidString),
+            URLQueryItem(name: "VideoCodec", value: "h264"),
+            URLQueryItem(name: "AudioCodec", value: "aac"),
+            URLQueryItem(name: "VideoBitrate", value: "60000000"),
+            URLQueryItem(name: "AudioBitrate", value: "384000"),
+            URLQueryItem(name: "TranscodingMaxAudioChannels", value: "2"),
+            URLQueryItem(name: "AllowVideoStreamCopy", value: "false"),
+            URLQueryItem(name: "AllowAudioStreamCopy", value: "false"),
+            URLQueryItem(name: "SegmentContainer", value: "ts"),
+            URLQueryItem(name: "MinSegments", value: "1"),
+            URLQueryItem(name: "BreakOnNonKeyFrames", value: "true"),
+        ]
+        return components?.url
+    }
+
+    /// 返回新旧媒体库记录中的 Plex ratingKey。
+    private var plexItemID: String? {
+        let raw = serverItemID ?? id.components(separatedBy: "plex-video:").last
+        guard let raw, !raw.isEmpty else { return nil }
+        return raw.replacingOccurrences(of: "plex-video:", with: "")
+    }
+
+    /// 生成 Plex Universal Transcoder 的 HLS 地址，令牌仅存在于本次内存 URL。
+    /// - Parameters:
+    ///   - server: Plex Media Server 根地址。
+    ///   - itemID: Plex ratingKey。
+    ///   - token: 运行时从 Keychain 读取的 Plex Token。
+    /// - Returns: Plex 可直接播放或按需转码的 HLS 地址。
+    private func plexHLSURL(server: URL, itemID: String, token: String) -> URL? {
+        var components = URLComponents(
+            url: server.appendingPathComponent("video/:/transcode/universal/start.m3u8"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "path", value: "/library/metadata/\(itemID)"),
+            URLQueryItem(name: "protocol", value: "hls"),
+            URLQueryItem(name: "mediaIndex", value: "0"),
+            URLQueryItem(name: "partIndex", value: "0"),
+            URLQueryItem(name: "directPlay", value: "1"),
+            URLQueryItem(name: "directStream", value: "1"),
+            URLQueryItem(name: "fastSeek", value: "1"),
+            URLQueryItem(name: "maxVideoBitrate", value: "40000"),
+            URLQueryItem(name: "videoQuality", value: "100"),
+            URLQueryItem(name: "session", value: UUID().uuidString),
+            URLQueryItem(name: "X-Plex-Client-Identifier", value: "com.kanata.app"),
+            URLQueryItem(name: "X-Plex-Product", value: "Kanata"),
+            URLQueryItem(name: "X-Plex-Token", value: token),
+        ]
+        return components?.url
     }
 
     /// 从 Keychain 读取网络媒体播放所需的请求头。

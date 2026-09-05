@@ -182,6 +182,8 @@ struct MediaImportPreview: View {
                 }
             }
         }
+        .listStyle(.plain)
+        .kanataFormBackground()
         .navigationTitle("确认导入")
         .kanataInlineNavigationTitle()
         .toolbar {
@@ -264,6 +266,8 @@ struct MediaImportPreview: View {
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: importRowHeight, alignment: .leading)
+                .padding(.horizontal, 14)
+                .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -285,13 +289,24 @@ struct MediaImportPreview: View {
                     toggleSelection(candidate.id)
                 }
             } label: {
+                #if os(tvOS)
+                Label("编辑", systemImage: "slider.horizontal.3")
+                    .font(.headline.weight(.semibold))
+                    .frame(minWidth: 140, minHeight: 64)
+                #else
                 Image(systemName: "ellipsis.circle")
                     .frame(width: 48, height: 48)
+                #endif
             }
             .buttonStyle(.plain)
-            .kanataTVFocus(cornerRadius: 24)
+            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .kanataTVFocus(cornerRadius: 12)
             .accessibilityLabel("管理 \(candidate.item.displayName)")
         }
+        .listRowBackground(Color.clear)
+        #if !os(tvOS)
+        .listRowSeparator(.hidden)
+        #endif
     }
 
     /// 切换单个候选是否参与本次导入。
