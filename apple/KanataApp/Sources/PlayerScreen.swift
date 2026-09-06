@@ -149,6 +149,9 @@ private struct TVSeekBar: View {
     let value: Double
     let duration: Double
     let onSeek: (Double) -> Void
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let onTogglePlayback: () -> Void
     @Environment(\.isFocused) private var isFocused
 
     var body: some View {
@@ -178,6 +181,7 @@ private struct TVSeekBar: View {
                 .strokeBorder(isFocused ? KanataTheme.accent.opacity(0.9) : .clear, lineWidth: 2)
         }
         .onMoveCommand(perform: handleMove)
+        .onTapGesture(perform: onTogglePlayback)
         .accessibilityLabel("播放进度")
         .accessibilityValue("已播放 \(Int(value)) 秒，共 \(Int(duration)) 秒")
         .accessibilityAdjustableAction(adjustAccessibilityValue)
@@ -199,8 +203,10 @@ private struct TVSeekBar: View {
             onSeek(max(0, value - step))
         case .right:
             onSeek(min(duration, value + step))
-        case .up, .down:
-            break
+        case .up:
+            onMoveUp()
+        case .down:
+            onMoveDown()
         @unknown default:
             break
         }
@@ -237,6 +243,9 @@ private enum TVPlayerFocus: Hashable {
     case danmakuToggle
     case danmakuSettings
     case manualMatch
+    case failureCompatibility
+    case failureRetry
+    case failureBack
 }
 #endif
 
@@ -393,6 +402,9 @@ struct PlayerScreen: View {
         .onChange(of: shouldShowPlayerControls) { _, visible in
             synchronizeTVPlayerFocus(isVisible: visible)
         }
+        .onChange(of: viewModel.state) { _, state in
+            synchronizeTVPlayerFocus(for: state)
+        }
         .onChange(of: tvFocusedControl) { _, focus in
             handleTVControlFocusChange(focus)
         }
@@ -520,6 +532,12 @@ struct PlayerScreen: View {
         return false
     }
 
+    /// 当前是否正在显示播放失败操作，供 tvOS 排除透明画面焦点。
+    private var isPlaybackFailed: Bool {
+        if case .failed = viewModel.state { return true }
+        return false
+    }
+
     /// 计算弹幕可用画布；竖屏避开顶部栏，横屏只保留上下间距且不改变左右范围。
     /// - Parameters:
     ///   - size: 播放器容器尺寸。
@@ -629,7 +647,7 @@ struct PlayerScreen: View {
                 .contentShape(Rectangle())
                 .onTapGesture { setControlsVisible(!isShowingControls) }
                 #if os(tvOS)
-                .focusable(!shouldShowPlayerControls)
+                .focusable(!shouldShowPlayerControls && !isPlaybackFailed)
                 .focused($tvFocusedControl, equals: .background)
                 .onMoveCommand(perform: handleTVRemoteMove)
                 #endif
@@ -647,7 +665,7 @@ struct PlayerScreen: View {
                 .gesture(playerDragGesture)
                 #endif
                 #if os(tvOS)
-                .focusable(!shouldShowPlayerControls)
+                .focusable(!shouldShowPlayerControls && !isPlaybackFailed)
                 .focused($tvFocusedControl, equals: .background)
                 .onMoveCommand(perform: handleTVRemoteMove)
                 #endif
@@ -758,16 +776,28 @@ struct PlayerScreen: View {
                         Button("兼容播放") { retryWithCompatibilityStream() }
                             .buttonStyle(KanataPrimaryButtonStyle())
                             .frame(width: 220)
+                            #if os(tvOS)
+                            .focused($tvFocusedControl, equals: .failureCompatibility)
+                            #endif
                     }
                     Button("重试") {
                         Task { await openActiveItem() }
                     }
                     .buttonStyle(KanataSecondaryButtonStyle())
                     .frame(width: 220)
+                    #if os(tvOS)
+                    .focused($tvFocusedControl, equals: .failureRetry)
+                    #endif
                     Button("返回") { handleBack() }
                         .buttonStyle(KanataSecondaryButtonStyle())
                         .frame(width: 220)
+                        #if os(tvOS)
+                        .focused($tvFocusedControl, equals: .failureBack)
+                        #endif
                 }
+                #if os(tvOS)
+                .focusSection()
+                #endif
             }
             .padding(.horizontal, 46)
             .padding(.vertical, 38)
@@ -852,12 +882,17 @@ struct PlayerScreen: View {
                     #if os(tvOS)
                     TVSeekBar(
                         value: currentTime,
-                        duration: max(viewModel.duration, 1)
-                    ) { target in
-                        currentTime = target
-                        commitSeek(to: target)
-                        setControlsVisible(true)
-                    }
+                        duration: max(viewModel.duration, 1),
+                        onSeek: { target in
+                            currentTime = target
+                            commitSeek(to: target)
+                            showOSD("跳转至 \(timeLabel(target))")
+                            setControlsVisible(true)
+                        },
+                        onMoveUp: { tvFocusedControl = .back },
+                        onMoveDown: { tvFocusedControl = .playPause },
+                        onTogglePlayback: togglePlayback
+                    )
                     .focused($tvFocusedControl, equals: .progress)
                     #else
                     Slider(
@@ -1082,7 +1117,7 @@ struct PlayerScreen: View {
                 height: prominent ? primarySize : regularSize
             )
             .background(
-                prominent ? Color.white.opacity(0.23) : Color.black.opacity(0.42),
+                playerControlBackground(prominent: prominent),
                 in: RoundedRectangle(cornerRadius: prominent ? 22 : 17, style: .continuous)
             )
             .overlay {
@@ -1092,12 +1127,32 @@ struct PlayerScreen: View {
             .contentShape(RoundedRectangle(cornerRadius: prominent ? 22 : 17, style: .continuous))
     }
 
+    /// 返回播放按钮与普通工具按钮的默认背景；电视播放键保持无底色。
+    /// - Parameter prominent: 是否为中央播放或暂停按钮。
+    /// - Returns: 当前平台对应的按钮背景色。
+    private func playerControlBackground(prominent: Bool) -> Color {
+        #if os(tvOS)
+        prominent ? .clear : .black.opacity(0.42)
+        #else
+        prominent ? .white.opacity(0.23) : .black.opacity(0.42)
+        #endif
+    }
+
     #if os(tvOS)
     /// 控制层隐藏时只负责唤出控件，后续方向事件交给 tvOS 焦点引擎。
     /// - Parameter direction: Siri Remote 当前移动方向。
     private func handleTVRemoteMove(_ direction: MoveCommandDirection) {
-        guard !shouldShowPlayerControls else { return }
-        setControlsVisible(true)
+        guard !shouldShowPlayerControls, !isPlaybackFailed else { return }
+        switch direction {
+        case .left:
+            seekFromTVRemote(by: -10)
+        case .right:
+            seekFromTVRemote(by: 10)
+        case .up, .down:
+            setControlsVisible(true)
+        @unknown default:
+            setControlsVisible(true)
+        }
     }
 
     /// 菜单键第一次隐藏播放控件，控件已隐藏时再执行返回。
@@ -1109,14 +1164,18 @@ struct PlayerScreen: View {
         }
     }
 
-    /// 控制层出现后把焦点交给中央播放按钮，隐藏后交回透明视频层。
+    /// 控制层出现后把焦点交给时间轴，隐藏后交回透明视频层。
     /// - Parameter isVisible: 控制层当前是否可见且可操作。
     private func synchronizeTVPlayerFocus(isVisible: Bool) {
         Task { @MainActor in
             await Task.yield()
+            guard !isPlaybackFailed else {
+                focusPlaybackFailureActions()
+                return
+            }
             if isVisible {
                 if tvFocusedControl == nil || tvFocusedControl == .background {
-                    tvFocusedControl = .playPause
+                    tvFocusedControl = .progress
                 }
             } else {
                 tvFocusedControl = .background
@@ -1129,6 +1188,41 @@ struct PlayerScreen: View {
     private func handleTVControlFocusChange(_ focus: TVPlayerFocus?) {
         guard shouldShowPlayerControls, focus != nil, focus != .background else { return }
         scheduleControlsHide()
+    }
+
+    /// 播放状态变化时把焦点交给错误操作或播放时间轴。
+    /// - Parameter state: 播放器最新加载状态。
+    private func synchronizeTVPlayerFocus(for state: PlayerViewModel.LoadState) {
+        Task { @MainActor in
+            await Task.yield()
+            switch state {
+            case .failed:
+                controlsTask?.cancel()
+                focusPlaybackFailureActions()
+            case .ready:
+                tvFocusedControl = .progress
+            case .idle, .preparing:
+                tvFocusedControl = nil
+            }
+        }
+    }
+
+    /// 选择播放失败弹窗中最合适的默认操作。
+    private func focusPlaybackFailureActions() {
+        tvFocusedControl = !isUsingCompatibilityStream && isCompatibilityAvailable
+            ? .failureCompatibility
+            : .failureRetry
+    }
+
+    /// 在画面焦点下响应遥控器左右操作，并显示最新时间轴位置。
+    /// - Parameter seconds: 正数快进，负数快退。
+    private func seekFromTVRemote(by seconds: Double) {
+        let target = min(max(currentTime + seconds, 0), max(viewModel.duration, 0))
+        currentTime = target
+        commitSeek(to: target)
+        setControlsVisible(true)
+        tvFocusedControl = .progress
+        showOSD("\(seconds < 0 ? "后退" : "前进") \(Int(abs(seconds))) 秒 · \(timeLabel(target))")
     }
     #endif
 

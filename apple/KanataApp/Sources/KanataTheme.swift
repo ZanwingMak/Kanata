@@ -208,6 +208,7 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
 struct KanataSecondaryButtonStyle: ButtonStyle {
     #if os(tvOS)
     @Environment(\.isFocused) private var isFocused
+    @Environment(\.colorScheme) private var colorScheme
     #endif
 
     /// 根据按压状态绘制带细边框的次级按钮。
@@ -215,8 +216,11 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     /// - Returns: 无缩放动画的次级按钮视图。
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            #if os(tvOS)
+            .environment(\.colorScheme, isFocused ? .light : colorScheme)
+            #endif
             .font(.body.weight(.medium))
-            .foregroundStyle(.primary)
+            .foregroundStyle(secondaryForeground)
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 14)
@@ -243,9 +247,18 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     private func secondaryBackground(configuration: Configuration) -> Color {
         if configuration.isPressed { return KanataTheme.elevatedSurface }
         #if os(tvOS)
-        if isFocused { return KanataTheme.accent.opacity(0.16) }
+        if isFocused { return .white.opacity(0.92) }
         #endif
         return KanataTheme.surface
+    }
+
+    /// 返回次级按钮在电视高亮状态下的高对比度文字颜色。
+    private var secondaryForeground: Color {
+        #if os(tvOS)
+        isFocused ? .black.opacity(0.9) : .primary
+        #else
+        .primary
+        #endif
     }
 
     /// 返回次级按钮当前描边颜色。

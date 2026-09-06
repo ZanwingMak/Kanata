@@ -273,6 +273,9 @@ struct DanmakuSettingsPanel: View {
                         Slider(value: $config.fontScale, in: 0.5...2.0, step: 0.05)
                     }
                     #endif
+                    #if os(tvOS)
+                    TVDanmakuScalePicker(selection: $config.fontScale)
+                    #else
                     Picker("快捷档位", selection: $config.fontScale) {
                         Text("小").tag(0.75)
                         Text("清晰").tag(0.9)
@@ -280,25 +283,27 @@ struct DanmakuSettingsPanel: View {
                         Text("大").tag(1.35)
                     }
                     .pickerStyle(.segmented)
+                    #endif
                 }
 
                 Section("弹幕字体") {
+                    #if os(tvOS)
+                    TVDanmakuFontPicker(options: fontOptions, selection: selectedFontName)
+                    Text("Apple TV 支持上方内置字体；字体文件导入目前仅在 iPhone 和 iPad 提供。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    #else
                     Picker("字体", selection: selectedFontName) {
                         ForEach(fontOptions) { option in
                             Text(option.title).tag(option.id)
                         }
                     }
-                    #if !os(tvOS)
                     Button {
                         isImportingFont = true
                     } label: {
                         Label("导入字体文件", systemImage: "text.badge.plus")
                     }
                     Text("支持 TTF、OTF 和 TTC；字体仅保存在本机应用目录，不会上传。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    #else
-                    Text("Apple TV 支持上方内置字体；字体文件导入目前仅在 iPhone 和 iPad 提供。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     #endif
@@ -537,6 +542,112 @@ struct DanmakuSettingsPanel: View {
 }
 
 #if os(tvOS)
+/// tvOS 弹幕字号快捷选择器，避免系统浅色高亮与白字重叠。
+private struct TVDanmakuScalePicker: View {
+    @Binding var selection: Double
+    private let options: [(title: String, value: Double)] = [
+        ("小", 0.75),
+        ("清晰", 0.9),
+        ("中", 1.1),
+        ("大", 1.35),
+    ]
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ForEach(options, id: \.value) { option in
+                Button {
+                    selection = option.value
+                } label: {
+                    Label(
+                        option.title,
+                        systemImage: isSelected(option.value) ? "checkmark.circle.fill" : "circle"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(TVDanmakuChoiceButtonStyle(isSelected: isSelected(option.value)))
+                .accessibilityValue(isSelected(option.value) ? "已选择" : "未选择")
+            }
+        }
+        .focusSection()
+    }
+
+    /// 判断给定字号是否为当前选项，规避浮点数精度差异。
+    /// - Parameter value: 待比较的字号比例。
+    /// - Returns: 与当前字号近似相等时返回 true。
+    private func isSelected(_ value: Double) -> Bool {
+        abs(selection - value) < 0.001
+    }
+}
+
+/// tvOS 弹幕字体选择器，以可横向移动的高对比度按钮替代系统 Picker。
+private struct TVDanmakuFontPicker: View {
+    let options: [DanmakuFontOption]
+    @Binding var selection: String
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14) {
+                ForEach(options) { option in
+                    Button {
+                        selection = option.id
+                    } label: {
+                        Label(
+                            option.title,
+                            systemImage: selection == option.id ? "checkmark.circle.fill" : "textformat"
+                        )
+                        .lineLimit(1)
+                    }
+                    .buttonStyle(TVDanmakuChoiceButtonStyle(isSelected: selection == option.id))
+                    .accessibilityValue(selection == option.id ? "已选择" : "未选择")
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 8)
+        }
+        .frame(minHeight: 76)
+        .focusSection()
+    }
+}
+
+/// 弹幕选项统一焦点样式；聚焦时使用浅底深字保证电视远距可读性。
+private struct TVDanmakuChoiceButtonStyle: ButtonStyle {
+    let isSelected: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    /// 绘制选中、聚焦和按压状态均清晰可辨的弹幕选项。
+    /// - Parameter configuration: SwiftUI 按钮状态。
+    /// - Returns: 高对比度胶囊按钮。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(isFocused ? Color.black.opacity(0.9) : .white)
+            .padding(.horizontal, 24)
+            .frame(minHeight: 58)
+            .background(backgroundColor, in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(borderColor, lineWidth: isFocused ? 3 : 1)
+            }
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.28 : 0), radius: 14)
+            .scaleEffect(isFocused ? 1.025 : 1)
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .focusEffectDisabled()
+            .animation(.easeOut(duration: 0.14), value: isFocused)
+    }
+
+    /// 返回当前选项背景色，焦点态始终使用浅底。
+    private var backgroundColor: Color {
+        if isFocused { return .white.opacity(0.94) }
+        return isSelected ? KanataTheme.accent.opacity(0.34) : .white.opacity(0.08)
+    }
+
+    /// 返回当前选项边框，选中项在失焦时仍保留状态提示。
+    private var borderColor: Color {
+        if isFocused { return KanataTheme.accent }
+        return isSelected ? KanataTheme.accent.opacity(0.9) : .white.opacity(0.12)
+    }
+}
+
 /// tvOS 使用可聚焦的加减按钮替代系统未提供的 Slider 与 Stepper。
 private struct TVValueAdjuster: View {
     let title: String

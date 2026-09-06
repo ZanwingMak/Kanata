@@ -496,10 +496,26 @@ final class PlayerViewModel {
             }
         }
         let candidates = merged.values.sorted { left, right in
+            let leftEpisodePriority = candidateEpisodePriority(left)
+            let rightEpisodePriority = candidateEpisodePriority(right)
+            if leftEpisodePriority != rightEpisodePriority {
+                return leftEpisodePriority > rightEpisodePriority
+            }
             if left.confidence == right.confidence { return left.id < right.id }
             return left.confidence > right.confidence
         }
         return (candidates, errors)
+    }
+
+    /// 返回候选分集排序优先级，当前视频集数一致的结果始终排在前面。
+    /// - Parameter candidate: 待排序的弹幕候选。
+    /// - Returns: 一致为 2、无法确认集数为 1、不一致为 0。
+    private func candidateEpisodePriority(_ candidate: ProviderCandidate) -> Int {
+        switch episodeAlignment(for: candidate) {
+        case .matched: 2
+        case .unverified, .unavailable: 1
+        case .mismatched: 0
+        }
     }
 
     /// 拉取指定候选的弹幕，并在成功后保存文件指纹绑定。
