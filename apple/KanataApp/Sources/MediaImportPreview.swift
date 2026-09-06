@@ -27,26 +27,35 @@ private struct MediaImportGroup: Identifiable {
 struct MediaImportPreview: View {
     let draft: MediaImportDraft
     let usesParentNavigation: Bool
+    let presentsSourceCompletion: Bool
     let onConfirm: ([LibraryItem]) -> Void
+    let onReturnHome: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var candidates: [MediaImportCandidate]
     @State private var mergesCollections: Bool
     @State private var mergedTitle: String
     @State private var editingCandidate: MediaImportCandidate?
+    @State private var completionNotice: String?
 
     /// 创建导入预览，并为每个扫描结果生成本次导入内唯一的候选 ID。
     /// - Parameters:
     ///   - draft: 扫描结果。
     ///   - usesParentNavigation: 是否复用上层导航栈。
+    ///   - presentsSourceCompletion: 是否在当前页展示媒体源导入后的下一步操作。
     ///   - onConfirm: 用户确认后的条目回调。
+    ///   - onReturnHome: 用户完成导入并选择返回首页时的回调。
     init(
         draft: MediaImportDraft,
         usesParentNavigation: Bool = false,
-        onConfirm: @escaping ([LibraryItem]) -> Void
+        presentsSourceCompletion: Bool = false,
+        onConfirm: @escaping ([LibraryItem]) -> Void,
+        onReturnHome: @escaping () -> Void = {}
     ) {
         self.draft = draft
         self.usesParentNavigation = usesParentNavigation
+        self.presentsSourceCompletion = presentsSourceCompletion
         self.onConfirm = onConfirm
+        self.onReturnHome = onReturnHome
         _candidates = State(initialValue: draft.items.enumerated().map { offset, item in
             MediaImportCandidate(id: "candidate:\(offset):\(item.id)", item: item, isIncluded: true)
         })
@@ -201,6 +210,24 @@ struct MediaImportPreview: View {
             }
         }
         .tint(KanataTheme.accent)
+        .alert(
+            "已加入媒体库",
+            isPresented: Binding(
+                get: { completionNotice != nil },
+                set: { if !$0 { completionNotice = nil } }
+            )
+        ) {
+            Button("继续添加") {
+                completionNotice = nil
+                dismiss()
+            }
+            Button("返回首页", role: .cancel) {
+                completionNotice = nil
+                onReturnHome()
+            }
+        } message: {
+            Text(completionNotice ?? "")
+        }
         #if os(tvOS)
         .navigationDestination(item: $editingCandidate) { candidate in
             EpisodeMetadataEditor(candidate: candidate, onSave: updateEpisode)
@@ -521,7 +548,22 @@ struct MediaImportPreview: View {
             }
         }
         onConfirm(result)
-        dismiss()
+        if presentsSourceCompletion {
+            completionNotice = completionMessage(for: result)
+        } else {
+            dismiss()
+        }
+    }
+
+    /// 生成媒体源导入完成后的简短统计说明。
+    /// - Parameter items: 已实际写入媒体库的条目。
+    /// - Returns: 包含合集数与视频数的确认文案。
+    private func completionMessage(for items: [LibraryItem]) -> String {
+        let collectionCount = Set(items.compactMap(\.collectionID)).count
+        if collectionCount > 0 {
+            return "已加入 \(collectionCount) 个合集、共 \(items.count) 个视频，并已定位到“最近添加”。"
+        }
+        return "已加入 \(items.count) 个视频，并已定位到“最近添加”。"
     }
 }
 

@@ -50,6 +50,8 @@ private enum MediaSourceDraftStore {
 /// 统一媒体源入口，展示历史连接并支持添加四类网络媒体源。
 struct MediaSourceSheet: View {
     let onAdd: ([LibraryItem]) -> Void
+    let onImport: ([LibraryItem]) -> Void
+    let onReturnHome: () -> Void
     let onSourcesChanged: () -> Void
     let usesParentNavigation: Bool
     @Environment(AppSettings.self) private var settings
@@ -63,15 +65,21 @@ struct MediaSourceSheet: View {
 
     /// 创建媒体源入口；Apple TV 可复用首页导航栈以获得完整页面式流程。
     /// - Parameters:
-    ///   - onAdd: 选中视频或合集后的回调。
+    ///   - onAdd: 无需导入预览的单视频添加回调。
+    ///   - onImport: 经过确认导入页的媒体条目回调。
+    ///   - onReturnHome: 导入完成后返回媒体库首页的回调。
     ///   - onSourcesChanged: 历史媒体源变化后的刷新回调。
     ///   - usesParentNavigation: 是否由外层 NavigationStack 管理返回层级。
     init(
         onAdd: @escaping ([LibraryItem]) -> Void,
+        onImport: @escaping ([LibraryItem]) -> Void,
+        onReturnHome: @escaping () -> Void,
         onSourcesChanged: @escaping () -> Void,
         usesParentNavigation: Bool = false
     ) {
         self.onAdd = onAdd
+        self.onImport = onImport
+        self.onReturnHome = onReturnHome
         self.onSourcesChanged = onSourcesChanged
         self.usesParentNavigation = usesParentNavigation
     }
@@ -169,7 +177,8 @@ struct MediaSourceSheet: View {
                             MediaSourceConnectionView(
                                 kind: kind,
                                 onSaved: { _ in reloadProfiles() },
-                                onAdd: finish
+                                onAdd: onImport,
+                                onReturnHome: onReturnHome
                             )
                         } label: {
                             sourceLabel(kind.title, detail: sourceDetail(kind), symbol: kind.symbol)
@@ -194,14 +203,19 @@ struct MediaSourceSheet: View {
         .navigationTitle("添加媒体源")
         .kanataInlineNavigationTitle()
         .navigationDestination(item: $browsingProfile) { profile in
-            MediaSourceChannelView(profile: profile, onAdd: finish)
+            MediaSourceChannelView(
+                profile: profile,
+                onAdd: onImport,
+                onReturnHome: onReturnHome
+            )
         }
         .navigationDestination(item: $editingProfile) { profile in
             MediaSourceConnectionView(
                 kind: profile.kind,
                 existingProfile: profile,
                 onSaved: { _ in reloadProfiles() },
-                onAdd: finish
+                onAdd: onImport,
+                onReturnHome: onReturnHome
             )
         }
         .toolbar {
@@ -230,7 +244,12 @@ struct MediaSourceSheet: View {
             Text(importError ?? "")
         }
         .kanataModal(item: $pendingImport) { draft in
-            MediaImportPreview(draft: draft, onConfirm: finish)
+            MediaImportPreview(
+                draft: draft,
+                presentsSourceCompletion: true,
+                onConfirm: onImport,
+                onReturnHome: onReturnHome
+            )
         }
     }
 
@@ -413,6 +432,7 @@ private struct MediaSourceConnectionView: View {
     let existingProfile: MediaSourceProfile?
     let onSaved: (MediaSourceProfile) -> Void
     let onAdd: ([LibraryItem]) -> Void
+    let onReturnHome: () -> Void
     @State private var name = ""
     @State private var serverScheme = "http"
     @State private var serverHost = ""
@@ -450,16 +470,19 @@ private struct MediaSourceConnectionView: View {
     ///   - existingProfile: 要编辑的历史媒体源，nil 表示新增。
     ///   - onSaved: 保存完成回调。
     ///   - onAdd: 从频道加入媒体库的回调。
+    ///   - onReturnHome: 完成导入后返回媒体库首页的回调。
     init(
         kind: MediaSourceKind,
         existingProfile: MediaSourceProfile? = nil,
         onSaved: @escaping (MediaSourceProfile) -> Void,
-        onAdd: @escaping ([LibraryItem]) -> Void
+        onAdd: @escaping ([LibraryItem]) -> Void,
+        onReturnHome: @escaping () -> Void
     ) {
         self.kind = kind
         self.existingProfile = existingProfile
         self.onSaved = onSaved
         self.onAdd = onAdd
+        self.onReturnHome = onReturnHome
         guard let existingProfile else { return }
         _name = State(initialValue: existingProfile.name)
         _rootPath = State(initialValue: existingProfile.rootPath ?? "/")
@@ -476,7 +499,11 @@ private struct MediaSourceConnectionView: View {
     var body: some View {
         Group {
             if let profile {
-                MediaSourceChannelView(profile: profile, onAdd: onAdd)
+                MediaSourceChannelView(
+                    profile: profile,
+                    onAdd: onAdd,
+                    onReturnHome: onReturnHome
+                )
             } else {
                 connectionForm
             }
@@ -1292,14 +1319,23 @@ private struct PlexAuthorizationView: View {
 struct MediaSourceChannelView: View {
     let profile: MediaSourceProfile
     let onAdd: ([LibraryItem]) -> Void
+    let onReturnHome: () -> Void
 
     var body: some View {
         Group {
             switch profile.kind {
             case .webDAV:
-                WebDAVChannelView(profile: profile, onAdd: onAdd)
+                WebDAVChannelView(
+                    profile: profile,
+                    onAdd: onAdd,
+                    onReturnHome: onReturnHome
+                )
             case .jellyfin, .emby, .plex, .synology:
-                MediaServerChannelView(profile: profile, onAdd: onAdd)
+                MediaServerChannelView(
+                    profile: profile,
+                    onAdd: onAdd,
+                    onReturnHome: onReturnHome
+                )
             }
         }
         .navigationTitle(profile.name)
@@ -1312,6 +1348,7 @@ struct MediaSourceChannelView: View {
 private struct WebDAVChannelView: View {
     let profile: MediaSourceProfile
     let onAdd: ([LibraryItem]) -> Void
+    let onReturnHome: () -> Void
     @State private var directoryStack: [(url: URL, name: String)] = []
     @State private var entries: [WebDAVEntry] = []
     @State private var isLoading = false
@@ -1323,9 +1360,15 @@ private struct WebDAVChannelView: View {
     /// - Parameters:
     ///   - profile: WebDAV 媒体源。
     ///   - onAdd: 选择媒体后的回调。
-    init(profile: MediaSourceProfile, onAdd: @escaping ([LibraryItem]) -> Void) {
+    ///   - onReturnHome: 完成导入后返回媒体库首页的回调。
+    init(
+        profile: MediaSourceProfile,
+        onAdd: @escaping ([LibraryItem]) -> Void,
+        onReturnHome: @escaping () -> Void
+    ) {
         self.profile = profile
         self.onAdd = onAdd
+        self.onReturnHome = onReturnHome
         self.client = WebDAVClient(profile: profile)
     }
 
@@ -1448,12 +1491,23 @@ private struct WebDAVChannelView: View {
             )
         ) {
             if let draft = pendingImport {
-                MediaImportPreview(draft: draft, usesParentNavigation: true, onConfirm: onAdd)
+                MediaImportPreview(
+                    draft: draft,
+                    usesParentNavigation: true,
+                    presentsSourceCompletion: true,
+                    onConfirm: onAdd,
+                    onReturnHome: onReturnHome
+                )
             }
         }
         #else
         .kanataModal(item: $pendingImport) { draft in
-            MediaImportPreview(draft: draft, onConfirm: onAdd)
+            MediaImportPreview(
+                draft: draft,
+                presentsSourceCompletion: true,
+                onConfirm: onAdd,
+                onReturnHome: onReturnHome
+            )
         }
         #endif
     }
@@ -1665,6 +1719,7 @@ private enum MediaChannelFilter: String, CaseIterable, Identifiable {
 private struct MediaServerChannelView: View {
     let profile: MediaSourceProfile
     let onAdd: ([LibraryItem]) -> Void
+    let onReturnHome: () -> Void
     @State private var stack: [(key: String?, name: String)] = []
     @State private var entries: [MediaSourceEntry] = []
     @State private var filter = MediaChannelFilter.all
@@ -1699,23 +1754,7 @@ private struct MediaServerChannelView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                VStack(alignment: .leading, spacing: 4) {
-                    Label(stack.last?.name ?? profile.name, systemImage: "folder")
-                        #if os(tvOS)
-                        .font(.title2.weight(.semibold))
-                        #else
-                        .font(.headline)
-                        #endif
-                    Text(stack.map(\.name).joined(separator: " / "))
-                        #if os(tvOS)
-                        .font(.body)
-                        #else
-                        .font(.caption)
-                        #endif
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                .padding(.vertical, 8)
+                currentLocationCard
                 Button {
                     Task { await addCurrentDirectory() }
                 } label: {
@@ -1727,7 +1766,7 @@ private struct MediaServerChannelView: View {
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
             Section(stack.last?.name ?? profile.name) {
                 ForEach(visibleEntries) { entry in
-                    HStack(spacing: 18) {
+                    HStack(spacing: 0) {
                         Button {
                             Task { await select(entry) }
                         } label: {
@@ -1760,23 +1799,31 @@ private struct MediaServerChannelView: View {
                             .padding(.horizontal, 16)
                             .contentShape(Rectangle())
                         }
-                        .kanataDirectoryRowStyle(cornerRadius: 14)
+                        .kanataTVFocus(cornerRadius: 12)
                         if entry.isDirectory {
+                            Divider()
+                                .frame(height: tvServerRowHeight - 20)
                             Button {
                                 Task { await addDirectory(entry) }
                             } label: {
                                 #if os(tvOS)
-                                Label("加入", systemImage: "rectangle.stack.badge.plus")
+                                Label("加入", systemImage: "plus.circle.fill")
                                     .font(.headline.weight(.semibold))
-                                    .frame(minWidth: 132, minHeight: 68)
+                                    .frame(minWidth: 116, minHeight: tvServerRowHeight)
                                 #else
-                                Image(systemName: "rectangle.stack.badge.plus")
+                                Image(systemName: "plus.circle.fill")
                                     .frame(width: 44, height: 44)
                                 #endif
                             }
-                            .kanataDirectoryRowStyle(cornerRadius: 14)
+                            .foregroundStyle(KanataTheme.accent)
+                            .kanataTVFocus(cornerRadius: 12)
                             .accessibilityLabel("把 \(entry.name) 添加为合集")
                         }
+                    }
+                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(KanataTheme.separator.opacity(0.7), lineWidth: 1)
                     }
                     .listRowBackground(Color.clear)
                     #if !os(tvOS)
@@ -1818,12 +1865,23 @@ private struct MediaServerChannelView: View {
             )
         ) {
             if let draft = pendingImport {
-                MediaImportPreview(draft: draft, usesParentNavigation: true, onConfirm: onAdd)
+                MediaImportPreview(
+                    draft: draft,
+                    usesParentNavigation: true,
+                    presentsSourceCompletion: true,
+                    onConfirm: onAdd,
+                    onReturnHome: onReturnHome
+                )
             }
         }
         #else
         .kanataModal(item: $pendingImport) { draft in
-            MediaImportPreview(draft: draft, onConfirm: onAdd)
+            MediaImportPreview(
+                draft: draft,
+                presentsSourceCompletion: true,
+                onConfirm: onAdd,
+                onReturnHome: onReturnHome
+            )
         }
         #endif
     }
@@ -1835,6 +1893,49 @@ private struct MediaServerChannelView: View {
         #else
         62
         #endif
+    }
+
+    /// 展示当前服务器与浏览层级，避免标题、图标和路径挤在列表边缘。
+    private var currentLocationCard: some View {
+        HStack(spacing: 16) {
+            Image(systemName: profile.kind.symbol)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(KanataTheme.accent)
+                .frame(width: 52, height: 52)
+                .background(KanataTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(stack.last?.name ?? profile.name)
+                    #if os(tvOS)
+                    .font(.title2.weight(.semibold))
+                    #else
+                    .font(.headline)
+                    #endif
+                    .lineLimit(1)
+                Text(currentLocationDetail)
+                    #if os(tvOS)
+                    .font(.body)
+                    #else
+                    .font(.caption)
+                    #endif
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 12)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(KanataTheme.separator.opacity(0.7), lineWidth: 1)
+        }
+        .listRowBackground(Color.clear)
+    }
+
+    /// 返回不重复服务器名称的当前位置说明。
+    private var currentLocationDetail: String {
+        let path = stack.map(\.name).joined(separator: " / ")
+        return stack.count > 1 ? path : "\(profile.kind.title) · 当前媒体源"
     }
 
     /// 首次进入频道时读取根媒体库。

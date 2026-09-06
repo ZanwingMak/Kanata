@@ -426,6 +426,8 @@ struct LibraryView: View {
             .navigationDestination(isPresented: $isAddingMediaSource) {
                 MediaSourceSheet(
                     onAdd: addMediaSourceItems,
+                    onImport: addImportedMediaSourceItems,
+                    onReturnHome: returnToLibraryAfterAddingSource,
                     onSourcesChanged: reloadMediaSources,
                     usesParentNavigation: true
                 )
@@ -437,7 +439,11 @@ struct LibraryView: View {
                 )
             ) {
                 if let profile = browsingSource {
-                    MediaSourceChannelView(profile: profile, onAdd: addMediaSourceItems)
+                    MediaSourceChannelView(
+                        profile: profile,
+                        onAdd: addImportedMediaSourceItems,
+                        onReturnHome: returnToLibraryAfterAddingSource
+                    )
                 }
             }
             #else
@@ -447,12 +453,18 @@ struct LibraryView: View {
             .sheet(isPresented: $isAddingMediaSource) {
                 MediaSourceSheet(
                     onAdd: addMediaSourceItems,
+                    onImport: addImportedMediaSourceItems,
+                    onReturnHome: returnToLibraryAfterAddingSource,
                     onSourcesChanged: reloadMediaSources
                 )
             }
             .sheet(item: $browsingSource) { profile in
                 NavigationStack {
-                    MediaSourceChannelView(profile: profile, onAdd: addMediaSourceItems)
+                    MediaSourceChannelView(
+                        profile: profile,
+                        onAdd: addImportedMediaSourceItems,
+                        onReturnHome: returnToLibraryAfterAddingSource
+                    )
                         .toolbar {
                             ToolbarItem(placement: .cancellationAction) {
                                 Button("关闭") { browsingSource = nil }
@@ -1054,6 +1066,13 @@ struct LibraryView: View {
     private func addMediaSourceItems(_ newItems: [LibraryItem]) {
         addMediaItems(newItems)
         mediaSourceNotice = libraryNotice
+        libraryNotice = nil
+    }
+
+    /// 合并已经在确认导入页完成编排的媒体源条目，由当前页负责展示完成操作。
+    /// - Parameter newItems: 确认导入页生成的媒体条目。
+    private func addImportedMediaSourceItems(_ newItems: [LibraryItem]) {
+        addMediaItems(newItems)
         libraryNotice = nil
     }
 
