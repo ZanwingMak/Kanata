@@ -654,21 +654,75 @@ private struct TVValueAdjuster: View {
     let value: String
     let onDecrement: () -> Void
     let onIncrement: () -> Void
+    @FocusState private var focusedAction: Action?
+
+    private enum Action: Hashable {
+        case decrement
+        case increment
+    }
 
     var body: some View {
         HStack {
             Text(title)
+                .foregroundStyle(.primary)
             Spacer()
-            Text(value).monospacedDigit()
+            Text(value)
+                .monospacedDigit()
+                .foregroundStyle(.primary)
             Button(action: onDecrement) {
                 Image(systemName: "minus")
+                    .frame(width: 52, height: 52)
             }
+            .buttonStyle(TVValueAdjusterButtonStyle())
+            .focused($focusedAction, equals: .decrement)
             .accessibilityLabel("减小\(title)")
             Button(action: onIncrement) {
                 Image(systemName: "plus")
+                    .frame(width: 52, height: 52)
             }
+            .buttonStyle(TVValueAdjusterButtonStyle())
+            .focused($focusedAction, equals: .increment)
             .accessibilityLabel("增大\(title)")
         }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 64)
+        .background(
+            focusedAction == nil ? Color.clear : KanataTheme.accent.opacity(0.12),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(
+                    focusedAction == nil ? Color.clear : KanataTheme.accent.opacity(0.72),
+                    lineWidth: 2
+                )
+        }
+    }
+}
+
+/// tvOS 数值调节按钮样式，避免系统白色聚焦材质覆盖同一行的文字。
+private struct TVValueAdjusterButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) private var isFocused
+
+    /// 绘制不改变文字配色的小型加减按钮。
+    /// - Parameter configuration: 当前按钮按压状态。
+    /// - Returns: 主题色图标与克制的圆形焦点反馈。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(isFocused ? Color.white : KanataTheme.accent)
+            .background(
+                isFocused ? KanataTheme.accent : KanataTheme.accent.opacity(0.14),
+                in: Circle()
+            )
+            .overlay {
+                Circle()
+                    .strokeBorder(isFocused ? Color.white.opacity(0.72) : Color.clear, lineWidth: 2)
+            }
+            .focusEffectDisabled()
+            .scaleEffect(isFocused ? 1.06 : 1)
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(.easeOut(duration: 0.14), value: isFocused)
     }
 }
 #endif

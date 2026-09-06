@@ -868,7 +868,7 @@ actor PlexAccountClient {
     ///   - token: 可选账号令牌。
     private static func applyHeaders(to request: inout URLRequest, token: String? = nil) {
         request.setValue("Kanata", forHTTPHeaderField: "X-Plex-Product")
-        request.setValue("0.1.0", forHTTPHeaderField: "X-Plex-Version")
+        request.setValue("1.0.0", forHTTPHeaderField: "X-Plex-Version")
         request.setValue(stableDeviceID(), forHTTPHeaderField: "X-Plex-Client-Identifier")
         request.setValue("Apple", forHTTPHeaderField: "X-Plex-Platform")
         if let token { request.setValue(token, forHTTPHeaderField: "X-Plex-Token") }
@@ -1118,7 +1118,7 @@ actor PlexClient {
             "X-Plex-Token": token,
             "X-Plex-Client-Identifier": "com.kanata.app",
             "X-Plex-Product": "Kanata",
-            "X-Plex-Version": "0.1.0",
+            "X-Plex-Version": "1.0.0",
         ]
     }
 }

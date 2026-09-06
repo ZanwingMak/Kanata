@@ -364,9 +364,7 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 26;
-				DANDANPLAY_APP_ID = "";
-				DANDANPLAY_APP_SECRET = "";
+				CURRENT_PROJECT_VERSION = 27;
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Sources/Info-tvOS.plist";
@@ -376,7 +374,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.kanata.app;
 				PRODUCT_NAME = Kanata;
 				PROVISIONING_PROFILE_SPECIFIER = "Kanata tvOS App Store iCloud";
@@ -456,9 +454,7 @@
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
-				DANDANPLAY_APP_ID = "";
-				DANDANPLAY_APP_SECRET = "";
+				CURRENT_PROJECT_VERSION = 27;
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Sources/Info-tvOS.plist";
@@ -468,7 +464,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.kanata.app;
 				PRODUCT_NAME = Kanata;
 				SDKROOT = appletvos;
@@ -486,9 +482,7 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 26;
-				DANDANPLAY_APP_ID = "";
-				DANDANPLAY_APP_SECRET = "";
+				CURRENT_PROJECT_VERSION = 27;
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
@@ -503,7 +497,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.kanata.app;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 6.0;
@@ -574,9 +568,7 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 26;
-				DANDANPLAY_APP_ID = "";
-				DANDANPLAY_APP_SECRET = "";
+				CURRENT_PROJECT_VERSION = 27;
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
@@ -591,7 +583,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.kanata.app;
 				PROVISIONING_PROFILE_SPECIFIER = "Kanata iOS App Store iCloud";
 				SDKROOT = iphoneos;

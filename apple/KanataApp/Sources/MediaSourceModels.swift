@@ -266,7 +266,7 @@ enum MediaSourceProfileStore {
                 "X-Plex-Token": token,
                 "X-Plex-Client-Identifier": "com.kanata.app",
                 "X-Plex-Product": "Kanata",
-                "X-Plex-Version": "0.1.0",
+                "X-Plex-Version": "1.0.0",
             ]
         case .synology:
             return [:]
@@ -277,7 +277,7 @@ enum MediaSourceProfileStore {
     /// - Parameter token: 可选访问令牌。
     /// - Returns: 服务端识别客户端所需的授权字符串。
     static func mediaBrowserAuthorization(token: String? = nil) -> String {
-        var value = "MediaBrowser Client=\"Kanata\", Device=\"Apple\", DeviceId=\"kanata-apple\", Version=\"0.1.0\""
+        var value = "MediaBrowser Client=\"Kanata\", Device=\"Apple\", DeviceId=\"kanata-apple\", Version=\"1.0.0\""
         if let token { value += ", Token=\"\(token)\"" }
         return value
     }

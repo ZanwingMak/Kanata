@@ -2,7 +2,7 @@
 
 Kanata 是一款面向 iPhone、iPad、Apple TV 与浏览器的自有媒体弹幕播放器。它不提供影视内容；用户连接自己的本地文件、NAS 或媒体服务器，应用负责整理剧集、播放视频，并为当前分集匹配和渲染弹幕。
 
-项目正在通过 TestFlight 持续进行真机迭代。Apple 端使用 SwiftUI 与 AVPlayer，Web 端使用 React 与 ArtPlayer，并附带一个可自托管的弹幕网关。
+项目正在通过 TestFlight 持续进行真机迭代。Apple 端使用 SwiftUI、AVPlayer 与 KSPlayer/FFmpeg 通用解码内核，Web 端使用 React 与 ArtPlayer，并附带一个可自托管的弹幕网关。
 
 ## 主要能力
 
@@ -26,8 +26,8 @@ Kanata 是一款面向 iPhone、iPad、Apple TV 与浏览器的自有媒体弹�
 
 ### 弹幕
 
-- Apple 端内置哔哩哔哩、爱奇艺、腾讯视频、巴哈姆特动画疯和弹弹play来源；每个来源可单独启用与测试。
-- 弹弹play开放平台由于基础额度有限，默认作为低频备用来源，不是应用运行的必需依赖。
+- Apple 端内置哔哩哔哩、爱奇艺、腾讯视频和巴哈姆特动画疯来源；每个来源可单独启用与测试。
+- 弹弹play作为独立自配置渠道提供。Kanata 不内置 AppID 或 AppSecret，用户可填写自己的开放平台凭据并将其安全保存在本机 Keychain。
 - 支持作品搜索、候选分集选择、重新匹配、持久绑定，并明确显示“视频第几集”和“弹幕源第几集”是否一致。
 - 支持导入本地 XML、JSON 与 ASS 弹幕，与在线弹幕合并、去重和持久缓存；断网时可使用最近缓存。
 - 支持字号、透明度、描边、阴影、速度、密度、显示区域、字体和时间偏移调整。Apple TV 使用更适合观看距离的独立默认字号。
@@ -42,9 +42,9 @@ Kanata 是一款面向 iPhone、iPad、Apple TV 与浏览器的自有媒体弹�
 
 ## 播放兼容性
 
-Kanata 当前以 Apple 原生 AVPlayer 为播放内核。MP4、MOV 和 HLS，以及设备硬件支持的 H.264/HEVC 通常可直接播放。Jellyfin、Emby 与 Plex 可把不兼容媒体转换为 HLS，因此更适合包含多种封装和编码的媒体库。
+Kanata 优先使用 Apple 原生 AVPlayer 播放 MP4、MOV、HLS 及设备硬件支持的 H.264/HEVC；MKV、WebM、AVI、FLV 等容器会自动切换 KSPlayer/FFmpeg 通用解码内核。Jellyfin、Emby 与 Plex 还可把不兼容媒体转换为 HLS，以覆盖更多服务端媒体组合。
 
-WebDAV、DSM 直链和系统文件夹没有服务端转码能力。MKV、WebM、AVI、FLV，或 HEVC 10-bit + FLAC 等组合是否能播放，仍受 AVPlayer 与具体设备能力限制；失败时应用会说明原因，但目前不会假装已经通过第三方内核解码。
+WebDAV、DSM 直链和系统文件夹没有服务端转码能力，播放结果仍受 Apple TV 或 iPhone 的硬件解码能力、服务器 Range 分段读取以及网络状况影响。系统内核失败时会自动尝试通用解码；媒体服务器来源还会继续尝试兼容流，并在失败时给出可恢复操作。
 
 ## 架构
 
@@ -57,7 +57,7 @@ WebDAV、DSM 直链和系统文件夹没有服务端转码能力。MKV、WebM、
               ▼
 ┌─────────────────────────────────────┐
 │ Apple App                           │
-│ SwiftUI 媒体库 + AVPlayer + 弹幕渲染 │
+│ SwiftUI + AVPlayer / KSPlayer + 弹幕渲染│
 │ 内置来源 / 本地缓存 / Keychain / iCloud│
 └──────────────────┬──────────────────┘
                    │ 可选
@@ -124,7 +124,7 @@ npm run dev
 
 - Kanata 不提供、解析或下载第三方视频平台的影视流，不绕过 DRM，也不提供 VIP 内容解析。
 - Apple 端敏感凭证存放在 Keychain；媒体库和 iCloud 快照只保存必要的非敏感索引。
-- 弹弹play AppSecret、App Store Connect 私钥、媒体服务器令牌和平台 Cookie 均不得写入源码、README、构建日志或提交历史。
+- 用户填写的弹弹play AppSecret、App Store Connect 私钥、媒体服务器令牌和平台 Cookie 均不得写入源码、README、构建日志或提交历史。
 - 公共弹幕接口可能随平台规则变化而失效；单个来源失败不应阻断视频播放。
 
 ## 开发状态与文档

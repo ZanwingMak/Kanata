@@ -110,7 +110,7 @@ final class PlayerViewModel {
     private var client: GatewayClient?
     private var builtInClient: BuiltInBilibiliClient?
     private var builtInPublicClient: BuiltInPublicDanmakuClient?
-    private var builtInDandanplayClient: BuiltInDandanplayClient?
+    private var dandanplayChannelClient: DandanplayChannelClient?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var timeControlObservation: NSKeyValueObservation?
@@ -246,7 +246,7 @@ final class PlayerViewModel {
         client = settings.makeClient()
         builtInClient = settings.makeBuiltInBilibiliClient()
         builtInPublicClient = settings.makeBuiltInPublicDanmakuClient()
-        builtInDandanplayClient = settings.makeBuiltInDandanplayClient()
+        dandanplayChannelClient = settings.makeDandanplayChannelClient()
         onlineCacheLimitBytes = Int64(settings.onlineDanmakuCacheLimitMB) * 1024 * 1024
         mediaKey = progressKey ?? url.absoluteString
         currentPlaybackURL = url
@@ -375,7 +375,7 @@ final class PlayerViewModel {
         guard client != nil
                 || builtInClient != nil
                 || builtInPublicClient != nil
-                || builtInDandanplayClient != nil else {
+                || dandanplayChannelClient != nil else {
             if let fingerprint, let savedCandidate,
                await restoreCachedDanmaku(for: savedCandidate, fingerprint: fingerprint) {
                 return
@@ -477,11 +477,11 @@ final class PlayerViewModel {
                 errors.append("爱奇艺、腾讯视频、巴哈姆特未找到匹配结果")
             }
         }
-        if let builtInDandanplayClient {
+        if let dandanplayChannelClient {
             do {
-                append(try await builtInDandanplayClient.resolve(request))
+                append(try await dandanplayChannelClient.resolve(request))
             } catch {
-                errors.append("弹弹play备用：\(error.localizedDescription)")
+                errors.append("弹弹play渠道：\(error.localizedDescription)")
             }
         }
         if let client {
@@ -569,10 +569,10 @@ final class PlayerViewModel {
                 errors.append(error.localizedDescription)
             }
         }
-        if candidate.source == .dandanplay, let builtInDandanplayClient {
+        if candidate.source == .dandanplay, let dandanplayChannelClient {
             let startedAt = Date()
             do {
-                let items = try await builtInDandanplayClient.danmaku(
+                let items = try await dandanplayChannelClient.danmaku(
                     platformEpisodeID: candidate.platformEpisodeId
                 )
                 if !items.isEmpty {
@@ -585,7 +585,7 @@ final class PlayerViewModel {
                     )
                     return true
                 }
-                errors.append("弹弹play备用来源返回空弹幕")
+                errors.append("弹弹play渠道返回空弹幕")
             } catch {
                 errors.append(error.localizedDescription)
             }
@@ -717,7 +717,7 @@ final class PlayerViewModel {
               client != nil
                 || builtInClient != nil
                 || builtInPublicClient != nil
-                || builtInDandanplayClient != nil else {
+                || dandanplayChannelClient != nil else {
             danmakuStats = "没有启用可用的在线弹幕来源"
             return
         }

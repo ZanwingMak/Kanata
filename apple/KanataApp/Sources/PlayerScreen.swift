@@ -246,6 +246,8 @@ private struct TVSeekBar: View {
     let onTogglePlayback: () -> Void
     @Environment(\.isFocused) private var isFocused
     @State private var scrubStartValue: Double?
+    @State private var directionalSeekTarget: Double?
+    @State private var directionalRepeatCount = 0
 
     var body: some View {
         GeometryReader { proxy in
@@ -280,8 +282,13 @@ private struct TVSeekBar: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(isFocused ? KanataTheme.accent.opacity(0.9) : .clear, lineWidth: 2)
         }
+        .onKeyPress(keys: [.leftArrow, .rightArrow], phases: .all, action: handleDirectionalKeyPress)
         .onMoveCommand(perform: handleMove)
         .onTapGesture(perform: onTogglePlayback)
+        .onChange(of: isFocused) { _, focused in
+            if !focused { finishDirectionalSeek() }
+        }
+        .onDisappear(perform: finishDirectionalSeek)
         .accessibilityLabel("播放进度")
         .accessibilityValue("已播放 \(Int(value)) 秒，共 \(Int(duration)) 秒")
         .accessibilityAdjustableAction(adjustAccessibilityValue)
@@ -329,6 +336,45 @@ private struct TVSeekBar: View {
         return min(max(start + duration * acceleratedProgress, 0), duration)
     }
 
+    /// 处理遥控器方向键的按下、连发与松开阶段，长按时连续加速预览进度。
+    /// - Parameter press: SwiftUI 转发的左右方向按键事件。
+    /// - Returns: 焦点在时间轴上时接管事件，否则交回系统。
+    private func handleDirectionalKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        guard isFocused else { return .ignored }
+        let direction = press.key == .leftArrow ? -1.0 : 1.0
+        if press.phase.contains(.down) {
+            directionalRepeatCount = 0
+            updateDirectionalSeek(direction: direction, isRepeated: false)
+        } else if press.phase.contains(.repeat) {
+            directionalRepeatCount += 1
+            updateDirectionalSeek(direction: direction, isRepeated: true)
+        } else if press.phase.contains(.up) {
+            finishDirectionalSeek()
+        }
+        return .handled
+    }
+
+    /// 更新方向键连续拖动的预览位置，按住时间越长步进越快。
+    /// - Parameters:
+    ///   - direction: -1 表示后退，1 表示前进。
+    ///   - isRepeated: 当前是否为系统产生的按键连发事件。
+    private func updateDirectionalSeek(direction: Double, isRepeated: Bool) {
+        let baseStep = duration >= 7_200 ? 30.0 : 10.0
+        let acceleration = isRepeated ? min(0.5 + Double(directionalRepeatCount) / 10, 3) : 1
+        let start = directionalSeekTarget ?? value
+        let target = min(max(start + direction * baseStep * acceleration, 0), duration)
+        directionalSeekTarget = target
+        onScrubChanged(target)
+    }
+
+    /// 在方向键松开或时间轴失焦时统一提交最终播放位置。
+    private func finishDirectionalSeek() {
+        guard let target = directionalSeekTarget else { return }
+        directionalSeekTarget = nil
+        directionalRepeatCount = 0
+        onSeek(target)
+    }
+
     /// 处理遥控器方向键，短视频每次十秒，长视频每次三十秒。
     /// - Parameter direction: Siri Remote 当前移动方向。
     private func handleMove(_ direction: MoveCommandDirection) {
@@ -366,7 +412,6 @@ private struct TVSeekBar: View {
 private enum TVPlayerFocus: Hashable {
     case background
     case back
-    case rematch
     case more
     case progress
     case rewind
@@ -972,16 +1017,6 @@ struct PlayerScreen: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                Button {
-                    viewModel.isShowingCandidates = true
-                } label: {
-                    controlSymbol("text.magnifyingglass", prominent: false)
-                }
-                .buttonStyle(PlayerControlButtonStyle())
-                #if os(tvOS)
-                .focused($tvFocusedControl, equals: .rematch)
-                #endif
-                .accessibilityLabel("重新匹配弹幕")
                 Button {
                     isShowingPlaybackPanel = true
                 } label: {
@@ -2713,12 +2748,20 @@ struct PlaybackOptionsPanel: View {
                         )
                     } label: {
                         LabeledContent("播放路径", value: playbackPathLabel)
+                            .frame(maxWidth: .infinity, minHeight: 58)
+                            .padding(.horizontal, 14)
                     }
+                    .kanataDirectoryRowStyle(cornerRadius: 12)
+                    .listRowBackground(Color.clear)
                     NavigationLink {
                         PlaybackRateSelectionView(viewModel: viewModel)
                     } label: {
                         LabeledContent("播放速度", value: playbackRateLabel(viewModel.playbackRate))
+                            .frame(maxWidth: .infinity, minHeight: 58)
+                            .padding(.horizontal, 14)
                     }
+                    .kanataDirectoryRowStyle(cornerRadius: 12)
+                    .listRowBackground(Color.clear)
                     Picker("连播方式", selection: $queueMode) {
                         ForEach(PlaybackQueueMode.allCases) { mode in
                             Text(mode.title).tag(mode)

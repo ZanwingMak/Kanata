@@ -22,6 +22,8 @@ struct SettingsView: View {
     @State private var isVerifyingBilibili = false
     @State private var builtInSourceResult: String?
     @State private var isTestingBuiltInSource = false
+    @State private var dandanplayChannelResult: String?
+    @State private var isTestingDandanplayChannel = false
     @State private var isShowingBilibiliQRCode = false
     #if os(iOS)
     @State private var selectedIconName: String?
@@ -139,15 +141,6 @@ struct SettingsView: View {
                     Toggle(isOn: $settings.builtInBilibiliEnabled) {
                         settingsLabel("哔哩哔哩", symbol: "play.rectangle.on.rectangle")
                     }
-                    Toggle(isOn: $settings.builtInDandanplayEnabled) {
-                        settingsLabel("弹弹play低额度备用", symbol: "shield.lefthalf.filled")
-                    }
-                    .disabled(!settings.hasDandanplayConfiguration)
-                    Text(settings.hasDandanplayConfiguration
-                        ? "当前构建已安全注入开放平台凭证。默认关闭，仅在需要时启用，以减少每日额度消耗。"
-                        : "当前构建未注入开放平台凭证；密钥不会写入仓库。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     Toggle(isOn: $settings.builtInPublicSourcesEnabled) {
                         settingsLabel("公共平台来源", symbol: "network")
                     }
@@ -178,7 +171,6 @@ struct SettingsView: View {
                     .disabled(
                         (
                             !settings.builtInBilibiliEnabled
-                            && !settings.builtInDandanplayEnabled
                             && (!settings.builtInPublicSourcesEnabled
                                 || (!settings.builtInIqiyiEnabled
                                     && !settings.builtInQQEnabled
@@ -189,6 +181,48 @@ struct SettingsView: View {
                     if let builtInSourceResult {
                         Text(builtInSourceResult).font(.caption).foregroundStyle(.secondary)
                     }
+                }
+
+                Section("弹弹play 渠道（自配置）") {
+                    LabeledContent("AppID") {
+                        TextField("请输入开放平台 AppID", text: $settings.dandanplayAppID)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    LabeledContent("AppSecret") {
+                        SecureField("请输入开放平台密钥", text: $settings.dandanplayAppSecret)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    Toggle(isOn: $settings.dandanplayChannelEnabled) {
+                        settingsLabel("启用弹弹play渠道", symbol: "key.horizontal")
+                    }
+                    .disabled(!settings.hasDandanplayConfiguration)
+                    Button {
+                        Task { await testDandanplayChannel() }
+                    } label: {
+                        HStack {
+                            Label("测试弹弹play渠道", systemImage: "checkmark.shield")
+                            if isTestingDandanplayChannel { Spacer(); ProgressView() }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(KanataSecondaryButtonStyle())
+                    .disabled(!settings.hasDandanplayConfiguration || isTestingDandanplayChannel)
+                    if settings.hasDandanplayConfiguration {
+                        Button("清除渠道配置", role: .destructive) {
+                            settings.clearDandanplayConfiguration()
+                            dandanplayChannelResult = "弹弹play渠道配置已清除"
+                        }
+                    }
+                    if let dandanplayChannelResult {
+                        Text(dandanplayChannelResult).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("Kanata 不内置或代填弹弹play凭据。AppID 与 AppSecret 由用户自行申请，并仅保存在当前设备的 Keychain。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("扩展弹幕网关（可选）") {
@@ -219,7 +253,7 @@ struct SettingsView: View {
                     if let testResult {
                         Text(testResult).font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("用于扩展弹弹play、自定义聚合接口及后续来源。未配置时不影响哔哩哔哩、爱奇艺、腾讯视频和巴哈姆特内置来源。")
+                    Text("用于连接自托管聚合接口及扩展来源。未配置时不影响设备上的其他弹幕渠道。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -316,7 +350,7 @@ struct SettingsView: View {
                 storageSection
 
                 Section {
-                    Text("Kanata 不提供任何影视内容。使用弹弹play数据时，来源标注为“弹弹play开放弹幕网络”；其他弹幕版权归对应平台与发送者所有，仅供个人观看时参考。")
+                    Text("Kanata 不提供任何影视内容，也不提供弹弹play开放平台凭据。用户配置弹弹play渠道后，数据来源会标注为“弹弹play开放弹幕网络”；其他弹幕版权归对应平台与发送者所有，仅供个人观看时参考。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -493,12 +527,11 @@ struct SettingsView: View {
         }
     }
 
-    /// 检查无需网关的弹幕来源是否可访问；弹弹play只在用户启用时消耗一次搜索额度。
+    /// 检查无需网关的内置弹幕来源是否可访问。
     private func testBuiltInSource() async {
         let bilibiliClient = settings.makeBuiltInBilibiliClient()
         let publicClient = settings.makeBuiltInPublicDanmakuClient()
-        let dandanplayClient = settings.makeBuiltInDandanplayClient()
-        guard bilibiliClient != nil || publicClient != nil || dandanplayClient != nil else {
+        guard bilibiliClient != nil || publicClient != nil else {
             builtInSourceResult = "内置来源已关闭"
             return
         }
@@ -508,9 +541,6 @@ struct SettingsView: View {
         var statuses: [String] = []
         if let bilibiliClient {
             statuses.append("哔哩哔哩\(await bilibiliClient.health() ? "可用" : "失败")")
-        }
-        if let dandanplayClient {
-            statuses.append("弹弹play\(await dandanplayClient.health() ? "可用" : "失败")")
         }
         if let publicClient {
             let health = await publicClient.health()
@@ -526,6 +556,29 @@ struct SettingsView: View {
         }
         let elapsed = Int(Date().timeIntervalSince(startedAt) * 1_000)
         builtInSourceResult = "\(statuses.joined(separator: " · ")) · \(elapsed)ms"
+    }
+
+    /// 使用用户填写的 AppID 与 AppSecret 检查弹弹play开放平台渠道。
+    private func testDandanplayChannel() async {
+        guard settings.hasDandanplayConfiguration else {
+            dandanplayChannelResult = "请先填写完整的 AppID 与 AppSecret"
+            return
+        }
+        settings.dandanplayChannelEnabled = true
+        guard let client = settings.makeDandanplayChannelClient() else {
+            settings.dandanplayChannelEnabled = false
+            dandanplayChannelResult = "弹弹play渠道配置不完整"
+            return
+        }
+        isTestingDandanplayChannel = true
+        defer { isTestingDandanplayChannel = false }
+        let startedAt = Date()
+        let available = await client.health()
+        let elapsed = Int(Date().timeIntervalSince(startedAt) * 1_000)
+        settings.dandanplayChannelEnabled = available
+        dandanplayChannelResult = available
+            ? "连接成功 · \(elapsed)ms · 渠道已启用"
+            : "连接失败 · 请检查 AppID、AppSecret 与开放平台额度"
     }
 
     /// 导入可选 Cookie 后，通过网关校验 B 站登录态。

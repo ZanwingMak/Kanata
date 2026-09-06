@@ -2,32 +2,18 @@ import CryptoKit
 import Foundation
 import KanataCore
 
-/// App 内置的弹弹play开放平台客户端；仅在本机构建注入凭证且用户主动启用时工作。
-actor BuiltInDandanplayClient {
+/// 使用用户自有 AppID 与 AppSecret 的弹弹play开放平台渠道客户端。
+actor DandanplayChannelClient {
     private let baseURL = URL(string: "https://api.dandanplay.net")!
     private let appID: String
     private let appSecret: String
     private let session: URLSession
 
-    /// 从 App 的构建配置读取凭证；仓库和运行日志均不保存密钥。
-    /// - Returns: 当前构建未注入完整凭证时返回 nil。
-    static func configured() -> BuiltInDandanplayClient? {
-        let appID = (Bundle.main.object(forInfoDictionaryKey: "DandanplayAppId") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let appSecret = (Bundle.main.object(forInfoDictionaryKey: "DandanplayAppSecret") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !appID.isEmpty,
-              !appSecret.isEmpty,
-              !appID.contains("$("),
-              !appSecret.contains("$(") else { return nil }
-        return BuiltInDandanplayClient(appID: appID, appSecret: appSecret)
-    }
-
-    /// 创建签名客户端，并使用不落盘 Cookie 的短超时会话。
+    /// 使用用户填写的凭据创建签名客户端，并使用不落盘 Cookie 的短超时会话。
     /// - Parameters:
     ///   - appID: 开放平台应用 ID。
-    ///   - appSecret: 仅存在于已签名 App 二进制中的应用密钥。
-    private init(appID: String, appSecret: String) {
+    ///   - appSecret: 仅保存在用户本机 Keychain 中的应用密钥。
+    init(appID: String, appSecret: String) {
         self.appID = appID
         self.appSecret = appSecret
         let configuration = URLSessionConfiguration.ephemeral
@@ -66,7 +52,7 @@ actor BuiltInDandanplayClient {
             (anime.episodes ?? []).map { episode in
                 ProviderCandidate(
                     source: .dandanplay,
-                    sourceInstanceName: "弹弹play（低额度备用）",
+                    sourceInstanceName: "弹弹play（自配置）",
                     platformEpisodeId: String(episode.episodeId),
                     title: anime.animeTitle,
                     episodeTitle: episode.episodeTitle,
@@ -95,7 +81,7 @@ actor BuiltInDandanplayClient {
         return (response.matches ?? []).map { match in
             ProviderCandidate(
                 source: .dandanplay,
-                sourceInstanceName: "弹弹play（低额度备用）",
+                sourceInstanceName: "弹弹play（自配置）",
                 platformEpisodeId: "\(match.episodeId)@\(match.shift ?? 0)",
                 title: match.animeTitle,
                 episodeTitle: match.episodeTitle,
@@ -307,7 +293,7 @@ actor BuiltInDandanplayClient {
     }
 }
 
-/// 弹弹play内置客户端的安全、网络与响应错误。
+/// 弹弹play自配置渠道的安全、网络与响应错误。
 private enum DandanplayClientError: LocalizedError {
     case credentialRejected
     case http(Int)

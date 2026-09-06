@@ -48,9 +48,19 @@ final class AppSettings {
         didSet { defaults.set(builtInBahamutEnabled, forKey: Keys.builtInBahamutEnabled) }
     }
 
-    /// 低额度弹弹play开放平台备用来源，默认关闭以避免无意消耗配额。
-    var builtInDandanplayEnabled: Bool {
-        didSet { defaults.set(builtInDandanplayEnabled, forKey: Keys.builtInDandanplayEnabled) }
+    /// 用户自行配置的弹弹play开放平台渠道开关。
+    var dandanplayChannelEnabled: Bool {
+        didSet { defaults.set(dandanplayChannelEnabled, forKey: Keys.dandanplayChannelEnabled) }
+    }
+
+    /// 用户自己的弹弹play开放平台 AppID，仅保存在本机 Keychain。
+    var dandanplayAppID: String {
+        didSet { KeychainStore.setString(dandanplayAppID, account: KeychainAccounts.dandanplayAppID) }
+    }
+
+    /// 用户自己的弹弹play开放平台 AppSecret，仅保存在本机 Keychain。
+    var dandanplayAppSecret: String {
+        didSet { KeychainStore.setString(dandanplayAppSecret, account: KeychainAccounts.dandanplayAppSecret) }
     }
 
     /// 全局强调色主题。
@@ -100,7 +110,8 @@ final class AppSettings {
         static let builtInIqiyiEnabled = "source.iqiyi.builtInEnabled"
         static let builtInQQEnabled = "source.qq.builtInEnabled"
         static let builtInBahamutEnabled = "source.bahamut.builtInEnabled"
-        static let builtInDandanplayEnabled = "source.dandanplay.builtInEnabled"
+        static let dandanplayChannelEnabled = "source.dandanplay.channelEnabled"
+        static let legacyBuiltInDandanplayEnabled = "source.dandanplay.builtInEnabled"
         static let accentTheme = KanataTheme.accentStorageKey
         static let appearance = "appearance.mode"
     }
@@ -108,6 +119,8 @@ final class AppSettings {
     private enum KeychainAccounts {
         static let gatewayToken = "gateway.token"
         static let bilibiliCredential = "credential.bilibili"
+        static let dandanplayAppID = "credential.dandanplay.appID"
+        static let dandanplayAppSecret = "credential.dandanplay.appSecret"
     }
 
     private struct StoredBilibiliCredential: Codable {
@@ -135,7 +148,9 @@ final class AppSettings {
         self.builtInIqiyiEnabled = defaults.object(forKey: Keys.builtInIqiyiEnabled) as? Bool ?? true
         self.builtInQQEnabled = defaults.object(forKey: Keys.builtInQQEnabled) as? Bool ?? true
         self.builtInBahamutEnabled = defaults.object(forKey: Keys.builtInBahamutEnabled) as? Bool ?? true
-        self.builtInDandanplayEnabled = defaults.object(forKey: Keys.builtInDandanplayEnabled) as? Bool ?? false
+        self.dandanplayAppID = KeychainStore.string(account: KeychainAccounts.dandanplayAppID) ?? ""
+        self.dandanplayAppSecret = KeychainStore.string(account: KeychainAccounts.dandanplayAppSecret) ?? ""
+        self.dandanplayChannelEnabled = defaults.object(forKey: Keys.dandanplayChannelEnabled) as? Bool ?? false
         self.accentTheme = KanataAccentTheme(
             rawValue: defaults.string(forKey: Keys.accentTheme) ?? ""
         ) ?? .galaxy
@@ -193,6 +208,7 @@ final class AppSettings {
             KeychainStore.setString(legacyGatewayToken, account: KeychainAccounts.gatewayToken)
             defaults.removeObject(forKey: Keys.gatewayToken)
         }
+        defaults.removeObject(forKey: Keys.legacyBuiltInDandanplayEnabled)
         if storedVisualStyleVersion < 7 {
             defaults.set(7, forKey: Keys.visualStyleVersion)
             suppressesCloudPush = true
@@ -260,15 +276,34 @@ final class AppSettings {
         return BuiltInPublicDanmakuClient(enabledSources: enabledSources)
     }
 
-    /// 创建低额度弹弹play备用客户端；未启用或构建未注入密钥时返回 nil。
-    /// - Returns: 已签名的开放平台客户端。
-    func makeBuiltInDandanplayClient() -> BuiltInDandanplayClient? {
-        guard builtInDandanplayEnabled else { return nil }
-        return BuiltInDandanplayClient.configured()
+    /// 使用用户自己的凭据创建弹弹play渠道客户端。
+    /// - Returns: 渠道未启用或凭据不完整时返回 nil。
+    func makeDandanplayChannelClient() -> DandanplayChannelClient? {
+        guard dandanplayChannelEnabled, hasDandanplayConfiguration else { return nil }
+        return DandanplayChannelClient(appID: normalizedDandanplayAppID, appSecret: normalizedDandanplayAppSecret)
     }
 
-    /// 当前 App 构建是否已注入弹弹play开放平台凭证。
-    var hasDandanplayConfiguration: Bool { BuiltInDandanplayClient.configured() != nil }
+    /// 当前设备是否已填写完整的弹弹play开放平台凭据。
+    var hasDandanplayConfiguration: Bool {
+        !normalizedDandanplayAppID.isEmpty && !normalizedDandanplayAppSecret.isEmpty
+    }
+
+    /// 清除用户保存的弹弹play渠道凭据并关闭该渠道。
+    func clearDandanplayConfiguration() {
+        dandanplayChannelEnabled = false
+        dandanplayAppID = ""
+        dandanplayAppSecret = ""
+    }
+
+    /// 返回去除首尾空白的弹弹play AppID。
+    private var normalizedDandanplayAppID: String {
+        dandanplayAppID.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 返回去除首尾空白的弹弹play AppSecret。
+    private var normalizedDandanplayAppSecret: String {
+        dandanplayAppSecret.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     /// 组装供内置来源使用的 B 站 Cookie，请求日志不会输出该值。
     private var bilibiliCookieHeader: String {

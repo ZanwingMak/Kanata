@@ -1759,76 +1759,23 @@ private struct MediaServerChannelView: View {
                     Task { await addCurrentDirectory() }
                 } label: {
                     Label("选择当前内容", systemImage: "rectangle.stack.badge.plus")
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 58)
+                        .padding(.horizontal, 18)
+                        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                .buttonStyle(KanataSecondaryButtonStyle())
+                .kanataDirectoryRowStyle(cornerRadius: 14)
                 .disabled(entries.isEmpty || isLoading)
+                .listRowInsets(mediaServerControlInsets)
+                .listRowBackground(Color.clear)
+                #if !os(tvOS)
+                .listRowSeparator(.hidden)
+                #endif
             }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
             Section(stack.last?.name ?? profile.name) {
                 ForEach(visibleEntries) { entry in
-                    HStack(spacing: 0) {
-                        Button {
-                            Task { await select(entry) }
-                        } label: {
-                            HStack(spacing: 12) {
-                                MediaServerArtworkView(
-                                    url: artworkURL(for: entry),
-                                    headers: MediaSourceProfileStore.playbackHeaders(for: profile),
-                                    fallbackSymbol: symbol(for: entry)
-                                )
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(entry.name)
-                                        .lineLimit(2)
-                                        #if os(tvOS)
-                                        .font(.title3.weight(.semibold))
-                                        #endif
-                                    Text(entry.typeLabel)
-                                        #if os(tvOS)
-                                        .font(.body)
-                                        #else
-                                        .font(.caption)
-                                        #endif
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: entry.isDirectory ? "chevron.right" : "play.fill")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: tvServerRowHeight, alignment: .leading)
-                            .padding(.horizontal, 16)
-                            .contentShape(Rectangle())
-                        }
-                        .kanataTVFocus(cornerRadius: 12)
-                        if entry.isDirectory {
-                            Divider()
-                                .frame(height: tvServerRowHeight - 20)
-                            Button {
-                                Task { await addDirectory(entry) }
-                            } label: {
-                                #if os(tvOS)
-                                Label("加入", systemImage: "plus.circle.fill")
-                                    .font(.headline.weight(.semibold))
-                                    .frame(minWidth: 116, minHeight: tvServerRowHeight)
-                                #else
-                                Image(systemName: "plus.circle.fill")
-                                    .frame(width: 44, height: 44)
-                                #endif
-                            }
-                            .foregroundStyle(KanataTheme.accent)
-                            .kanataTVFocus(cornerRadius: 12)
-                            .accessibilityLabel("把 \(entry.name) 添加为合集")
-                        }
-                    }
-                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(KanataTheme.separator.opacity(0.7), lineWidth: 1)
-                    }
-                    .listRowBackground(Color.clear)
-                    #if !os(tvOS)
-                    .listRowSeparator(.hidden)
-                    #endif
+                    mediaServerEntryRow(entry)
                 }
             }
             if !isLoading && visibleEntries.isEmpty && errorMessage == nil {
@@ -1895,6 +1842,113 @@ private struct MediaServerChannelView: View {
         #endif
     }
 
+    /// 返回频道顶部控件在列表中的统一留白。
+    private var mediaServerControlInsets: EdgeInsets {
+        #if os(tvOS)
+        EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0)
+        #else
+        EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0)
+        #endif
+    }
+
+    /// 返回媒体目录行之间的呼吸空间，避免焦点边框贴住相邻行。
+    private var mediaServerEntryInsets: EdgeInsets {
+        #if os(tvOS)
+        EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 0)
+        #else
+        EdgeInsets(top: 3, leading: 0, bottom: 3, trailing: 0)
+        #endif
+    }
+
+    /// 构建一个媒体服务器目录或视频行，并把浏览与加入操作限制在各自区域。
+    /// - Parameter entry: 当前服务器条目。
+    /// - Returns: 带统一留白和单层边框的列表行。
+    private func mediaServerEntryRow(_ entry: MediaSourceEntry) -> some View {
+        HStack(spacing: 0) {
+            mediaServerBrowseButton(entry)
+            if entry.isDirectory {
+                Divider()
+                    .padding(.vertical, 16)
+                mediaServerAddButton(entry)
+            }
+        }
+        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(KanataTheme.separator.opacity(0.7), lineWidth: 1)
+        }
+        .listRowBackground(Color.clear)
+        #if !os(tvOS)
+        .listRowSeparator(.hidden)
+        #endif
+        .listRowInsets(mediaServerEntryInsets)
+    }
+
+    /// 构建媒体条目的主浏览按钮。
+    /// - Parameter entry: 当前服务器条目。
+    /// - Returns: 显示封面、名称、类型和导航方向的按钮。
+    private func mediaServerBrowseButton(_ entry: MediaSourceEntry) -> some View {
+        Button {
+            Task { await select(entry) }
+        } label: {
+            HStack(spacing: 12) {
+                MediaServerArtworkView(
+                    url: artworkURL(for: entry),
+                    headers: MediaSourceProfileStore.playbackHeaders(for: profile),
+                    fallbackSymbol: symbol(for: entry)
+                )
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.name)
+                        .lineLimit(2)
+                        #if os(tvOS)
+                        .font(.title3.weight(.semibold))
+                        #endif
+                    Text(entry.typeLabel)
+                        #if os(tvOS)
+                        .font(.body)
+                        #else
+                        .font(.caption)
+                        #endif
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: entry.isDirectory ? "chevron.right" : "play.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, minHeight: tvServerRowHeight, alignment: .leading)
+            .padding(.leading, 18)
+            .padding(.trailing, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(MediaServerJoinedButtonStyle(cornerRadius: 11))
+    }
+
+    /// 构建目录右侧独立的加入媒体库按钮。
+    /// - Parameter entry: 当前目录条目。
+    /// - Returns: 不会与主浏览焦点边框重叠的加入按钮。
+    private func mediaServerAddButton(_ entry: MediaSourceEntry) -> some View {
+        Button {
+            Task { await addDirectory(entry) }
+        } label: {
+            #if os(tvOS)
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                Text("加入")
+            }
+            .font(.headline.weight(.semibold))
+            .frame(width: 132)
+            .frame(minHeight: tvServerRowHeight)
+            #else
+            Image(systemName: "plus.circle.fill")
+                .frame(width: 44, height: 44)
+            #endif
+        }
+        .foregroundStyle(KanataTheme.accent)
+        .buttonStyle(MediaServerJoinedButtonStyle(cornerRadius: 11))
+        .accessibilityLabel("把 \(entry.name) 添加为合集")
+    }
+
     /// 展示当前服务器与浏览层级，避免标题、图标和路径挤在列表边缘。
     private var currentLocationCard: some View {
         HStack(spacing: 16) {
@@ -1923,13 +1977,17 @@ private struct MediaServerChannelView: View {
             Spacer(minLength: 12)
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.vertical, 12)
+        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(KanataTheme.separator.opacity(0.7), lineWidth: 1)
+                .strokeBorder(KanataTheme.separator.opacity(0.55), lineWidth: 1)
         }
+        .listRowInsets(mediaServerControlInsets)
         .listRowBackground(Color.clear)
+        #if !os(tvOS)
+        .listRowSeparator(.hidden)
+        #endif
     }
 
     /// 返回不重复服务器名称的当前位置说明。
@@ -2168,6 +2226,64 @@ private struct MediaServerChannelView: View {
             return try await SynologyFileStationClient().items(profile: profile, parentPath: key)
         }
         return try await mediaBrowserClient.items(profile: profile, parentID: key)
+    }
+}
+
+/// 媒体服务器组合行的内嵌按钮样式，让主操作和“加入”共享底板且焦点互不挤压。
+private struct MediaServerJoinedButtonStyle: ButtonStyle {
+    let cornerRadius: CGFloat
+    #if os(tvOS)
+    @Environment(\.isFocused) private var isFocused
+    #endif
+
+    /// 绘制向内收的焦点背景与边框，保持组合行外框和尺寸稳定。
+    /// - Parameter configuration: SwiftUI 按钮状态。
+    /// - Returns: 不缩放、不越过相邻操作区域的按钮视图。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(focusBackground)
+                    .padding(3)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(focusBorder, lineWidth: focusBorderWidth)
+                    .padding(3)
+            }
+            .contentShape(Rectangle())
+            #if os(tvOS)
+            .focusEffectDisabled()
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.16 : 0), radius: 10)
+            #endif
+            .opacity(configuration.isPressed ? 0.72 : 1)
+    }
+
+    /// 返回当前焦点对应的内嵌背景色。
+    private var focusBackground: Color {
+        #if os(tvOS)
+        isFocused ? KanataTheme.accent.opacity(0.13) : .clear
+        #else
+        .clear
+        #endif
+    }
+
+    /// 返回当前焦点对应的内嵌边框色。
+    private var focusBorder: Color {
+        #if os(tvOS)
+        isFocused ? KanataTheme.accent.opacity(0.95) : .clear
+        #else
+        .clear
+        #endif
+    }
+
+    /// 返回当前焦点对应的内嵌边框宽度。
+    private var focusBorderWidth: CGFloat {
+        #if os(tvOS)
+        isFocused ? 2 : 0
+        #else
+        0
+        #endif
     }
 }
 
