@@ -129,12 +129,10 @@ private struct PlayerControlButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.72 : 1)
             #if os(tvOS)
             .focusEffectDisabled()
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(isFocused ? KanataTheme.accent : Color.clear, lineWidth: 3)
-            }
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.34 : 0), radius: 14)
-            .scaleEffect(isFocused ? 1.045 : 1)
+            .foregroundStyle(isFocused ? KanataTheme.accent : Color.white)
+            .shadow(color: .black.opacity(0.82), radius: 4, y: 2)
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.72 : 0), radius: 12)
+            .scaleEffect(isFocused ? 1.12 : 1)
             .animation(.easeOut(duration: 0.14), value: isFocused)
             #else
             .scaleEffect(1)
@@ -144,15 +142,110 @@ private struct PlayerControlButtonStyle: ButtonStyle {
 }
 
 #if os(tvOS)
+/// 把 Siri Remote 触控区的连续平移手势转发给 SwiftUI 时间轴。
+private struct TVRemotePanGestureView: UIViewRepresentable {
+    let isEnabled: Bool
+    let onChanged: (CGFloat) -> Void
+    let onEnded: (CGFloat) -> Void
+
+    /// 创建负责接收 tvOS 间接触控事件的协调器。
+    /// - Returns: 保存最新回调并处理平移状态的协调器。
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    /// 创建透明手势承载视图并注册遥控器平移识别器。
+    /// - Parameter context: SwiftUI 表示层上下文。
+    /// - Returns: 不参与绘制、只接收触控区手势的视图。
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        let recognizer = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePan(_:))
+        )
+        recognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+        recognizer.allowedPressTypes = []
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = context.coordinator
+        view.addGestureRecognizer(recognizer)
+        context.coordinator.recognizer = recognizer
+        return view
+    }
+
+    /// 同步暂停状态和最新 SwiftUI 回调。
+    /// - Parameters:
+    ///   - uiView: 当前透明手势视图。
+    ///   - context: SwiftUI 表示层上下文。
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.parent = self
+        context.coordinator.recognizer?.isEnabled = isEnabled
+    }
+
+    /// 管理遥控器连续平移识别与滑动速度投影。
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var parent: TVRemotePanGestureView
+        weak var recognizer: UIPanGestureRecognizer?
+
+        /// 保存首次创建时的 SwiftUI 表示层参数。
+        /// - Parameter parent: 当前手势视图配置。
+        init(parent: TVRemotePanGestureView) {
+            self.parent = parent
+        }
+
+        /// 连续转发横向位移，并在松手时加入轻量速度投影。
+        /// - Parameter recognizer: 当前遥控器平移识别器。
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            let translation = recognizer.translation(in: recognizer.view).x
+            switch recognizer.state {
+            case .began, .changed:
+                parent.onChanged(translation)
+            case .ended:
+                let velocity = recognizer.velocity(in: recognizer.view).x
+                parent.onEnded(translation + velocity * 0.12)
+            case .cancelled, .failed:
+                parent.onEnded(translation)
+            default:
+                break
+            }
+        }
+
+        /// 仅接管暂停状态下的横向滑动，纵向手势继续交给焦点系统。
+        /// - Parameter gestureRecognizer: 即将开始识别的平移手势。
+        /// - Returns: 横向速度占优且当前允许拖动时返回 true。
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard parent.isEnabled,
+                  let recognizer = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            let velocity = recognizer.velocity(in: recognizer.view)
+            return abs(velocity.x) > abs(velocity.y)
+        }
+
+        /// 允许遥控器平移与 SwiftUI 的确认点击共存。
+        /// - Parameters:
+        ///   - gestureRecognizer: 当前平移识别器。
+        ///   - otherGestureRecognizer: 同一视图层级中的其他识别器。
+        /// - Returns: 始终允许并行识别。
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+    }
+}
+
 /// Apple TV 专用进度控件；获得焦点后可用遥控器左右键跳转。
 private struct TVSeekBar: View {
     let value: Double
     let duration: Double
+    let isPlaying: Bool
+    let onScrubChanged: (Double) -> Void
     let onSeek: (Double) -> Void
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
     let onTogglePlayback: () -> Void
     @Environment(\.isFocused) private var isFocused
+    @State private var scrubStartValue: Double?
 
     var body: some View {
         GeometryReader { proxy in
@@ -171,6 +264,13 @@ private struct TVSeekBar: View {
             }
             .frame(height: isFocused ? 14 : 8)
             .frame(maxHeight: .infinity, alignment: .center)
+            .overlay {
+                TVRemotePanGestureView(
+                    isEnabled: isFocused && !isPlaying,
+                    onChanged: { updatePausedScrub(translation: $0, width: width) },
+                    onEnded: { finishPausedScrub(translation: $0, width: width) }
+                )
+            }
         }
         .frame(height: 38)
         .contentShape(Rectangle())
@@ -192,6 +292,41 @@ private struct TVSeekBar: View {
     private var progress: CGFloat {
         guard duration.isFinite, duration > 0 else { return 0 }
         return CGFloat(min(max(value / duration, 0), 1))
+    }
+
+    /// 暂停时根据遥控器横向滑动持续更新进度预览。
+    /// - Parameters:
+    ///   - translation: 当前累计水平位移。
+    ///   - width: 时间轴可用宽度。
+    private func updatePausedScrub(translation: CGFloat, width: CGFloat) {
+        guard isFocused, !isPlaying else { return }
+        let start = scrubStartValue ?? value
+        if scrubStartValue == nil { scrubStartValue = start }
+        onScrubChanged(scrubTarget(from: start, translation: translation, width: width))
+    }
+
+    /// 遥控器滑动结束后提交带速度投影的目标进度。
+    /// - Parameters:
+    ///   - translation: 已包含松手速度投影的水平位移。
+    ///   - width: 时间轴可用宽度。
+    private func finishPausedScrub(translation: CGFloat, width: CGFloat) {
+        guard let start = scrubStartValue, isFocused, !isPlaying else {
+            scrubStartValue = nil
+            return
+        }
+        scrubStartValue = nil
+        onSeek(scrubTarget(from: start, translation: translation, width: width))
+    }
+
+    /// 按时间轴宽度和滑动距离计算加速后的目标时间。
+    /// - Parameters:
+    ///   - start: 本次滑动开始时的播放时间。
+    ///   - translation: 遥控器触控区的水平位移。
+    ///   - width: 时间轴可用宽度。
+    /// - Returns: 限制在媒体时长内的目标时间。
+    private func scrubTarget(from start: Double, translation: CGFloat, width: CGFloat) -> Double {
+        let acceleratedProgress = Double(translation / max(width, 1)) * 1.8
+        return min(max(start + duration * acceleratedProgress, 0), duration)
     }
 
     /// 处理遥控器方向键，短视频每次十秒，长视频每次三十秒。
@@ -654,6 +789,12 @@ struct PlayerScreen: View {
         } else {
             Color.clear
                 .contentShape(Rectangle())
+                #if os(tvOS)
+                .onTapGesture(perform: handleTVBackgroundConfirm)
+                .focusable(!shouldShowPlayerControls && !isPlaybackFailed)
+                .focused($tvFocusedControl, equals: .background)
+                .onMoveCommand(perform: handleTVRemoteMove)
+                #else
                 .onTapGesture(count: 2) {
                     togglePlayback()
                     showOSD(isPlaying ? "播放" : "暂停")
@@ -661,13 +802,7 @@ struct PlayerScreen: View {
                 .onTapGesture {
                     setControlsVisible(!isShowingControls)
                 }
-                #if os(iOS)
                 .gesture(playerDragGesture)
-                #endif
-                #if os(tvOS)
-                .focusable(!shouldShowPlayerControls && !isPlaybackFailed)
-                .focused($tvFocusedControl, equals: .background)
-                .onMoveCommand(perform: handleTVRemoteMove)
                 #endif
         }
     }
@@ -883,6 +1018,13 @@ struct PlayerScreen: View {
                     TVSeekBar(
                         value: currentTime,
                         duration: max(viewModel.duration, 1),
+                        isPlaying: isPlaying,
+                        onScrubChanged: { target in
+                            isSeeking = true
+                            pendingSeekTarget = nil
+                            controlsTask?.cancel()
+                            currentTime = target
+                        },
                         onSeek: { target in
                             currentTime = target
                             commitSeek(to: target)
@@ -1102,16 +1244,18 @@ struct PlayerScreen: View {
         #if os(tvOS)
         let regularSize: CGFloat = 68
         let primarySize: CGFloat = 82
+        return Image(systemName: name)
+            .font(prominent ? .title.weight(.semibold) : .title2.weight(.semibold))
+            .frame(
+                width: prominent ? primarySize : regularSize,
+                height: prominent ? primarySize : regularSize
+            )
+            .contentShape(RoundedRectangle(cornerRadius: prominent ? 22 : 17, style: .continuous))
         #else
         let regularSize: CGFloat = compact ? 38 : 44
         let primarySize: CGFloat = compact ? 46 : 52
-        #endif
         return Image(systemName: name)
-            #if os(tvOS)
-            .font(prominent ? .title.weight(.semibold) : .title2.weight(.semibold))
-            #else
             .font(prominent ? .title2.weight(.semibold) : .body.weight(.semibold))
-            #endif
             .frame(
                 width: prominent ? primarySize : regularSize,
                 height: prominent ? primarySize : regularSize
@@ -1125,20 +1269,25 @@ struct PlayerScreen: View {
                     .strokeBorder(.white.opacity(prominent ? 0.22 : 0.10), lineWidth: 1)
             }
             .contentShape(RoundedRectangle(cornerRadius: prominent ? 22 : 17, style: .continuous))
-    }
-
-    /// 返回播放按钮与普通工具按钮的默认背景；电视播放键保持无底色。
-    /// - Parameter prominent: 是否为中央播放或暂停按钮。
-    /// - Returns: 当前平台对应的按钮背景色。
-    private func playerControlBackground(prominent: Bool) -> Color {
-        #if os(tvOS)
-        prominent ? .clear : .black.opacity(0.42)
-        #else
-        prominent ? .white.opacity(0.23) : .black.opacity(0.42)
         #endif
     }
 
+    /// 返回 iPhone 与 iPad 播放按钮的默认背景。
+    /// - Parameter prominent: 是否为中央播放或暂停按钮。
+    /// - Returns: 播放主按钮或普通工具按钮的背景色。
+    private func playerControlBackground(prominent: Bool) -> Color {
+        prominent ? .white.opacity(0.23) : .black.opacity(0.42)
+    }
+
     #if os(tvOS)
+    /// 控件隐藏时响应遥控器中间确认键，切换播放状态并显示控制层。
+    private func handleTVBackgroundConfirm() {
+        guard !shouldShowPlayerControls, !isPlaybackFailed else { return }
+        togglePlayback()
+        setControlsVisible(true)
+        showOSD(isPlaying ? "播放" : "暂停")
+    }
+
     /// 控制层隐藏时只负责唤出控件，后续方向事件交给 tvOS 焦点引擎。
     /// - Parameter direction: Siri Remote 当前移动方向。
     private func handleTVRemoteMove(_ direction: MoveCommandDirection) {
