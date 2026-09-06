@@ -2875,6 +2875,7 @@ struct PlaybackOptionsPanel: View {
                     LabeledContent("弹幕", value: viewModel.danmakuStats.isEmpty ? "尚未加载" : viewModel.danmakuStats)
                 }
             }
+            .kanataFormBackground()
             .navigationTitle("播放设置")
             .kanataInlineNavigationTitle()
             .toolbar {
