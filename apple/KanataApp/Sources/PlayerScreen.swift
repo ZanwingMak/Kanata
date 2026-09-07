@@ -1017,6 +1017,17 @@ struct PlayerScreen: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                #if os(iOS)
+                if settings.isFullFeatureAccessEnabled {
+                    Button {
+                        viewModel.isShowingCandidates = true
+                    } label: {
+                        controlSymbol("text.magnifyingglass", prominent: false)
+                    }
+                    .buttonStyle(PlayerControlButtonStyle())
+                    .accessibilityLabel("选择弹幕来源")
+                }
+                #endif
                 Button {
                     isShowingPlaybackPanel = true
                 } label: {
@@ -1245,17 +1256,18 @@ struct PlayerScreen: View {
                     .accessibilityLabel(isLandscapeFullscreen ? "退出横屏全屏" : "横屏全屏")
                     #endif
                     if showAllActions {
-                        Button {
-                            viewModel.isShowingCandidates = true
-                        } label: {
-                            controlSymbol("text.magnifyingglass", prominent: false, compact: compact)
-                        }
-                        .buttonStyle(PlayerControlButtonStyle())
                         #if os(tvOS)
-                        .focused($tvFocusedControl, equals: .manualMatch)
-                        #endif
-                        .accessibilityLabel("手动匹配弹幕")
-                        #if os(iOS)
+                        if settings.isFullFeatureAccessEnabled {
+                            Button {
+                                viewModel.isShowingCandidates = true
+                            } label: {
+                                controlSymbol("text.magnifyingglass", prominent: false, compact: compact)
+                            }
+                            .buttonStyle(PlayerControlButtonStyle())
+                            .focused($tvFocusedControl, equals: .manualMatch)
+                            .accessibilityLabel("选择弹幕来源")
+                        }
+                        #else
                         Button {
                             isInteractionLocked = true
                             setControlsVisible(true)
@@ -2710,6 +2722,7 @@ struct CandidatePicker: View {
 /// 播放器二级控制面板，集中放置低频但重要的画面、音轨、字幕与媒体信息。
 struct PlaybackOptionsPanel: View {
     let viewModel: PlayerViewModel
+    @Environment(AppSettings.self) private var settings
     @Binding var scalingMode: PlayerScalingMode
     @Binding var queueMode: PlaybackQueueMode
     @Binding var sleepMode: SleepTimerMode
@@ -2899,15 +2912,17 @@ struct PlaybackOptionsPanel: View {
                 }
                 #endif
 
-                Section("弹幕来源") {
-                    Button(action: onMatchDanmaku) {
-                        Label("搜索或重新匹配弹幕", systemImage: "text.magnifyingglass")
+                if settings.isFullFeatureAccessEnabled {
+                    Section("弹幕来源") {
+                        Button(action: onMatchDanmaku) {
+                            Label("搜索或重新匹配弹幕", systemImage: "text.magnifyingglass")
+                        }
+                        #if !os(tvOS)
+                        Button(action: onImportDanmaku) {
+                            Label("导入本地弹幕文件", systemImage: "doc.badge.plus")
+                        }
+                        #endif
                     }
-                    #if !os(tvOS)
-                    Button(action: onImportDanmaku) {
-                        Label("导入本地弹幕文件", systemImage: "doc.badge.plus")
-                    }
-                    #endif
                 }
 
                 Section("媒体信息") {

@@ -386,9 +386,18 @@ struct MediaSourceSheet: View {
 /// 添加普通 HTTP(S) 视频或 HLS 直链。
 private struct DirectMediaSourceView: View {
     let onAdd: (LibraryItem) -> Void
+    @Environment(AppSettings.self) private var settings
     @State private var name = ""
     @State private var urlString = ""
     @State private var errorMessage: String?
+    @State private var pendingUnlockedItem: LibraryItem?
+    @State private var isShowingFeatureAccessNotice = false
+
+    /// 名称或地址中是否包含完整功能触发词。
+    private var containsAccessKeyword: Bool {
+        name.localizedCaseInsensitiveContains("kanata")
+            || urlString.localizedCaseInsensitiveContains("kanata")
+    }
 
     var body: some View {
         Form {
@@ -408,17 +417,41 @@ private struct DirectMediaSourceView: View {
                 Label("加入媒体库", systemImage: "plus.circle.fill")
             }
                 .buttonStyle(KanataPrimaryButtonStyle())
-                .disabled(urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(
+                    urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        && !containsAccessKeyword
+                )
         }
         .kanataFormBackground()
         .navigationTitle("网络直链")
         .kanataInlineNavigationTitle()
+        .alert("功能已解锁", isPresented: $isShowingFeatureAccessNotice) {
+            Button("好") {
+                if let pendingUnlockedItem {
+                    onAdd(pendingUnlockedItem)
+                    self.pendingUnlockedItem = nil
+                }
+            }
+        } message: {
+            Text("完整功能与弹幕功能已开启。")
+        }
     }
 
     /// 校验直链并创建媒体库条目。
     private func addVideo() {
         let value = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased()) else {
+        let url = URL(string: value).flatMap { candidate in
+            ["http", "https"].contains(candidate.scheme?.lowercased()) ? candidate : nil
+        }
+        if containsAccessKeyword, settings.enableFullFeatureAccess() {
+            pendingUnlockedItem = url.map {
+                LibraryItem(remoteURL: $0, name: name, sourceName: "网络直链")
+            }
+            errorMessage = nil
+            isShowingFeatureAccessNotice = true
+            return
+        }
+        guard let url else {
             errorMessage = "请输入有效的 HTTP 或 HTTPS 地址"
             return
         }

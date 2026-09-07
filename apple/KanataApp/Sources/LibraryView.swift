@@ -245,10 +245,20 @@ struct LibraryView: View {
                         Button("导入本地视频") { isImporting = true }
                             .buttonStyle(KanataPrimaryButtonStyle())
                             .disabled(isProcessingImport)
+                        #else
+                        Button("设置") { isShowingSettings = true }
+                            .buttonStyle(KanataSecondaryButtonStyle())
+                            .focused($tvFocusedControl, equals: .settings)
                         #endif
                         Button("添加媒体源") { isAddingMediaSource = true }
                             .buttonStyle(KanataSecondaryButtonStyle())
+                            #if os(tvOS)
+                            .focused($tvFocusedControl, equals: .add)
+                            #endif
                     }
+                    #if os(tvOS)
+                    .defaultFocus($tvFocusedControl, .add)
+                    #endif
                 } else {
                     ScrollViewReader { proxy in
                         ScrollView {

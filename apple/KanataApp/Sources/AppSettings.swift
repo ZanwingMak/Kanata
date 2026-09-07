@@ -7,6 +7,14 @@ import Security
 /// 应用级设置。使用 UserDefaults 持久化，非敏感播放偏好可通过 CloudSyncStore 同步。
 @Observable
 final class AppSettings {
+    /// 当前安装是否已开放完整的在线弹幕与账号相关入口。
+    private(set) var isFullFeatureAccessEnabled: Bool {
+        didSet { defaults.set(isFullFeatureAccessEnabled, forKey: Keys.fullFeatureAccessEnabled) }
+    }
+
+    /// 是否需要展示首次安装的免费使用提示。
+    private(set) var shouldShowFreeAppNotice: Bool
+
     /// 网关地址，例如 http://192.168.1.7:9321
     var gatewayURLString: String {
         didSet { defaults.set(gatewayURLString, forKey: Keys.gatewayURL) }
@@ -114,6 +122,8 @@ final class AppSettings {
         static let legacyBuiltInDandanplayEnabled = "source.dandanplay.builtInEnabled"
         static let accentTheme = KanataTheme.accentStorageKey
         static let appearance = "appearance.mode"
+        static let fullFeatureAccessEnabled = "app.fullFeatureAccessEnabled"
+        static let freeAppNoticeShown = "app.freeAppNoticeShown"
     }
 
     private enum KeychainAccounts {
@@ -132,6 +142,12 @@ final class AppSettings {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let hasExistingInstallation = defaults.object(forKey: Keys.visualStyleVersion) != nil
+        let fullFeatureAccessEnabled = defaults.object(forKey: Keys.fullFeatureAccessEnabled) as? Bool
+            ?? hasExistingInstallation
+        self.isFullFeatureAccessEnabled = fullFeatureAccessEnabled
+        self.shouldShowFreeAppNotice = !hasExistingInstallation
+            && !defaults.bool(forKey: Keys.freeAppNoticeShown)
         self.gatewayURLString = defaults.string(forKey: Keys.gatewayURL) ?? ""
         let legacyGatewayToken = defaults.string(forKey: Keys.gatewayToken)
         self.gatewayToken = KeychainStore.string(account: KeychainAccounts.gatewayToken)
@@ -143,11 +159,16 @@ final class AppSettings {
         self.bilibiliJct = storedCredential?.biliJct ?? ""
         self.bilibiliUserID = storedCredential?.userID ?? ""
         self.bilibiliBuvid3 = storedCredential?.buvid3 ?? ""
-        self.builtInBilibiliEnabled = defaults.object(forKey: Keys.builtInBilibiliEnabled) as? Bool ?? true
-        self.builtInPublicSourcesEnabled = defaults.object(forKey: Keys.builtInPublicSourcesEnabled) as? Bool ?? true
-        self.builtInIqiyiEnabled = defaults.object(forKey: Keys.builtInIqiyiEnabled) as? Bool ?? true
-        self.builtInQQEnabled = defaults.object(forKey: Keys.builtInQQEnabled) as? Bool ?? true
-        self.builtInBahamutEnabled = defaults.object(forKey: Keys.builtInBahamutEnabled) as? Bool ?? true
+        self.builtInBilibiliEnabled = fullFeatureAccessEnabled
+            && (defaults.object(forKey: Keys.builtInBilibiliEnabled) as? Bool ?? true)
+        self.builtInPublicSourcesEnabled = fullFeatureAccessEnabled
+            && (defaults.object(forKey: Keys.builtInPublicSourcesEnabled) as? Bool ?? true)
+        self.builtInIqiyiEnabled = fullFeatureAccessEnabled
+            && (defaults.object(forKey: Keys.builtInIqiyiEnabled) as? Bool ?? true)
+        self.builtInQQEnabled = fullFeatureAccessEnabled
+            && (defaults.object(forKey: Keys.builtInQQEnabled) as? Bool ?? true)
+        self.builtInBahamutEnabled = fullFeatureAccessEnabled
+            && (defaults.object(forKey: Keys.builtInBahamutEnabled) as? Bool ?? true)
         self.dandanplayAppID = KeychainStore.string(account: KeychainAccounts.dandanplayAppID) ?? ""
         self.dandanplayAppSecret = KeychainStore.string(account: KeychainAccounts.dandanplayAppSecret) ?? ""
         self.dandanplayChannelEnabled = defaults.object(forKey: Keys.dandanplayChannelEnabled) as? Bool ?? false
@@ -171,6 +192,7 @@ final class AppSettings {
            let parsed = DanmakuDisplayArea(rawValue: area) { config.displayArea = parsed }
         if let duration = defaults.object(forKey: Keys.scrollDuration) as? Double { config.scrollDuration = duration }
         if let enabled = defaults.object(forKey: Keys.enabled) as? Bool { config.enabled = enabled }
+        if !fullFeatureAccessEnabled { config.enabled = false }
         if let bold = defaults.object(forKey: Keys.bold) as? Bool { config.bold = bold }
         if let stroke = defaults.object(forKey: Keys.strokeWidth) as? Double { config.strokeWidth = stroke }
         if let spacing = defaults.object(forKey: Keys.lineSpacing) as? Double { config.lineSpacing = spacing }
@@ -221,6 +243,7 @@ final class AppSettings {
     /// - Parameter config: 云端通用弹幕配置。
     func applyCloudDanmakuConfig(_ config: DanmakuRenderConfig) {
         var value = config
+        if !isFullFeatureAccessEnabled { value.enabled = false }
         #if os(tvOS)
         value.fontScale = danmakuConfig.fontScale
         #endif
@@ -260,14 +283,14 @@ final class AppSettings {
     /// 按当前凭证创建无需自建网关的内置 B 站客户端。
     /// - Returns: 用户关闭内置来源时返回 nil。
     func makeBuiltInBilibiliClient() -> BuiltInBilibiliClient? {
-        guard builtInBilibiliEnabled else { return nil }
+        guard isFullFeatureAccessEnabled, builtInBilibiliEnabled else { return nil }
         return BuiltInBilibiliClient(cookie: bilibiliCookieHeader)
     }
 
     /// 创建无需网关的爱奇艺、腾讯视频与巴哈姆特弹幕客户端。
     /// - Returns: 用户关闭内置公共来源时返回 nil。
     func makeBuiltInPublicDanmakuClient() -> BuiltInPublicDanmakuClient? {
-        guard builtInPublicSourcesEnabled else { return nil }
+        guard isFullFeatureAccessEnabled, builtInPublicSourcesEnabled else { return nil }
         var enabledSources = Set<DanmakuSourceId>()
         if builtInIqiyiEnabled { enabledSources.insert(.iqiyi) }
         if builtInQQEnabled { enabledSources.insert(.qq) }
@@ -320,6 +343,28 @@ final class AppSettings {
 
     /// 当前设备是否已保存 B 站会话凭证。
     var hasBilibiliCredential: Bool { !bilibiliSESSDATA.isEmpty }
+
+    /// 开放完整功能并恢复在线弹幕来源的默认开关。
+    /// - Returns: 本次是否从未开放状态切换为已开放。
+    @discardableResult
+    func enableFullFeatureAccess() -> Bool {
+        guard !isFullFeatureAccessEnabled else { return false }
+        isFullFeatureAccessEnabled = true
+        builtInBilibiliEnabled = true
+        builtInPublicSourcesEnabled = true
+        builtInIqiyiEnabled = true
+        builtInQQEnabled = true
+        builtInBahamutEnabled = true
+        danmakuConfig.enabled = true
+        return true
+    }
+
+    /// 记录首次安装提示已展示，之后不再重复弹出。
+    func markFreeAppNoticeShown() {
+        guard shouldShowFreeAppNotice else { return }
+        shouldShowFreeAppNotice = false
+        defaults.set(true, forKey: Keys.freeAppNoticeShown)
+    }
 
     /// 从完整 Cookie 文本提取并保存 B 站必要字段。
     @discardableResult

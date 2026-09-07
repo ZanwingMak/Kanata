@@ -25,6 +25,8 @@ struct SettingsView: View {
     @State private var dandanplayChannelResult: String?
     @State private var isTestingDandanplayChannel = false
     @State private var isShowingBilibiliQRCode = false
+    @State private var versionTapCount = 0
+    @State private var isShowingFeatureAccessNotice = false
     #if os(iOS)
     @State private var selectedIconName: String?
     @State private var iconResult: String?
@@ -137,49 +139,51 @@ struct SettingsView: View {
                     #endif
                 }
 
-                Section("开箱即用弹幕") {
-                    Toggle(isOn: $settings.builtInBilibiliEnabled) {
-                        settingsLabel("哔哩哔哩", symbol: "play.rectangle.on.rectangle")
-                    }
-                    Toggle(isOn: $settings.builtInPublicSourcesEnabled) {
-                        settingsLabel("公共平台来源", symbol: "network")
-                    }
-                    if settings.builtInPublicSourcesEnabled {
-                        Toggle(isOn: $settings.builtInIqiyiEnabled) {
-                            settingsLabel("爱奇艺", symbol: "i.square")
+                if settings.isFullFeatureAccessEnabled {
+                    Section("开箱即用弹幕") {
+                        Toggle(isOn: $settings.builtInBilibiliEnabled) {
+                            settingsLabel("哔哩哔哩", symbol: "play.rectangle.on.rectangle")
                         }
-                        Toggle(isOn: $settings.builtInQQEnabled) {
-                            settingsLabel("腾讯视频", symbol: "play.square")
+                        Toggle(isOn: $settings.builtInPublicSourcesEnabled) {
+                            settingsLabel("公共平台来源", symbol: "network")
                         }
-                        Toggle(isOn: $settings.builtInBahamutEnabled) {
-                            settingsLabel("巴哈姆特动画疯", symbol: "sparkles.tv")
+                        if settings.builtInPublicSourcesEnabled {
+                            Toggle(isOn: $settings.builtInIqiyiEnabled) {
+                                settingsLabel("爱奇艺", symbol: "i.square")
+                            }
+                            Toggle(isOn: $settings.builtInQQEnabled) {
+                                settingsLabel("腾讯视频", symbol: "play.square")
+                            }
+                            Toggle(isOn: $settings.builtInBahamutEnabled) {
+                                settingsLabel("巴哈姆特动画疯", symbol: "sparkles.tv")
+                            }
                         }
-                    }
-                    Text("无需服务器即可跨平台搜索作品、逐集选择并加载弹幕；网关不可用时仍可正常使用。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button {
-                        Task { await testBuiltInSource() }
-                    } label: {
-                        HStack {
-                            Label("测试全部内置来源", systemImage: "checkmark.circle")
-                            if isTestingBuiltInSource { Spacer(); ProgressView() }
+                        Text("无需服务器即可跨平台搜索作品、逐集选择并加载弹幕；网关不可用时仍可正常使用。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            Task { await testBuiltInSource() }
+                        } label: {
+                            HStack {
+                                Label("测试全部内置来源", systemImage: "checkmark.circle")
+                                if isTestingBuiltInSource { Spacer(); ProgressView() }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(KanataSecondaryButtonStyle())
-                    .disabled(
-                        (
-                            !settings.builtInBilibiliEnabled
-                            && (!settings.builtInPublicSourcesEnabled
-                                || (!settings.builtInIqiyiEnabled
-                                    && !settings.builtInQQEnabled
-                                    && !settings.builtInBahamutEnabled))
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        .disabled(
+                            (
+                                !settings.builtInBilibiliEnabled
+                                && (!settings.builtInPublicSourcesEnabled
+                                    || (!settings.builtInIqiyiEnabled
+                                        && !settings.builtInQQEnabled
+                                        && !settings.builtInBahamutEnabled))
+                            )
+                            || isTestingBuiltInSource
                         )
-                        || isTestingBuiltInSource
-                    )
-                    if let builtInSourceResult {
-                        Text(builtInSourceResult).font(.caption).foregroundStyle(.secondary)
+                        if let builtInSourceResult {
+                            Text(builtInSourceResult).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -258,7 +262,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if !sources.isEmpty {
+                if settings.isFullFeatureAccessEnabled, !sources.isEmpty {
                     Section("弹幕源") {
                         ForEach(sources) { source in
                             sourceStatusRow(source)
@@ -266,52 +270,54 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("B 站登录") {
-                    if settings.hasBilibiliCredential {
-                        Label("已在 Keychain 保存登录凭证", systemImage: "checkmark.shield")
-                            .foregroundStyle(.green)
-                    }
-                    Button {
-                        isShowingBilibiliQRCode = true
-                    } label: {
-                        KanataRowLabel(
-                            title: settings.hasBilibiliCredential ? "重新登录 B 站" : "扫码或浏览器登录",
-                            detail: "无需复制 Cookie，登录后自动返回确认",
-                            symbol: "qrcode.viewfinder"
-                        )
-                    }
-                    .buttonStyle(KanataSecondaryButtonStyle())
-                    #if os(tvOS)
-                    SecureField("Cookie 备用登录", text: $bilibiliCookieInput)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    #else
-                    DisclosureGroup("Cookie 备用登录") {
-                        SecureField("粘贴完整 Cookie", text: $bilibiliCookieInput)
+                if settings.isFullFeatureAccessEnabled {
+                    Section("B 站登录") {
+                        if settings.hasBilibiliCredential {
+                            Label("已在 Keychain 保存登录凭证", systemImage: "checkmark.shield")
+                                .foregroundStyle(.green)
+                        }
+                        Button {
+                            isShowingBilibiliQRCode = true
+                        } label: {
+                            KanataRowLabel(
+                                title: settings.hasBilibiliCredential ? "重新登录 B 站" : "扫码或浏览器登录",
+                                detail: "无需复制 Cookie，登录后自动返回确认",
+                                symbol: "qrcode.viewfinder"
+                            )
+                        }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        #if os(tvOS)
+                        SecureField("Cookie 备用登录", text: $bilibiliCookieInput)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                    }
-                    #endif
-                    Button {
-                        Task { await verifyBilibiliCredential() }
-                    } label: {
-                        HStack {
-                            Text(bilibiliCookieInput.isEmpty ? "验证已保存凭证" : "导入并验证")
-                            if isVerifyingBilibili { Spacer(); ProgressView() }
+                        #else
+                        DisclosureGroup("Cookie 备用登录") {
+                            SecureField("粘贴完整 Cookie", text: $bilibiliCookieInput)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
                         }
-                    }
-                    .buttonStyle(KanataSecondaryButtonStyle())
-                    .disabled(
-                        isVerifyingBilibili
-                        || (bilibiliCookieInput.isEmpty && !settings.hasBilibiliCredential)
-                    )
-                    if settings.hasBilibiliCredential {
-                        Button("退出 B 站登录", role: .destructive) {
-                            clearTarget = .bilibiliCredential
+                        #endif
+                        Button {
+                            Task { await verifyBilibiliCredential() }
+                        } label: {
+                            HStack {
+                                Text(bilibiliCookieInput.isEmpty ? "验证已保存凭证" : "导入并验证")
+                                if isVerifyingBilibili { Spacer(); ProgressView() }
+                            }
                         }
-                    }
-                    if let bilibiliResult {
-                        Text(bilibiliResult).font(.caption).foregroundStyle(.secondary)
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        .disabled(
+                            isVerifyingBilibili
+                            || (bilibiliCookieInput.isEmpty && !settings.hasBilibiliCredential)
+                        )
+                        if settings.hasBilibiliCredential {
+                            Button("退出 B 站登录", role: .destructive) {
+                                clearTarget = .bilibiliCredential
+                            }
+                        }
+                        if let bilibiliResult {
+                            Text(bilibiliResult).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -348,6 +354,17 @@ struct SettingsView: View {
                 }
 
                 storageSection
+
+                Section("关于 Kanata") {
+                    Button(action: registerVersionTap) {
+                        LabeledContent("版本", value: appVersionLabel)
+                    }
+                    .foregroundStyle(.primary)
+                    LabeledContent("许可", value: "请参阅开源仓库")
+                    Link(destination: openSourceURL) {
+                        LabeledContent("开源地址", value: "github.com/ZanwingMak/Kanata")
+                    }
+                }
 
                 Section {
                     Text("Kanata 不提供任何影视内容，也不提供弹弹play开放平台凭据。用户配置弹弹play渠道后，数据来源会标注为“弹弹play开放弹幕网络”；其他弹幕版权归对应平台与发送者所有，仅供个人观看时参考。")
@@ -401,6 +418,11 @@ struct SettingsView: View {
             } message: {
                 Text(clearConfirmationMessage)
             }
+            .alert("功能已解锁", isPresented: $isShowingFeatureAccessNotice) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text("完整功能与弹幕功能已开启。")
+            }
     }
 
     /// 生成设置行统一的图标与文本标签，保证开关和按钮左缘一致。
@@ -416,6 +438,29 @@ struct SettingsView: View {
                 .frame(width: 24)
                 .foregroundStyle(settings.accentTheme.accent)
         }
+    }
+
+    /// 记录版本号连续点击次数，并在达到要求时开放完整功能。
+    private func registerVersionTap() {
+        guard !settings.isFullFeatureAccessEnabled else { return }
+        versionTapCount += 1
+        guard versionTapCount >= 15 else { return }
+        versionTapCount = 0
+        if settings.enableFullFeatureAccess() {
+            isShowingFeatureAccessNotice = true
+        }
+    }
+
+    /// 返回当前 App 的市场版本与构建号。
+    private var appVersionLabel: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
+        return "\(version) (\(build))"
+    }
+
+    /// 项目公开源代码仓库地址。
+    private var openSourceURL: URL {
+        URL(string: "https://github.com/ZanwingMak/Kanata")!
     }
 
     #if os(iOS)
@@ -507,6 +552,14 @@ struct SettingsView: View {
 
     /// 测试网关连通性并拉取源状态
     private func testConnection() async {
+        if settings.gatewayURLString.localizedCaseInsensitiveContains("kanata") {
+            testResult = "功能已解锁"
+            if settings.enableFullFeatureAccess() {
+                versionTapCount = 0
+                isShowingFeatureAccessNotice = true
+            }
+            return
+        }
         guard let client = settings.makeClient() else {
             testResult = "网关地址格式不正确"
             return
