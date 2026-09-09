@@ -1408,87 +1408,28 @@ private struct WebDAVChannelView: View {
     var body: some View {
         List {
             Section("当前位置") {
-                VStack(alignment: .leading, spacing: 5) {
-                    Label(directoryStack.last?.name ?? profile.name, systemImage: "folder")
-                        #if os(tvOS)
-                        .font(.title2.weight(.semibold))
-                        #else
-                        .font(.headline)
-                        #endif
-                    Text(directoryStack.map(\.name).joined(separator: " / "))
-                        #if os(tvOS)
-                        .font(.body)
-                        #else
-                        .font(.caption)
-                        #endif
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                .padding(.vertical, 8)
+                currentLocationCard
                 Button {
                     addCurrentDirectory()
                 } label: {
                     Label("选择整个当前目录", systemImage: "rectangle.stack.badge.plus")
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 58)
+                        .padding(.horizontal, 18)
+                        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                .buttonStyle(KanataSecondaryButtonStyle())
+                .kanataDirectoryRowStyle(cornerRadius: 14)
                 .disabled(entries.isEmpty || isLoading)
+                .listRowInsets(webDAVControlInsets)
+                .listRowBackground(Color.clear)
+                #if !os(tvOS)
+                .listRowSeparator(.hidden)
+                #endif
             }
             if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.caption) }
             Section("目录内容") {
                 ForEach(entries) { entry in
-                    HStack(spacing: 18) {
-                        Button {
-                            Task { await select(entry) }
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: entry.isDirectory ? "folder.fill" : "play.rectangle")
-                                    .foregroundStyle(entry.isDirectory ? KanataTheme.accent : .secondary)
-                                    .frame(width: 34)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(entry.name)
-                                        .lineLimit(2)
-                                        #if os(tvOS)
-                                        .font(.title3.weight(.semibold))
-                                        #endif
-                                    Text(entry.isDirectory ? "打开文件夹" : "选择单个视频")
-                                        #if os(tvOS)
-                                        .font(.body)
-                                        #else
-                                        .font(.caption)
-                                        #endif
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer(minLength: 4)
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: tvDirectoryRowHeight, alignment: .leading)
-                            .padding(.horizontal, 16)
-                            .contentShape(Rectangle())
-                        }
-                        .kanataDirectoryRowStyle(cornerRadius: 14)
-                        if entry.isDirectory {
-                            Button {
-                                Task { await addDirectory(url: entry.url, title: entry.name) }
-                            } label: {
-                                #if os(tvOS)
-                                Label("加入", systemImage: "rectangle.stack.badge.plus")
-                                    .font(.headline.weight(.semibold))
-                                    .frame(minWidth: 132, minHeight: 64)
-                                #else
-                                Image(systemName: "rectangle.stack.badge.plus")
-                                    .frame(width: 44, height: 44)
-                                #endif
-                            }
-                            .kanataDirectoryRowStyle(cornerRadius: 14)
-                            .accessibilityLabel("把 \(entry.name) 添加为合集")
-                        }
-                    }
-                    .listRowBackground(Color.clear)
-                    #if !os(tvOS)
-                    .listRowSeparator(.hidden)
-                    #endif
+                    webDAVEntryRow(entry)
                 }
             }
             if !isLoading && entries.isEmpty && errorMessage == nil {
@@ -1552,6 +1493,158 @@ private struct WebDAVChannelView: View {
         #else
         52
         #endif
+    }
+
+    /// 返回 WebDAV 顶部控件在列表中的统一留白。
+    private var webDAVControlInsets: EdgeInsets {
+        #if os(tvOS)
+        EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0)
+        #else
+        EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0)
+        #endif
+    }
+
+    /// 返回 WebDAV 目录行之间的呼吸空间。
+    private var webDAVEntryInsets: EdgeInsets {
+        #if os(tvOS)
+        EdgeInsets(top: 5, leading: 0, bottom: 5, trailing: 0)
+        #else
+        EdgeInsets(top: 3, leading: 0, bottom: 3, trailing: 0)
+        #endif
+    }
+
+    /// 展示当前 WebDAV 目录，固定图标占位以避免与标题重叠。
+    private var currentLocationCard: some View {
+        HStack(spacing: 16) {
+            Image(systemName: profile.kind.symbol)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(KanataTheme.accent)
+                .frame(width: 52, height: 52)
+                .background(KanataTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(directoryStack.last?.name ?? profile.name)
+                    #if os(tvOS)
+                    .font(.title2.weight(.semibold))
+                    #else
+                    .font(.headline)
+                    #endif
+                    .lineLimit(1)
+                Text(currentLocationDetail)
+                    #if os(tvOS)
+                    .font(.body)
+                    #else
+                    .font(.caption)
+                    #endif
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 12)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(KanataTheme.separator.opacity(0.55), lineWidth: 1)
+        }
+        .listRowInsets(webDAVControlInsets)
+        .listRowBackground(Color.clear)
+        #if !os(tvOS)
+        .listRowSeparator(.hidden)
+        #endif
+    }
+
+    /// 返回不重复媒体源名称的当前 WebDAV 位置说明。
+    private var currentLocationDetail: String {
+        guard directoryStack.count > 1 else { return "\(profile.kind.title) · 根目录" }
+        return directoryStack.map(\.name).joined(separator: " / ")
+    }
+
+    /// 构建 WebDAV 目录或视频组合行，让浏览与加入共享同一个外框。
+    /// - Parameter entry: 当前 WebDAV 条目。
+    /// - Returns: 带稳定内边距和单层焦点边框的列表行。
+    private func webDAVEntryRow(_ entry: WebDAVEntry) -> some View {
+        HStack(spacing: 0) {
+            webDAVBrowseButton(entry)
+            if entry.isDirectory {
+                Divider()
+                    .padding(.vertical, 14)
+                webDAVAddButton(entry)
+            }
+        }
+        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(KanataTheme.separator.opacity(0.7), lineWidth: 1)
+        }
+        .listRowInsets(webDAVEntryInsets)
+        .listRowBackground(Color.clear)
+        #if !os(tvOS)
+        .listRowSeparator(.hidden)
+        #endif
+    }
+
+    /// 构建 WebDAV 条目的主浏览按钮。
+    /// - Parameter entry: 当前 WebDAV 条目。
+    /// - Returns: 显示名称、类型和导航方向的按钮。
+    private func webDAVBrowseButton(_ entry: WebDAVEntry) -> some View {
+        Button {
+            Task { await select(entry) }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: entry.isDirectory ? "folder.fill" : "play.rectangle")
+                    .foregroundStyle(entry.isDirectory ? KanataTheme.accent : .secondary)
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.name)
+                        .lineLimit(2)
+                        #if os(tvOS)
+                        .font(.title3.weight(.semibold))
+                        #endif
+                    Text(entry.isDirectory ? "打开文件夹" : "选择单个视频")
+                        #if os(tvOS)
+                        .font(.body)
+                        #else
+                        .font(.caption)
+                        #endif
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: entry.isDirectory ? "chevron.right" : "play.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, minHeight: tvDirectoryRowHeight, alignment: .leading)
+            .padding(.leading, 18)
+            .padding(.trailing, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(MediaServerJoinedButtonStyle(cornerRadius: 11))
+    }
+
+    /// 构建 WebDAV 目录右侧的加入合集按钮。
+    /// - Parameter entry: 当前 WebDAV 目录。
+    /// - Returns: 与主浏览区域共享行底板的独立操作按钮。
+    private func webDAVAddButton(_ entry: WebDAVEntry) -> some View {
+        Button {
+            Task { await addDirectory(url: entry.url, title: entry.name) }
+        } label: {
+            #if os(tvOS)
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                Text("加入")
+            }
+            .font(.headline.weight(.semibold))
+            .frame(width: 144)
+            .frame(minHeight: tvDirectoryRowHeight)
+            #else
+            Image(systemName: "plus.circle.fill")
+                .frame(width: 52, height: 52)
+            #endif
+        }
+        .foregroundStyle(KanataTheme.accent)
+        .buttonStyle(MediaServerJoinedButtonStyle(cornerRadius: 11))
+        .accessibilityLabel("把 \(entry.name) 添加为合集")
     }
 
     /// 读取配置中的 WebDAV 起始目录。

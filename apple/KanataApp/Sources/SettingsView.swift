@@ -355,6 +355,18 @@ struct SettingsView: View {
 
                 storageSection
 
+                Section("支持 Kanata") {
+                    NavigationLink {
+                        SponsorshipView()
+                    } label: {
+                        KanataRowLabel(
+                            title: "赞助 / 捐款",
+                            detail: "通过 App Store 自愿支持项目维护",
+                            symbol: "heart.circle"
+                        )
+                    }
+                }
+
                 Section("关于 Kanata") {
                     Button(action: registerVersionTap) {
                         LabeledContent("版本", value: appVersionLabel)

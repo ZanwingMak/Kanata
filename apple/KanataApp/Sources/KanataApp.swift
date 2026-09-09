@@ -4,6 +4,7 @@ import SwiftUI
 struct KanataApp: App {
     @State private var settings = AppSettings()
     @State private var cloudSync = CloudSyncStore.shared
+    @State private var sponsorshipStore = SponsorshipStore.shared
 
     /// 注册用户导入字体，保证直接进入播放器时也能恢复上次字体。
     init() {
@@ -15,6 +16,7 @@ struct KanataApp: App {
             LibraryView()
                 .environment(settings)
                 .environment(cloudSync)
+                .environment(sponsorshipStore)
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(settings.accentTheme.accent)
                 .task { cloudSync.configure(settings: settings) }

@@ -35,8 +35,9 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Sources/Kanata.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconAurora AppIconSunset"
+        PRODUCT_NAME: Kanata
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "28"
+        CURRENT_PROJECT_VERSION: "30"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
@@ -55,6 +56,9 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
+        CFBundleDisplayName: Kanata
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes:
           - audio
@@ -102,7 +106,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Sources/Kanata.entitlements
         PRODUCT_NAME: Kanata
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "28"
+        CURRENT_PROJECT_VERSION: "30"
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "3"
         GENERATE_INFOPLIST_FILE: YES
@@ -116,6 +120,9 @@ targets:
     info:
       path: Sources/Info-tvOS.plist
       properties:
+        CFBundleDisplayName: Kanata
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         TVTopShelfImage:
           TVTopShelfPrimaryImage: Top Shelf Image
