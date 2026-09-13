@@ -40,13 +40,20 @@ enum ExternalSubtitlePreference {
     /// 将候选字幕按设备语言、字幕类型和文件名稳定排序。
     /// - Parameters:
     ///   - resources: 待排序字幕。
+    ///   - videoName: 可选视频文件名；提供后同名字幕优先。
     ///   - preferredLanguages: 系统语言标识，默认使用设备语言顺序。
     /// - Returns: 最适合本机语言的字幕排在首位。
     static func sorted(
         _ resources: [ExternalSubtitleResource],
+        videoName: String? = nil,
         preferredLanguages: [String] = Locale.preferredLanguages
     ) -> [ExternalSubtitleResource] {
         resources.sorted { left, right in
+            if let videoName {
+                let leftMatch = matches(subtitleName: left.name, videoName: videoName) ? 0 : 1
+                let rightMatch = matches(subtitleName: right.name, videoName: videoName) ? 0 : 1
+                if leftMatch != rightMatch { return leftMatch < rightMatch }
+            }
             let leftRank = languageRank(fileName: left.name, preferredLanguages: preferredLanguages)
             let rightRank = languageRank(fileName: right.name, preferredLanguages: preferredLanguages)
             if leftRank != rightRank { return leftRank < rightRank }
@@ -79,6 +86,41 @@ enum ExternalSubtitlePreference {
             }
         }
         return preferredLanguages.count + fallbacks.count + 1
+    }
+
+    /// 将系统首选语言转换为 OpenSubtitles 使用的语言代码，并补充英语兜底。
+    /// - Parameter preferredLanguages: 系统首选语言顺序。
+    /// - Returns: 去重后的两位或中文地区语言代码，最多保留四项。
+    static func preferredOnlineLanguageCodes(
+        preferredLanguages: [String] = Locale.preferredLanguages
+    ) -> [String] {
+        var values: [String] = []
+        for identifier in preferredLanguages {
+            let language = identifier.lowercased().replacingOccurrences(of: "_", with: "-")
+            let code: String
+            if language.hasPrefix("zh-hans") || language.hasPrefix("zh-cn") || language.hasPrefix("zh-sg") {
+                code = "zh-cn"
+            } else if language.hasPrefix("zh-hant") || language.hasPrefix("zh-tw") || language.hasPrefix("zh-hk") {
+                code = "zh-tw"
+            } else {
+                code = language.split(separator: "-").first.map(String.init) ?? language
+            }
+            if !code.isEmpty, !values.contains(code) { values.append(code) }
+            if values.count == 3 { break }
+        }
+        if !values.contains("en") { values.append("en") }
+        return Array(values.prefix(4))
+    }
+
+    /// 返回语言代码的本地化显示名称。
+    /// - Parameter identifier: OpenSubtitles 或 BCP-47 语言代码。
+    /// - Returns: 适合界面展示的语言名称，无法识别时返回大写代码。
+    static func languageDisplayName(_ identifier: String) -> String {
+        let normalized = identifier.lowercased().replacingOccurrences(of: "_", with: "-")
+        if normalized == "zh-cn" || normalized.hasPrefix("zh-hans") { return "简体中文" }
+        if normalized == "zh-tw" || normalized == "zh-hk" || normalized.hasPrefix("zh-hant") { return "繁體中文" }
+        let code = normalized.split(separator: "-").first.map(String.init) ?? normalized
+        return Locale.current.localizedString(forLanguageCode: code) ?? identifier.uppercased()
     }
 
     /// 返回语言标识常见的文件名别名。
@@ -244,7 +286,7 @@ enum ExternalSubtitleError: LocalizedError {
         switch self {
         case .invalidEncoding: "字幕编码无法识别，请转换为 UTF-8、GB18030 或 Big5"
         case .noCues: "没有解析到有效字幕时间轴"
-        case .notFound: "当前视频旁没有找到可用的外挂字幕"
+        case .notFound: "媒体同目录或服务器没有找到可用字幕，可继续搜索网络字幕"
         case .http(let statusCode): "外挂字幕下载失败（HTTP \(statusCode)）"
         }
     }

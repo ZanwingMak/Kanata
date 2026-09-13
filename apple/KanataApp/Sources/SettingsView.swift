@@ -239,6 +239,34 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("在线字幕") {
+                    KanataRowLabel(
+                        title: "OpenSubtitles",
+                        detail: "在播放器中按作品、季度和集数搜索网络字幕",
+                        symbol: "captions.bubble.fill"
+                    )
+                    LabeledContent("API Key") {
+                        SecureField("请输入个人 API Key", text: $settings.openSubtitlesAPIKey)
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    if settings.hasOpenSubtitlesConfiguration {
+                        Label("网络字幕搜索已就绪", systemImage: "checkmark.shield.fill")
+                            .foregroundStyle(KanataTheme.success)
+                        Button("清除在线字幕配置", role: .destructive) {
+                            settings.clearOpenSubtitlesConfiguration()
+                        }
+                    } else {
+                        Link(destination: URL(string: "https://www.opensubtitles.com/consumers")!) {
+                            Label("申请 OpenSubtitles API Key", systemImage: "arrow.up.right.square")
+                        }
+                    }
+                    Text("Kanata 不内置在线字幕凭据。API Key 由用户自行申请并只保存在当前设备的 Keychain；同目录字幕无需配置即可使用。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("扩展弹幕网关（可选）") {
                     LabeledContent("网关地址") {
                         TextField("http://192.168.1.7:9321", text: $settings.gatewayURLString)

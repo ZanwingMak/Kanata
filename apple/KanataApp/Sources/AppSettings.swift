@@ -71,6 +71,11 @@ final class AppSettings {
         didSet { KeychainStore.setString(dandanplayAppSecret, account: KeychainAccounts.dandanplayAppSecret) }
     }
 
+    /// 用户自行申请的 OpenSubtitles API Key，仅保存在当前设备 Keychain。
+    var openSubtitlesAPIKey: String {
+        didSet { KeychainStore.setString(openSubtitlesAPIKey, account: KeychainAccounts.openSubtitlesAPIKey) }
+    }
+
     /// 全局强调色主题。
     var accentTheme: KanataAccentTheme {
         didSet { defaults.set(accentTheme.rawValue, forKey: Keys.accentTheme) }
@@ -131,6 +136,7 @@ final class AppSettings {
         static let bilibiliCredential = "credential.bilibili"
         static let dandanplayAppID = "credential.dandanplay.appID"
         static let dandanplayAppSecret = "credential.dandanplay.appSecret"
+        static let openSubtitlesAPIKey = "credential.opensubtitles.apiKey"
     }
 
     private struct StoredBilibiliCredential: Codable {
@@ -172,6 +178,7 @@ final class AppSettings {
         self.dandanplayAppID = KeychainStore.string(account: KeychainAccounts.dandanplayAppID) ?? ""
         self.dandanplayAppSecret = KeychainStore.string(account: KeychainAccounts.dandanplayAppSecret) ?? ""
         self.dandanplayChannelEnabled = defaults.object(forKey: Keys.dandanplayChannelEnabled) as? Bool ?? false
+        self.openSubtitlesAPIKey = KeychainStore.string(account: KeychainAccounts.openSubtitlesAPIKey) ?? ""
         self.accentTheme = KanataAccentTheme(
             rawValue: defaults.string(forKey: Keys.accentTheme) ?? ""
         ) ?? .galaxy
@@ -316,6 +323,25 @@ final class AppSettings {
         dandanplayChannelEnabled = false
         dandanplayAppID = ""
         dandanplayAppSecret = ""
+    }
+
+    /// 使用用户自己的 API Key 创建 OpenSubtitles 在线字幕客户端。
+    /// - Returns: 未填写有效 API Key 时返回 nil。
+    func makeOpenSubtitlesClient() -> OpenSubtitlesClient? {
+        let key = openSubtitlesAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return nil }
+        return OpenSubtitlesClient(apiKey: key)
+    }
+
+    /// 当前设备是否已经配置在线字幕搜索所需的 API Key。
+    var hasOpenSubtitlesConfiguration: Bool {
+        !openSubtitlesAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// 从当前设备 Keychain 清除 OpenSubtitles API Key。
+    func clearOpenSubtitlesConfiguration() {
+        openSubtitlesAPIKey = ""
+        KeychainStore.remove(account: KeychainAccounts.openSubtitlesAPIKey)
     }
 
     /// 返回去除首尾空白的弹弹play AppID。

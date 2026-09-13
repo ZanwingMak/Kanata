@@ -473,6 +473,7 @@ struct PlayerScreen: View {
     @State private var externalSubtitleName: String?
     @State private var externalSubtitleResources: [ExternalSubtitleResource] = []
     @State private var selectedExternalSubtitleID: String?
+    @State private var selectedOnlineSubtitleFileID: Int?
     @State private var externalSubtitleOffset = 0.0
     @State private var isExternalSubtitleEnabled = true
     @State private var isFetchingExternalSubtitles = false
@@ -634,6 +635,11 @@ struct PlayerScreen: View {
                 externalSubtitleName: externalSubtitleName,
                 externalSubtitleResources: externalSubtitleResources,
                 selectedExternalSubtitleID: selectedExternalSubtitleID,
+                selectedOnlineSubtitleFileID: selectedOnlineSubtitleFileID,
+                subtitleSearchTitle: activeItem.libraryTitle,
+                subtitleVideoFileName: activeItem.displayName,
+                subtitleSearchSeason: activeItem.season,
+                subtitleSearchEpisode: activeItem.episode ?? activeItem.collectionIndex,
                 externalSubtitleEnabled: $isExternalSubtitleEnabled,
                 externalSubtitleOffset: $externalSubtitleOffset,
                 isFetchingExternalSubtitles: isFetchingExternalSubtitles,
@@ -652,6 +658,7 @@ struct PlayerScreen: View {
                 },
                 onFetchExternalSubtitles: fetchExternalSubtitles,
                 onSelectExternalSubtitle: selectExternalSubtitle,
+                onSelectOnlineSubtitle: loadOnlineSubtitle,
                 onMarkIntro: { updateSkipSegment(introEnd: currentTime) },
                 onMarkOutro: { updateSkipSegment(outroStart: currentTime) },
                 onClearSkipSegment: { clearSkipSegment() },
@@ -1551,6 +1558,7 @@ struct PlayerScreen: View {
         externalSubtitleName = nil
         externalSubtitleResources = []
         selectedExternalSubtitleID = nil
+        selectedOnlineSubtitleFileID = nil
         externalSubtitleOffset = 0
         subtitleFetchTask?.cancel()
         skipSegment = PlaybackSkipSegmentStore.segment(for: skipSegmentKey)
@@ -1928,6 +1936,7 @@ struct PlayerScreen: View {
                     externalSubtitleName = fileName
                     externalSubtitleResources = []
                     selectedExternalSubtitleID = nil
+                    selectedOnlineSubtitleFileID = nil
                     isExternalSubtitleEnabled = true
                     showOSD("已载入 \(cues.count) 条外挂字幕")
                 } catch {
@@ -1967,8 +1976,14 @@ struct PlayerScreen: View {
                 let resources = try await externalSubtitleResources(for: item, videoURL: videoURL)
                 guard !Task.isCancelled, activeItem.id == item.id else { return }
                 externalSubtitleResources = resources
-                guard let preferred = resources.first else {
-                    if announcesResult { danmakuOperationError = ExternalSubtitleError.notFound.localizedDescription }
+                guard let preferred = preferredAutomaticSubtitle(in: resources, for: item) else {
+                    if announcesResult {
+                        if resources.isEmpty {
+                            danmakuOperationError = ExternalSubtitleError.notFound.localizedDescription
+                        } else {
+                            showOSD("发现 \(resources.count) 个目录字幕，请手动选择")
+                        }
+                    }
                     return
                 }
                 _ = await loadExternalSubtitle(preferred, for: item.id, announcesResult: announcesResult)
@@ -1990,7 +2005,7 @@ struct PlayerScreen: View {
     ) async throws -> [ExternalSubtitleResource] {
         let resources: [ExternalSubtitleResource]
         if videoURL.isFileURL {
-            resources = try localSubtitleResources(beside: videoURL, videoName: item.displayName)
+            resources = try localSubtitleResources(beside: videoURL)
         } else if let profileID = item.sourceProfileID,
                   let profile = MediaSourceProfileStore.profile(id: profileID) {
             switch profile.kind {
@@ -1998,9 +2013,7 @@ struct PlayerScreen: View {
                 let values = try await WebDAVClient(profile: profile).subtitleFiles(
                     directory: videoURL.deletingLastPathComponent()
                 )
-                resources = values.filter {
-                    ExternalSubtitlePreference.matches(subtitleName: $0.name, videoName: item.displayName)
-                }
+                resources = values
             case .synology:
                 let storedPath = item.serverItemID?.replacingOccurrences(of: "synology:", with: "")
                     ?? URLComponents(url: videoURL, resolvingAgainstBaseURL: false)?.queryItems?
@@ -2010,9 +2023,7 @@ struct PlayerScreen: View {
                     profile: profile,
                     videoPath: storedPath
                 )
-                resources = values.filter {
-                    ExternalSubtitlePreference.matches(subtitleName: $0.name, videoName: item.displayName)
-                }
+                resources = values
             case .jellyfin, .emby:
                 guard let itemID = item.serverItemID else { return [] }
                 resources = try await MediaBrowserClient().subtitleFiles(
@@ -2029,15 +2040,14 @@ struct PlayerScreen: View {
             resources = []
         }
         let unique = Dictionary(resources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return ExternalSubtitlePreference.sorted(Array(unique.values))
+        return ExternalSubtitlePreference.sorted(Array(unique.values), videoName: item.displayName)
     }
 
-    /// 扫描本地视频同目录并保留同名及带语言后缀的字幕。
+    /// 扫描本地视频同目录中的全部支持字幕，同名候选会在后续排序中优先。
     /// - Parameters:
     ///   - videoURL: 本地视频地址。
-    ///   - videoName: 媒体库保存的原始视频名。
     /// - Returns: 可在安全作用域内读取的字幕资源。
-    private func localSubtitleResources(beside videoURL: URL, videoName: String) throws -> [ExternalSubtitleResource] {
+    private func localSubtitleResources(beside videoURL: URL) throws -> [ExternalSubtitleResource] {
         let hasAccess = videoURL.startAccessingSecurityScopedResource()
         defer { if hasAccess { videoURL.stopAccessingSecurityScopedResource() } }
         return try FileManager.default.contentsOfDirectory(
@@ -2047,9 +2057,27 @@ struct PlayerScreen: View {
         )
         .filter {
             ExternalSubtitlePreference.supportedExtensions.contains($0.pathExtension.lowercased())
-                && ExternalSubtitlePreference.matches(subtitleName: $0.lastPathComponent, videoName: videoName)
         }
         .map { ExternalSubtitleResource(url: $0, name: $0.lastPathComponent, requestHeaders: [:]) }
+    }
+
+    /// 选择适合自动加载的同目录或媒体服务器字幕，避免误载同目录中的其他视频字幕。
+    /// - Parameters:
+    ///   - resources: 当前媒体来源发现的字幕。
+    ///   - item: 当前视频条目。
+    /// - Returns: 同名且符合本地语言的字幕；媒体服务器专属字幕可直接返回首项。
+    private func preferredAutomaticSubtitle(
+        in resources: [ExternalSubtitleResource],
+        for item: LibraryItem
+    ) -> ExternalSubtitleResource? {
+        if let profileID = item.sourceProfileID,
+           let kind = MediaSourceProfileStore.profile(id: profileID)?.kind,
+           [.jellyfin, .emby, .plex].contains(kind) {
+            return resources.first
+        }
+        return resources.first {
+            ExternalSubtitlePreference.matches(subtitleName: $0.name, videoName: item.displayName)
+        }
     }
 
     /// 选择已发现的另一份外挂字幕并立即载入。
@@ -2085,12 +2113,44 @@ struct PlayerScreen: View {
             externalSubtitleCues = cues
             externalSubtitleName = resource.name
             selectedExternalSubtitleID = resource.id
+            selectedOnlineSubtitleFileID = nil
             isExternalSubtitleEnabled = true
             if announcesResult { showOSD("已载入 \(resource.name)") }
             return true
         } catch {
             guard !Task.isCancelled, activeItem.id == itemID, announcesResult else { return false }
             danmakuOperationError = "外挂字幕读取失败：\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    /// 下载并加载用户在字幕中心选择的在线字幕。
+    /// - Parameter candidate: OpenSubtitles 搜索候选。
+    /// - Returns: 下载、解析并应用成功时返回 true。
+    private func loadOnlineSubtitle(_ candidate: OnlineSubtitleCandidate) async -> Bool {
+        guard let client = settings.makeOpenSubtitlesClient() else {
+            danmakuOperationError = OpenSubtitlesError.missingConfiguration.localizedDescription
+            return false
+        }
+        let itemID = activeItem.id
+        isFetchingExternalSubtitles = true
+        defer { if activeItem.id == itemID { isFetchingExternalSubtitles = false } }
+        do {
+            let downloaded = try await client.download(candidate)
+            let cues = try await Task.detached(priority: .utility) {
+                try ExternalSubtitleParser.parse(data: downloaded.data, fileName: downloaded.fileName)
+            }.value
+            guard !Task.isCancelled, activeItem.id == itemID else { return false }
+            externalSubtitleCues = cues
+            externalSubtitleName = downloaded.fileName
+            selectedExternalSubtitleID = nil
+            selectedOnlineSubtitleFileID = candidate.fileID
+            isExternalSubtitleEnabled = true
+            showOSD("已载入 \(ExternalSubtitlePreference.languageDisplayName(candidate.language))字幕")
+            return true
+        } catch {
+            guard !Task.isCancelled, activeItem.id == itemID else { return false }
+            danmakuOperationError = "在线字幕加载失败：\(error.localizedDescription)"
             return false
         }
     }
@@ -2705,6 +2765,521 @@ struct CandidatePicker: View {
     }
 }
 
+/// 聚合媒体同目录与在线搜索结果的字幕中心。
+private struct SubtitleCenterView: View {
+    let searchTitle: String
+    let videoFileName: String
+    let season: Int?
+    let episode: Int?
+    let directoryResources: [ExternalSubtitleResource]
+    let selectedDirectoryID: String?
+    let selectedOnlineFileID: Int?
+    let isDiscoveringDirectory: Bool
+    let onRefreshDirectory: () -> Void
+    let onSelectDirectory: (String) -> Void
+    let onSelectOnline: (OnlineSubtitleCandidate) async -> Bool
+    @Environment(AppSettings.self) private var settings
+    @State private var query: String
+    @State private var onlineCandidates: [OnlineSubtitleCandidate] = []
+    @State private var isSearching = false
+    @State private var loadingOnlineFileID: Int?
+    @State private var statusMessage: String?
+
+    /// 创建字幕中心并使用当前作品名预填在线搜索关键词。
+    /// - Parameters:
+    ///   - searchTitle: 当前作品或媒体名称。
+    ///   - videoFileName: 当前媒体的原始文件名，用于判断同名字幕。
+    ///   - season: 当前季度。
+    ///   - episode: 当前集数。
+    ///   - directoryResources: 媒体同目录或服务器已发现字幕。
+    ///   - selectedDirectoryID: 当前目录字幕标识。
+    ///   - selectedOnlineFileID: 当前在线字幕文件标识。
+    ///   - isDiscoveringDirectory: 是否正在扫描媒体目录。
+    ///   - onRefreshDirectory: 重新扫描媒体目录操作。
+    ///   - onSelectDirectory: 选择目录字幕操作。
+    ///   - onSelectOnline: 下载并选择在线字幕操作。
+    init(
+        searchTitle: String,
+        videoFileName: String,
+        season: Int?,
+        episode: Int?,
+        directoryResources: [ExternalSubtitleResource],
+        selectedDirectoryID: String?,
+        selectedOnlineFileID: Int?,
+        isDiscoveringDirectory: Bool,
+        onRefreshDirectory: @escaping () -> Void,
+        onSelectDirectory: @escaping (String) -> Void,
+        onSelectOnline: @escaping (OnlineSubtitleCandidate) async -> Bool
+    ) {
+        self.searchTitle = searchTitle
+        self.videoFileName = videoFileName
+        self.season = season
+        self.episode = episode
+        self.directoryResources = directoryResources
+        self.selectedDirectoryID = selectedDirectoryID
+        self.selectedOnlineFileID = selectedOnlineFileID
+        self.isDiscoveringDirectory = isDiscoveringDirectory
+        self.onRefreshDirectory = onRefreshDirectory
+        self.onSelectDirectory = onSelectDirectory
+        self.onSelectOnline = onSelectOnline
+        self._query = State(initialValue: searchTitle)
+    }
+
+    var body: some View {
+        ZStack {
+            KanataAmbientBackground()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: sectionSpacing) {
+                    heroCard
+                    directorySection
+                    onlineSection
+                }
+                .frame(maxWidth: contentMaxWidth)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, verticalPadding)
+                .frame(maxWidth: .infinity)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .navigationTitle("字幕中心")
+        .kanataInlineNavigationTitle()
+        .task {
+            if directoryResources.isEmpty { onRefreshDirectory() }
+        }
+    }
+
+    /// 构建说明当前视频和搜索范围的玻璃标题卡片。
+    private var heroCard: some View {
+        HStack(spacing: 18) {
+            Image(systemName: "captions.bubble.fill")
+                .font(heroIconFont)
+                .foregroundStyle(KanataTheme.accent)
+                .frame(width: heroIconSize, height: heroIconSize)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(KanataTheme.accent.opacity(0.25), lineWidth: 1)
+                }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(searchTitle)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Text(mediaContextLabel)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text("同目录字幕无需配置；在线结果会优先匹配当前季集和系统语言。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(cardPadding)
+        .kanataGlassSurface(cornerRadius: 24, isElevated: true)
+    }
+
+    /// 构建媒体源同目录字幕分区。
+    private var directorySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(
+                title: "媒体同目录",
+                detail: directoryResources.isEmpty ? "尚未发现字幕" : "\(directoryResources.count) 个候选",
+                symbol: "folder.badge.gearshape",
+                isLoading: isDiscoveringDirectory,
+                actionTitle: "重新扫描",
+                action: onRefreshDirectory
+            )
+            if directoryResources.isEmpty {
+                emptyCard(
+                    title: isDiscoveringDirectory ? "正在扫描媒体目录" : "当前目录没有可用字幕",
+                    detail: "支持 SRT、VTT、ASS 和 SSA；WebDAV、群晖及媒体服务器字幕也会显示在这里。",
+                    symbol: isDiscoveringDirectory ? "arrow.triangle.2.circlepath" : "doc.text.magnifyingglass"
+                )
+            } else {
+                ForEach(directoryResources) { resource in
+                    Button {
+                        onSelectDirectory(resource.id)
+                        statusMessage = "正在加载 \(resource.name)"
+                    } label: {
+                        directoryCandidateRow(resource)
+                    }
+                    .kanataDirectoryRowStyle(cornerRadius: 18)
+                    .disabled(isDiscoveringDirectory || loadingOnlineFileID != nil)
+                }
+            }
+        }
+    }
+
+    /// 构建网络搜索输入和候选结果分区。
+    private var onlineSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(
+                title: "在线字幕",
+                detail: onlineCandidates.isEmpty ? "OpenSubtitles" : "\(onlineCandidates.count) 个结果",
+                symbol: "network",
+                isLoading: isSearching
+            )
+            VStack(spacing: 14) {
+                HStack(spacing: 12) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(KanataTheme.accent)
+                    TextField("输入作品名或文件名", text: $query)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit { searchOnline() }
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("清空搜索词")
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: searchFieldHeight)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(KanataTheme.separator, lineWidth: 1)
+                }
+
+                Button(action: searchOnline) {
+                    HStack(spacing: 10) {
+                        if isSearching { ProgressView().tint(.white) }
+                        Label(isSearching ? "正在搜索…" : "搜索网络字幕", systemImage: "sparkle.magnifyingglass")
+                    }
+                }
+                .buttonStyle(KanataPrimaryButtonStyle())
+                .disabled(isSearching || query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if !settings.hasOpenSubtitlesConfiguration {
+                    Label("请先在设置中填写个人 OpenSubtitles API Key", systemImage: "key.horizontal")
+                        .font(.footnote)
+                        .foregroundStyle(KanataTheme.warning)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let statusMessage {
+                    Text(statusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(cardPadding)
+            .kanataGlassSurface(cornerRadius: 22)
+
+            ForEach(onlineCandidates) { candidate in
+                Button {
+                    Task { await selectOnline(candidate) }
+                } label: {
+                    onlineCandidateRow(candidate)
+                }
+                .kanataDirectoryRowStyle(cornerRadius: 18)
+                .disabled(loadingOnlineFileID != nil)
+            }
+        }
+    }
+
+    /// 构建可复用的分区标题与可选刷新操作。
+    /// - Parameters:
+    ///   - title: 分区标题。
+    ///   - detail: 结果数量或来源说明。
+    ///   - symbol: 分区图标。
+    ///   - isLoading: 是否显示加载状态。
+    ///   - actionTitle: 可选操作文案。
+    ///   - action: 可选操作。
+    /// - Returns: 左右信息对齐的标题栏。
+    private func sectionHeader(
+        title: String,
+        detail: String,
+        symbol: String,
+        isLoading: Bool,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) -> some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: symbol)
+                .font(.headline)
+                .foregroundStyle(.primary)
+            if isLoading { ProgressView().controlSize(.small) }
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(KanataTheme.accent)
+                    .disabled(isLoading)
+            }
+        }
+        .padding(.horizontal, 4)
+    }
+
+    /// 构建一个同目录字幕候选行。
+    /// - Parameter resource: 媒体目录或服务器字幕资源。
+    /// - Returns: 带格式、语言优先级和选中状态的候选行。
+    private func directoryCandidateRow(_ resource: ExternalSubtitleResource) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: resource.url.isFileURL ? "doc.text.fill" : "server.rack")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(KanataTheme.accent)
+                .frame(width: 42)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(resource.name)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    subtitleBadge(resource.url.pathExtension.uppercased())
+                    if ExternalSubtitlePreference.languageRank(fileName: resource.name) == 0 {
+                        subtitleBadge("系统语言", tint: KanataTheme.success)
+                    }
+                    if ExternalSubtitlePreference.matches(subtitleName: resource.name, videoName: videoFileName) {
+                        subtitleBadge("同名匹配", tint: KanataTheme.accent)
+                    }
+                }
+            }
+            Spacer(minLength: 12)
+            if selectedDirectoryID == resource.id {
+                Label("使用中", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(KanataTheme.success)
+            } else {
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: candidateRowHeight)
+    }
+
+    /// 构建一个在线字幕候选行。
+    /// - Parameter candidate: OpenSubtitles 搜索结果。
+    /// - Returns: 展示语言、季集、版本和质量信息的候选行。
+    private func onlineCandidateRow(_ candidate: OnlineSubtitleCandidate) -> some View {
+        HStack(spacing: 14) {
+            VStack(spacing: 4) {
+                Text(ExternalSubtitlePreference.languageDisplayName(candidate.language))
+                    .font(.caption.weight(.bold))
+                    .multilineTextAlignment(.center)
+                Image(systemName: candidate.isTrusted ? "checkmark.shield.fill" : "captions.bubble")
+                    .foregroundStyle(candidate.isTrusted ? KanataTheme.success : KanataTheme.accent)
+            }
+            .frame(width: languageBadgeWidth)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(candidate.displayTitle)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Text(candidate.releaseName ?? candidate.fileName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    if isExactEpisode(candidate) { subtitleBadge("季集匹配", tint: KanataTheme.success) }
+                    if candidate.isTrusted { subtitleBadge("可信来源", tint: KanataTheme.success) }
+                    if candidate.isHearingImpaired { subtitleBadge("听障字幕") }
+                    subtitleBadge("\(candidate.downloadCount.formatted()) 次下载")
+                }
+            }
+            Spacer(minLength: 12)
+            if loadingOnlineFileID == candidate.fileID {
+                ProgressView()
+            } else if selectedOnlineFileID == candidate.fileID {
+                Label("使用中", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(KanataTheme.success)
+            } else {
+                Image(systemName: "arrow.down.circle")
+                    .font(.title3)
+                    .foregroundStyle(KanataTheme.accent)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: candidateRowHeight)
+    }
+
+    /// 构建紧凑的字幕属性标签。
+    /// - Parameters:
+    ///   - title: 标签文字。
+    ///   - tint: 标签强调色。
+    /// - Returns: 带半透明底色的胶囊标签。
+    private func subtitleBadge(_ title: String, tint: Color = .secondary) -> some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(tint.opacity(0.10), in: Capsule())
+    }
+
+    /// 构建没有候选时的玻璃占位卡片。
+    /// - Parameters:
+    ///   - title: 状态标题。
+    ///   - detail: 说明文字。
+    ///   - symbol: 状态图标。
+    /// - Returns: 保持页面节奏的空状态卡片。
+    private func emptyCard(title: String, detail: String, symbol: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundStyle(KanataTheme.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(cardPadding)
+        .kanataGlassSurface(cornerRadius: 20)
+    }
+
+    /// 发起在线字幕搜索并更新候选列表。
+    private func searchOnline() {
+        guard !isSearching else { return }
+        guard let client = settings.makeOpenSubtitlesClient() else {
+            statusMessage = OpenSubtitlesError.missingConfiguration.localizedDescription
+            return
+        }
+        isSearching = true
+        statusMessage = nil
+        Task {
+            defer { isSearching = false }
+            do {
+                onlineCandidates = try await client.search(query: query, season: season, episode: episode)
+                statusMessage = onlineCandidates.isEmpty
+                    ? "没有找到匹配结果，可以尝试作品原名或英文名"
+                    : "结果已按季集匹配和系统语言排序"
+            } catch {
+                onlineCandidates = []
+                statusMessage = "搜索失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// 下载并应用一个在线字幕候选。
+    /// - Parameter candidate: 用户选中的搜索结果。
+    private func selectOnline(_ candidate: OnlineSubtitleCandidate) async {
+        guard loadingOnlineFileID == nil else { return }
+        loadingOnlineFileID = candidate.fileID
+        statusMessage = "正在下载 \(ExternalSubtitlePreference.languageDisplayName(candidate.language))字幕…"
+        let success = await onSelectOnline(candidate)
+        if success { statusMessage = "字幕已加载并开始显示" }
+        loadingOnlineFileID = nil
+    }
+
+    /// 判断在线候选是否与当前季集完全一致。
+    /// - Parameter candidate: 在线字幕候选。
+    /// - Returns: 当前集数一致，且有季度时季度也一致。
+    private func isExactEpisode(_ candidate: OnlineSubtitleCandidate) -> Bool {
+        guard let episode else { return true }
+        guard candidate.episode == episode else { return false }
+        guard let season else { return true }
+        return candidate.season == season
+    }
+
+    /// 当前媒体的季集说明。
+    private var mediaContextLabel: String {
+        if let season, let episode { return "第 \(season) 季 · 第 \(episode) 集" }
+        if let episode { return "第 \(episode) 集" }
+        return "单个视频"
+    }
+
+    /// 返回不同设备上的页面水平安全间距。
+    private var horizontalPadding: CGFloat {
+        #if os(tvOS)
+        72
+        #else
+        20
+        #endif
+    }
+
+    /// 返回不同设备上的页面垂直安全间距。
+    private var verticalPadding: CGFloat {
+        #if os(tvOS)
+        48
+        #else
+        24
+        #endif
+    }
+
+    /// 返回字幕中心的最大内容宽度，避免电视端信息过度拉伸。
+    private var contentMaxWidth: CGFloat {
+        #if os(tvOS)
+        1_420
+        #else
+        760
+        #endif
+    }
+
+    /// 返回页面各功能区之间的垂直间距。
+    private var sectionSpacing: CGFloat {
+        #if os(tvOS)
+        36
+        #else
+        28
+        #endif
+    }
+
+    /// 返回玻璃卡片的自适应内边距。
+    private var cardPadding: CGFloat {
+        #if os(tvOS)
+        26
+        #else
+        18
+        #endif
+    }
+
+    /// 返回字幕候选行的最小高度。
+    private var candidateRowHeight: CGFloat {
+        #if os(tvOS)
+        104
+        #else
+        76
+        #endif
+    }
+
+    /// 返回搜索输入框的最小高度。
+    private var searchFieldHeight: CGFloat {
+        #if os(tvOS)
+        66
+        #else
+        50
+        #endif
+    }
+
+    /// 返回标题卡片图标的可视尺寸。
+    private var heroIconSize: CGFloat {
+        #if os(tvOS)
+        82
+        #else
+        58
+        #endif
+    }
+
+    /// 返回标题卡片图标使用的动态字号。
+    private var heroIconFont: Font {
+        #if os(tvOS)
+        .largeTitle
+        #else
+        .title2
+        #endif
+    }
+
+    /// 返回语言标识栏的固定宽度，保持候选文字纵向对齐。
+    private var languageBadgeWidth: CGFloat {
+        #if os(tvOS)
+        112
+        #else
+        78
+        #endif
+    }
+}
+
 /// 播放器二级控制面板，集中放置低频但重要的画面、音轨、字幕与媒体信息。
 struct PlaybackOptionsPanel: View {
     let viewModel: PlayerViewModel
@@ -2719,6 +3294,11 @@ struct PlaybackOptionsPanel: View {
     let externalSubtitleName: String?
     let externalSubtitleResources: [ExternalSubtitleResource]
     let selectedExternalSubtitleID: String?
+    let selectedOnlineSubtitleFileID: Int?
+    let subtitleSearchTitle: String
+    let subtitleVideoFileName: String
+    let subtitleSearchSeason: Int?
+    let subtitleSearchEpisode: Int?
     @Binding var externalSubtitleEnabled: Bool
     @Binding var externalSubtitleOffset: Double
     let isFetchingExternalSubtitles: Bool
@@ -2728,6 +3308,7 @@ struct PlaybackOptionsPanel: View {
     let onImportSubtitle: () -> Void
     let onFetchExternalSubtitles: () -> Void
     let onSelectExternalSubtitle: (String) -> Void
+    let onSelectOnlineSubtitle: (OnlineSubtitleCandidate) async -> Bool
     let onMarkIntro: () -> Void
     let onMarkOutro: () -> Void
     let onClearSkipSegment: () -> Void
@@ -2825,13 +3406,29 @@ struct PlaybackOptionsPanel: View {
                             Text(track.title).tag(track.id)
                         }
                     }
-                    Button(action: onFetchExternalSubtitles) {
-                        Label(
-                            isFetchingExternalSubtitles ? "正在获取外挂字幕…" : "获取外部字幕",
-                            systemImage: "text.badge.plus"
+                    NavigationLink {
+                        SubtitleCenterView(
+                            searchTitle: subtitleSearchTitle,
+                            videoFileName: subtitleVideoFileName,
+                            season: subtitleSearchSeason,
+                            episode: subtitleSearchEpisode,
+                            directoryResources: externalSubtitleResources,
+                            selectedDirectoryID: selectedExternalSubtitleID,
+                            selectedOnlineFileID: selectedOnlineSubtitleFileID,
+                            isDiscoveringDirectory: isFetchingExternalSubtitles,
+                            onRefreshDirectory: onFetchExternalSubtitles,
+                            onSelectDirectory: onSelectExternalSubtitle,
+                            onSelectOnline: onSelectOnlineSubtitle
+                        )
+                    } label: {
+                        KanataRowLabel(
+                            title: "字幕中心",
+                            detail: subtitleCenterDetail,
+                            symbol: "captions.bubble.fill"
                         )
                     }
-                    .disabled(isFetchingExternalSubtitles)
+                    .kanataDirectoryRowStyle(cornerRadius: 12)
+                    .listRowBackground(Color.clear)
                     #if !os(tvOS)
                     Button(action: onImportSubtitle) {
                         Label("导入 SRT / VTT / ASS / SSA", systemImage: "captions.bubble")
@@ -2839,19 +3436,6 @@ struct PlaybackOptionsPanel: View {
                     #endif
                     if hasExternalSubtitle {
                         Toggle("显示外挂字幕", isOn: $externalSubtitleEnabled)
-                        if externalSubtitleResources.count > 1 {
-                            Picker(
-                                "外挂字幕语言",
-                                selection: Binding(
-                                    get: { selectedExternalSubtitleID ?? externalSubtitleResources[0].id },
-                                    set: { value in onSelectExternalSubtitle(value) }
-                                )
-                            ) {
-                                ForEach(externalSubtitleResources) { resource in
-                                    Text(resource.name).tag(resource.id)
-                                }
-                            }
-                        }
                         LabeledContent("当前文件", value: externalSubtitleName ?? "已导入")
                         #if !os(tvOS)
                         Stepper(
@@ -2926,9 +3510,17 @@ struct PlaybackOptionsPanel: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
                         .kanataToolbarTextButton()
-                }
             }
         }
+    }
+    }
+
+    /// 返回字幕中心入口的动态状态摘要。
+    private var subtitleCenterDetail: String {
+        if isFetchingExternalSubtitles { return "正在扫描媒体目录…" }
+        if let externalSubtitleName { return "正在使用 · \(externalSubtitleName)" }
+        if externalSubtitleResources.isEmpty { return "搜索网络或扫描媒体同目录字幕" }
+        return "同目录发现 \(externalSubtitleResources.count) 个候选"
     }
 
     /// 把跳过位置秒数格式化为播放器时间标签。

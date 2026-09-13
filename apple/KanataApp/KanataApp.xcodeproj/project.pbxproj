@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0031258D7C92F9CFC2903A64 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 24054567603F95C0EC6A1783 /* Assets.xcassets */; };
 		0190C59C861A69A9EAD144FD /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4E24DE0179BDBA88E26F4FB /* LibraryView.swift */; };
+		0A6FE9F884E6128E23F48747 /* OnlineSubtitleClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCA654581CBD424797037C69 /* OnlineSubtitleClient.swift */; };
 		0B90F2C6548352BB8C4D390E /* KanataTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122A9F73DB01780311C2EC77 /* KanataTheme.swift */; };
 		0E5B87E6AF1A62F4157EACDA /* PlaybackSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B906A631FA659E4B7B13B18 /* PlaybackSupport.swift */; };
 		0EC14871CC22CAFCEF94E4E9 /* BuiltInPublicDanmakuClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56BDD49AC5E6D599D5BC3190 /* BuiltInPublicDanmakuClient.swift */; };
@@ -28,6 +29,7 @@
 		6BDE8BA75A71E2FB96893521 /* PlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D71423032201822DE1CEC33 /* PlayerScreen.swift */; };
 		7083F8DC01A8B4CEE1C53C72 /* KanataTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122A9F73DB01780311C2EC77 /* KanataTheme.swift */; };
 		78DF13F860AEC8C9703AEEFA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 24054567603F95C0EC6A1783 /* Assets.xcassets */; };
+		79B41830897C5928AEB57383 /* OnlineSubtitleClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCA654581CBD424797037C69 /* OnlineSubtitleClient.swift */; };
 		7ADE149C5CF8D4D155EED933 /* KanataRender in Frameworks */ = {isa = PBXBuildFile; productRef = 8EE44E1F48B4D8E9D04CA922 /* KanataRender */; };
 		7BABBAFA45A953A94D11B684 /* DanmakuFontRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79CFC3DD18A4AF488CA99D5F /* DanmakuFontRegistry.swift */; };
 		7EB919629CBF538D13744899 /* ExternalSubtitle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D7990DD427BBFF8B9307E4A /* ExternalSubtitle.swift */; };
@@ -99,6 +101,7 @@
 		CA68DAA542BB5DD17707BE90 /* PlatformFileImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformFileImporter.swift; sourceTree = "<group>"; };
 		D4E24DE0179BDBA88E26F4FB /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		DB8BB661202EC97429766ACF /* KanataRender */ = {isa = PBXFileReference; lastKnownFileType = folder; name = KanataRender; path = ../KanataRender; sourceTree = SOURCE_ROOT; };
+		FCA654581CBD424797037C69 /* OnlineSubtitleClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnlineSubtitleClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -157,6 +160,7 @@
 				31AACC6D69D5478A2FD742B6 /* MediaSourceClients.swift */,
 				ACC6304388980E26E4AA3D45 /* MediaSourceModels.swift */,
 				766BAD1CEAB78E524FD68966 /* MediaSources.swift */,
+				FCA654581CBD424797037C69 /* OnlineSubtitleClient.swift */,
 				CA68DAA542BB5DD17707BE90 /* PlatformFileImporter.swift */,
 				5B906A631FA659E4B7B13B18 /* PlaybackSupport.swift */,
 				9D71423032201822DE1CEC33 /* PlayerScreen.swift */,
@@ -317,6 +321,7 @@
 				E1ACAF0E02E5E7C871217746 /* MediaSourceClients.swift in Sources */,
 				E122D03D58273169B724230B /* MediaSourceModels.swift in Sources */,
 				98FF09C96A14EF8F76A085F3 /* MediaSources.swift in Sources */,
+				0A6FE9F884E6128E23F48747 /* OnlineSubtitleClient.swift in Sources */,
 				6813B82BF031BB5A506EC7AC /* PlatformFileImporter.swift in Sources */,
 				0E5B87E6AF1A62F4157EACDA /* PlaybackSupport.swift in Sources */,
 				A0DC7C89B456A362447704FB /* PlayerScreen.swift in Sources */,
@@ -348,6 +353,7 @@
 				3DF83AEAD29359EB6A3B8677 /* MediaSourceClients.swift in Sources */,
 				D91D166FFE00DB31CD4A283F /* MediaSourceModels.swift in Sources */,
 				CECEC02FE7F010C0FF6E7620 /* MediaSources.swift in Sources */,
+				79B41830897C5928AEB57383 /* OnlineSubtitleClient.swift in Sources */,
 				93D4CF481CFCCB1EA52DFB6F /* PlatformFileImporter.swift in Sources */,
 				CD09FFF8465288029A3884CE /* PlaybackSupport.swift in Sources */,
 				6BDE8BA75A71E2FB96893521 /* PlayerScreen.swift in Sources */,
@@ -370,7 +376,7 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Sources/Info-tvOS.plist";
@@ -460,7 +466,7 @@
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Sources/Info-tvOS.plist";
@@ -488,7 +494,7 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
@@ -575,7 +581,7 @@
 				CODE_SIGN_ENTITLEMENTS = Sources/Kanata.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 31;
+				CURRENT_PROJECT_VERSION = 32;
 				DEVELOPMENT_TEAM = 2Q2LMV7BR6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
