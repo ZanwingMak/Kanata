@@ -294,7 +294,7 @@ struct MediaImportPreview: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: importRowHeight, alignment: .leading)
                 .padding(.horizontal, 14)
-                .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .kanataGlassSurface(cornerRadius: 12)
                 .contentShape(Rectangle())
             }
             .kanataTVFocus(cornerRadius: 12)
@@ -324,7 +324,7 @@ struct MediaImportPreview: View {
                     .frame(width: 48, height: 48)
                 #endif
             }
-            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .kanataGlassSurface(cornerRadius: 12)
             .kanataTVFocus(cornerRadius: 12)
             .accessibilityLabel("管理 \(candidate.item.displayName)")
         }

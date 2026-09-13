@@ -225,12 +225,7 @@ struct BilibiliQRCodeLoginSheet: View {
     /// 构建适合客厅观看距离的 B 站扫码登录全屏面板。
     private var tvContent: some View {
         ZStack {
-            LinearGradient(
-                colors: [KanataTheme.backgroundTop, KanataTheme.background],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            KanataAmbientBackground()
 
             VStack(spacing: 34) {
                 HStack(alignment: .top, spacing: 24) {
@@ -267,7 +262,7 @@ struct BilibiliQRCodeLoginSheet: View {
                         .padding(38)
                         .frame(width: 590, alignment: .topLeading)
                         .frame(minHeight: 590, alignment: .topLeading)
-                        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .kanataGlassSurface(cornerRadius: 28, isElevated: true)
 
                         VStack(spacing: 24) {
                             Image(uiImage: renderedQRCode)
@@ -286,7 +281,7 @@ struct BilibiliQRCodeLoginSheet: View {
                                 .background(KanataTheme.elevatedSurface, in: Capsule())
                         }
                         .frame(maxWidth: .infinity, minHeight: 590)
-                        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .kanataGlassSurface(cornerRadius: 28, isElevated: true)
                     }
                 } else if let errorText {
                     VStack(spacing: 24) {
@@ -308,7 +303,7 @@ struct BilibiliQRCodeLoginSheet: View {
                     }
                     .padding(48)
                     .frame(maxWidth: 980, maxHeight: 560)
-                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .kanataGlassSurface(cornerRadius: 28, isElevated: true)
                 } else {
                     VStack(spacing: 22) {
                         ProgressView()

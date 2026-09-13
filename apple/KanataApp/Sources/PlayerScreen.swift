@@ -2191,12 +2191,7 @@ private struct PlaylistPicker: View {
     /// 构建电视端全屏分集面板，以独立背景和短标题避免文字与视频叠在一起。
     private var tvContent: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color.black.opacity(0.96), KanataTheme.background.opacity(0.98)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            KanataAmbientBackground()
 
             VStack(alignment: .leading, spacing: 26) {
                 HStack(alignment: .center, spacing: 24) {
@@ -2405,12 +2400,7 @@ struct CandidatePicker: View {
     /// 构建 Apple TV 双栏弹幕来源选择界面，减少默认列表的大片高亮与焦点跳跃。
     private var tvContent: some View {
         ZStack {
-            LinearGradient(
-                colors: [KanataTheme.backgroundTop, KanataTheme.background],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            KanataAmbientBackground()
 
             VStack(spacing: 28) {
                 HStack(spacing: 20) {
@@ -2464,11 +2454,7 @@ struct CandidatePicker: View {
                     }
                     .padding(.horizontal, 18)
                     .frame(height: 70, alignment: .center)
-                    .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(KanataTheme.separator, lineWidth: 1)
-                    }
+                    .kanataGlassSurface(cornerRadius: 14, isElevated: true)
                     Button { searchCandidates() } label: {
                         Label(viewModel.isSearchingCandidates ? "正在搜索" : "搜索弹幕", systemImage: "magnifyingglass")
                     }
@@ -2480,7 +2466,7 @@ struct CandidatePicker: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(24)
-                .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .kanataGlassSurface(cornerRadius: 22, isElevated: true)
 
                 if let binding = viewModel.currentBinding {
                     VStack(alignment: .leading, spacing: 14) {
@@ -2508,7 +2494,7 @@ struct CandidatePicker: View {
                         .focused($focusedControl, equals: .removeBinding)
                     }
                     .padding(24)
-                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .kanataGlassSurface(cornerRadius: 22, isElevated: true)
                 }
 
                 if viewModel.hasLocalDanmaku {
@@ -2528,7 +2514,7 @@ struct CandidatePicker: View {
                         .focused($focusedControl, equals: .removeLocal)
                     }
                     .padding(24)
-                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .kanataGlassSurface(cornerRadius: 22, isElevated: true)
                 }
             }
             .padding(6)
@@ -2561,7 +2547,7 @@ struct CandidatePicker: View {
                         .frame(maxWidth: 620)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .kanataGlassSurface(cornerRadius: 22, isElevated: true)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 12) {
@@ -2605,7 +2591,7 @@ struct CandidatePicker: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(KanataTheme.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .kanataGlassSurface(cornerRadius: 24, isElevated: true)
         .focusSection()
     }
 

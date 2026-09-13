@@ -987,12 +987,7 @@ private struct PlexAuthorizationView: View {
     /// 构建适合客厅观看距离的 Plex 授权与服务器选择全屏面板。
     private var tvContent: some View {
         ZStack {
-            LinearGradient(
-                colors: [KanataTheme.backgroundTop, KanataTheme.background],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            KanataAmbientBackground()
 
             VStack(spacing: 34) {
                 HStack(alignment: .top, spacing: 24) {
@@ -1034,7 +1029,7 @@ private struct PlexAuthorizationView: View {
                     }
                     .padding(48)
                     .frame(maxWidth: 980, maxHeight: 560)
-                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .kanataGlassSurface(cornerRadius: 28, isElevated: true)
                 } else {
                     VStack(spacing: 22) {
                         ProgressView()
@@ -1078,7 +1073,7 @@ private struct PlexAuthorizationView: View {
             .padding(40)
             .frame(width: 650, alignment: .topLeading)
             .frame(minHeight: 540, alignment: .topLeading)
-            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .kanataGlassSurface(cornerRadius: 28, isElevated: true)
 
             VStack(spacing: 22) {
                 if let renderedQRCode {
@@ -1109,7 +1104,7 @@ private struct PlexAuthorizationView: View {
             }
             .padding(36)
             .frame(maxWidth: .infinity, minHeight: 540)
-            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .kanataGlassSurface(cornerRadius: 28, isElevated: true)
         }
     }
 
@@ -1149,7 +1144,7 @@ private struct PlexAuthorizationView: View {
                             }
                             .padding(.horizontal, 28)
                             .frame(maxWidth: .infinity, minHeight: 116)
-                            .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 20))
+                            .kanataGlassSurface(cornerRadius: 20, isElevated: true)
                         }
                         .kanataTVFocus(cornerRadius: 24)
                         .focused($focusedControl, equals: .connection(connection.id))
@@ -1161,7 +1156,7 @@ private struct PlexAuthorizationView: View {
         }
         .padding(34)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .kanataGlassSurface(cornerRadius: 28, isElevated: true)
         .focusSection()
     }
 
@@ -1542,11 +1537,7 @@ private struct WebDAVChannelView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
-        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(KanataTheme.separator.opacity(0.55), lineWidth: 1)
-        }
+        .kanataGlassSurface(cornerRadius: 16)
         .listRowInsets(webDAVControlInsets)
         .listRowBackground(Color.clear)
         #if !os(tvOS)
@@ -1572,11 +1563,7 @@ private struct WebDAVChannelView: View {
                 webDAVAddButton(entry)
             }
         }
-        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(KanataTheme.separator.opacity(0.7), lineWidth: 1)
-        }
+        .kanataGlassSurface(cornerRadius: 14)
         .listRowInsets(webDAVEntryInsets)
         .listRowBackground(Color.clear)
         #if !os(tvOS)
@@ -1998,11 +1985,7 @@ private struct MediaServerChannelView: View {
                 mediaServerAddButton(entry)
             }
         }
-        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(KanataTheme.separator.opacity(0.7), lineWidth: 1)
-        }
+        .kanataGlassSurface(cornerRadius: 14)
         .listRowBackground(Color.clear)
         #if !os(tvOS)
         .listRowSeparator(.hidden)
@@ -2104,11 +2087,7 @@ private struct MediaServerChannelView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
-        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(KanataTheme.separator.opacity(0.55), lineWidth: 1)
-        }
+        .kanataGlassSurface(cornerRadius: 16)
         .listRowInsets(mediaServerControlInsets)
         .listRowBackground(Color.clear)
         #if !os(tvOS)

@@ -76,17 +76,27 @@ struct SettingsView: View {
         @Bindable var cloudSync = cloudSync
         return Form {
                 Section("外观与个性化") {
-                    Picker("主题色", selection: $settings.accentTheme) {
-                        ForEach(KanataAccentTheme.allCases) { theme in
-                            Label {
-                                Text(theme.title)
-                            } icon: {
-                                Circle()
-                                    .fill(theme.accent)
-                                    .frame(width: 18, height: 18)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("主题氛围")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 14) {
+                                ForEach(KanataAccentTheme.allCases) { theme in
+                                    Button {
+                                        settings.accentTheme = theme
+                                    } label: {
+                                        KanataThemePreview(
+                                            theme: theme,
+                                            isSelected: settings.accentTheme == theme
+                                        )
+                                    }
+                                    .kanataTVFocus(cornerRadius: 18)
+                                }
                             }
-                            .tag(theme)
+                            .padding(.vertical, 8)
                         }
+                        .scrollIndicators(.hidden)
                     }
                     Picker("界面外观", selection: $settings.appearance) {
                         ForEach(KanataAppearance.allCases) { appearance in

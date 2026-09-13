@@ -225,12 +225,7 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                LinearGradient(
-                    colors: [KanataTheme.backgroundTop, KanataTheme.background],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                KanataAmbientBackground()
                 if items.isEmpty && mediaSources.isEmpty {
                     ContentUnavailableView {
                         Label("开始建立你的媒体库", systemImage: "play.rectangle.on.rectangle")
@@ -1363,12 +1358,7 @@ private struct TVLibrarySearchSheet: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [KanataTheme.backgroundTop, KanataTheme.background],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            KanataAmbientBackground()
 
             VStack(spacing: 48) {
                 HStack(alignment: .top, spacing: 24) {
@@ -1402,11 +1392,7 @@ private struct TVLibrarySearchSheet: View {
                     }
                     .padding(.horizontal, 26)
                     .frame(minHeight: 82)
-                    .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 18))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18)
-                            .stroke(KanataTheme.separator, lineWidth: 1)
-                    }
+                    .kanataGlassSurface(cornerRadius: 18, isElevated: true)
                     Text(searchText.isEmpty
                         ? "输入关键词后，媒体库会立即筛选匹配内容。"
                         : "当前关键词：\(searchText)")
@@ -1431,7 +1417,7 @@ private struct TVLibrarySearchSheet: View {
                 }
                 .padding(40)
                 .frame(maxWidth: 1120)
-                .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .kanataGlassSurface(cornerRadius: 28, isElevated: true)
 
                 Spacer(minLength: 0)
             }
