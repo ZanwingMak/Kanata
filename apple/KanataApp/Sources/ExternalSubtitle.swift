@@ -18,6 +18,15 @@ struct ExternalSubtitleResource: Identifiable, Hashable, Sendable {
     var id: String { url.absoluteString }
 }
 
+/// 媒体源字幕目录浏览器中的文件夹或字幕文件。
+struct ExternalSubtitleBrowserEntry: Identifiable, Sendable {
+    let id: String
+    let name: String
+    let isDirectory: Bool
+    let navigationKey: String?
+    let resource: ExternalSubtitleResource?
+}
+
 /// 按视频文件名与设备首选语言筛选、排序外挂字幕。
 enum ExternalSubtitlePreference {
     static let supportedExtensions = Set(["srt", "vtt", "ass", "ssa"])

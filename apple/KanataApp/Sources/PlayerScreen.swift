@@ -408,6 +408,360 @@ private struct TVSeekBar: View {
     }
 }
 
+/// Apple TV 播放器底部快捷操作的圆形玻璃标签。
+private struct TVPlayerActionLabel: View {
+    let symbol: String
+    let title: String
+    let detail: String?
+    let isActive: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .fill(isFocused ? Color.white.opacity(0.96) : Color.black.opacity(0.34))
+                    .background(.ultraThinMaterial, in: Circle())
+                Circle()
+                    .strokeBorder(
+                        isFocused ? Color.white.opacity(0.92) : Color.white.opacity(0.22),
+                        lineWidth: isFocused ? 2 : 1
+                    )
+                Image(systemName: symbol)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(isFocused ? Color.black.opacity(0.88) : (isActive ? KanataTheme.accent : .white))
+            }
+            .frame(width: 58, height: 58)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            if let detail {
+                Text(detail)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.68))
+                    .lineLimit(1)
+            }
+        }
+        .frame(minWidth: 82)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Apple TV 播放器快捷操作的克制焦点样式。
+private struct TVPlayerActionButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) private var isFocused
+
+    /// 绘制轻微抬升的圆形操作，不在视频画面上叠加厚重边框。
+    /// - Parameter configuration: SwiftUI 按钮状态。
+    /// - Returns: 保持尺寸稳定的播放器快捷操作。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .focusEffectDisabled()
+            .scaleEffect(isFocused ? 1.08 : 1)
+            .shadow(color: .black.opacity(isFocused ? 0.38 : 0.18), radius: 14, y: 8)
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(.easeOut(duration: 0.14), value: isFocused)
+    }
+}
+
+/// Apple TV 播放器右侧浮层的高对比度行按钮样式。
+private struct TVPlayerQuickMenuRowStyle: ButtonStyle {
+    @Environment(\.isFocused) private var isFocused
+
+    /// 让聚焦行使用白底深色字，避免玻璃背景上的文字丢失。
+    /// - Parameter configuration: SwiftUI 按钮状态。
+    /// - Returns: 适合遥控器上下选择的整行按钮。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isFocused ? Color.black.opacity(0.9) : Color.white)
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity, minHeight: 62)
+            .background(
+                isFocused ? Color.white.opacity(0.94) : Color.white.opacity(0.075),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(isFocused ? Color.white : Color.white.opacity(0.12), lineWidth: 1)
+            }
+            .focusEffectDisabled()
+            .scaleEffect(isFocused ? 1.018 : 1)
+            .opacity(configuration.isPressed ? 0.74 : 1)
+            .animation(.easeOut(duration: 0.14), value: isFocused)
+    }
+}
+
+/// Apple TV 播放页右侧的轻量播放选项浮层。
+private struct TVPlayerQuickSettingsPanel: View {
+    let playbackRate: Double
+    let scalingMode: PlayerScalingMode
+    let subtitleDetail: String
+    let onCycleRate: () -> Void
+    let onCycleScaling: () -> Void
+    let onRestart: () -> Void
+    let onOpenSubtitles: () -> Void
+    let onOpenSettings: () -> Void
+    let onDismiss: () -> Void
+    @FocusState private var focusedAction: Action?
+
+    /// 浮层内可由遥控器选择的操作。
+    private enum Action: Hashable {
+        case speed
+        case scaling
+        case restart
+        case subtitles
+        case settings
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("播放选项")
+                        .font(.title2.bold())
+                    Text("常用设置无需离开画面")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.62))
+                }
+                Spacer()
+                Image(systemName: "ellipsis.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(KanataTheme.accent)
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 6)
+
+            Button(action: onCycleRate) {
+                quickMenuLabel(
+                    title: "播放速度",
+                    value: playbackRateText,
+                    symbol: "gauge.with.dots.needle.50percent"
+                )
+            }
+            .buttonStyle(TVPlayerQuickMenuRowStyle())
+            .focused($focusedAction, equals: .speed)
+
+            Button(action: onCycleScaling) {
+                quickMenuLabel(title: "画面比例", value: scalingMode.title, symbol: "rectangle.inset.filled")
+            }
+            .buttonStyle(TVPlayerQuickMenuRowStyle())
+            .focused($focusedAction, equals: .scaling)
+
+            Button(action: onRestart) {
+                quickMenuLabel(title: "从头播放", value: nil, symbol: "backward.end.fill")
+            }
+            .buttonStyle(TVPlayerQuickMenuRowStyle())
+            .focused($focusedAction, equals: .restart)
+
+            Button(action: onOpenSubtitles) {
+                quickMenuLabel(title: "字幕与音轨", value: subtitleDetail, symbol: "captions.bubble.fill")
+            }
+            .buttonStyle(TVPlayerQuickMenuRowStyle())
+            .focused($focusedAction, equals: .subtitles)
+
+            Button(action: onOpenSettings) {
+                quickMenuLabel(title: "全部播放设置", value: nil, symbol: "slider.horizontal.3")
+            }
+            .buttonStyle(TVPlayerQuickMenuRowStyle())
+            .focused($focusedAction, equals: .settings)
+        }
+        .padding(22)
+        .frame(width: 440)
+        .kanataGlassSurface(cornerRadius: 30, isElevated: true)
+        .focusSection()
+        .onAppear(perform: focusInitialAction)
+        .onExitCommand(perform: onDismiss)
+    }
+
+    /// 构建浮层中图标、标题和值对齐的单行标签。
+    /// - Parameters:
+    ///   - title: 操作标题。
+    ///   - value: 当前选项值。
+    ///   - symbol: SF Symbol 名称。
+    /// - Returns: 可放入整行按钮的标签。
+    private func quickMenuLabel(title: String, value: String?, symbol: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
+                .font(.body.weight(.semibold))
+                .frame(width: 28)
+            Text(title)
+                .font(.headline)
+            Spacer()
+            if let value {
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .opacity(0.72)
+                    .lineLimit(1)
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .opacity(0.54)
+        }
+    }
+
+    /// 返回播放倍率在浮层中的简短文案。
+    private var playbackRateText: String {
+        abs(playbackRate - 1) < 0.001 ? "正常" : "\(playbackRate.formatted())×"
+    }
+
+    /// 浮层出现后把焦点稳定放到第一行。
+    private func focusInitialAction() {
+        Task { @MainActor in
+            await Task.yield()
+            focusedAction = .speed
+        }
+    }
+}
+
+/// Apple TV 播放页底部的横向分集玻璃架。
+private struct TVPlayerEpisodeShelf: View {
+    let items: [LibraryItem]
+    let currentItemID: String
+    let onSelect: (LibraryItem) -> Void
+    let onDismiss: () -> Void
+    @FocusState private var focusedItemID: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("连续播放")
+                            .font(.largeTitle.bold())
+                        Text("\(items.first?.collectionTitle ?? "当前列表") · 共 \(items.count) 集")
+                            .font(.headline)
+                            .foregroundStyle(.white.opacity(0.66))
+                    }
+                    Spacer()
+                    Button(action: onDismiss) {
+                        Label("收起", systemImage: "chevron.down")
+                    }
+                    .buttonStyle(KanataTVActionButtonStyle())
+                }
+
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 22) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { offset, item in
+                            Button {
+                                onSelect(item)
+                            } label: {
+                                episodeCard(item: item, offset: offset)
+                            }
+                            .buttonStyle(.plain)
+                            .kanataTVFocus(cornerRadius: 24)
+                            .focused($focusedItemID, equals: item.id)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 10)
+                }
+                .scrollIndicators(.hidden)
+                .scrollClipDisabled()
+            }
+            .padding(.horizontal, 74)
+            .padding(.top, 34)
+            .padding(.bottom, 48)
+            .background(.ultraThinMaterial)
+            .background(Color.black.opacity(0.48))
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(.white.opacity(0.16))
+                    .frame(height: 1)
+            }
+        }
+        .background(
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.18), .black.opacity(0.54)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .focusSection()
+        .onAppear(perform: focusCurrentItem)
+        .onExitCommand(perform: onDismiss)
+    }
+
+    /// 构建带缩略图、集数和当前播放状态的横向分集卡片。
+    /// - Parameters:
+    ///   - item: 当前媒体条目。
+    ///   - offset: 条目在列表中的位置。
+    /// - Returns: 固定电视阅读距离的分集卡片。
+    private func episodeCard(item: LibraryItem, offset: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack(alignment: .bottomLeading) {
+                episodeArtwork(item)
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.72)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                Text(item.episodeLabel ?? "第 \(offset + 1) 集")
+                    .font(.headline.weight(.semibold))
+                    .padding(14)
+            }
+            .frame(width: 330, height: 166)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+            Text(item.libraryTitle)
+                .font(.headline)
+                .lineLimit(1)
+            HStack(spacing: 6) {
+                if item.id == currentItemID {
+                    Image(systemName: "speaker.wave.2.fill")
+                    Text("正在播放")
+                } else {
+                    Image(systemName: "play.fill")
+                    Text(item.sourceName ?? "媒体库")
+                }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(item.id == currentItemID ? KanataTheme.accent : .white.opacity(0.58))
+        }
+        .foregroundStyle(.white)
+        .frame(width: 330, alignment: .leading)
+    }
+
+    /// 返回分集海报；没有海报时使用主题渐变占位图。
+    /// - Parameter item: 需要展示缩略图的媒体条目。
+    /// - Returns: 填满分集卡片的海报视图。
+    @ViewBuilder
+    private func episodeArtwork(_ item: LibraryItem) -> some View {
+        if let value = item.artworkURLString, let url = URL(string: value) {
+            AsyncImage(url: url) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                episodeArtworkPlaceholder
+            }
+        } else {
+            episodeArtworkPlaceholder
+        }
+    }
+
+    /// 没有海报时使用与应用主题一致的柔和占位画面。
+    private var episodeArtworkPlaceholder: some View {
+        LinearGradient(
+            colors: [KanataTheme.accent.opacity(0.88), KanataTheme.ambientCompanion.opacity(0.74)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay {
+            Image(systemName: "play.rectangle.fill")
+                .font(.system(size: 48, weight: .medium))
+                .foregroundStyle(.white.opacity(0.78))
+        }
+    }
+
+    /// 分集架展开后优先聚焦当前正在播放的条目。
+    private func focusCurrentItem() {
+        Task { @MainActor in
+            await Task.yield()
+            focusedItemID = currentItemID
+        }
+    }
+}
+
 /// 电视播放器内可由 Siri Remote 到达的焦点目标。
 private enum TVPlayerFocus: Hashable {
     case background
@@ -420,6 +774,7 @@ private enum TVPlayerFocus: Hashable {
     case forward
     case nextEpisode
     case playlist
+    case subtitle
     case danmakuToggle
     case danmakuSettings
     case manualMatch
@@ -485,6 +840,7 @@ struct PlayerScreen: View {
     @State private var forcesUniversalPlayer = false
     @State private var playbackRouteMode = PlaybackRouteMode.automatic
     #if os(tvOS)
+    @State private var isShowingTVQuickSettings = false
     @FocusState private var tvFocusedControl: TVPlayerFocus?
     #endif
     #if os(iOS)
@@ -556,6 +912,33 @@ struct PlayerScreen: View {
                     controlsLayer
                 }
             }
+            #if os(tvOS)
+            if isShowingPlaylist {
+                TVPlayerEpisodeShelf(
+                    items: items,
+                    currentItemID: activeItem.id,
+                    onSelect: selectItem,
+                    onDismiss: dismissTVPlaylist
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .zIndex(3)
+            }
+            if isShowingTVQuickSettings {
+                tvQuickSettingsOverlay
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(4)
+            }
+            if isShowingPlaybackPanel {
+                tvPlaybackOptionsDrawer
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(5)
+            }
+            if isShowingDanmakuPanel {
+                tvDanmakuSettingsDrawer
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(6)
+            }
+            #endif
             if viewModel.isBuffering, case .ready = viewModel.state {
                 ProgressView()
                     .controlSize(.large)
@@ -614,64 +997,20 @@ struct PlayerScreen: View {
             }
             #endif
         }
-        .kanataModal(isPresented: $isShowingDanmakuPanel) {
+        .kanataModal(isPresented: danmakuPanelModalBinding) {
             DanmakuSettingsPanel(
                 config: $settings.danmakuConfig,
                 offset: $viewModel.offset,
-                onOffsetChanged: { showOSD(String(format: "弹幕延迟 %@%.1fs", viewModel.offset >= 0 ? "+" : "", viewModel.offset)) }
+                onOffsetChanged: { showOSD(String(format: "弹幕延迟 %@%.1fs", viewModel.offset >= 0 ? "+" : "", viewModel.offset)) },
+                onDismissPanel: nil
             )
             .presentationDetents([.medium, .large])
         }
-        .kanataModal(isPresented: $isShowingPlaybackPanel) {
-            PlaybackOptionsPanel(
-                viewModel: viewModel,
-                scalingMode: $scalingMode,
-                queueMode: $queueMode,
-                sleepMode: $sleepMode,
-                playbackRouteMode: playbackRouteMode,
-                playbackPathLabel: playbackPathLabel,
-                isCompatibilityAvailable: isCompatibilityAvailable,
-                hasExternalSubtitle: !externalSubtitleCues.isEmpty,
-                externalSubtitleName: externalSubtitleName,
-                externalSubtitleResources: externalSubtitleResources,
-                selectedExternalSubtitleID: selectedExternalSubtitleID,
-                selectedOnlineSubtitleFileID: selectedOnlineSubtitleFileID,
-                subtitleSearchTitle: activeItem.libraryTitle,
-                subtitleVideoFileName: activeItem.displayName,
-                subtitleSearchSeason: activeItem.season,
-                subtitleSearchEpisode: activeItem.episode ?? activeItem.collectionIndex,
-                externalSubtitleEnabled: $isExternalSubtitleEnabled,
-                externalSubtitleOffset: $externalSubtitleOffset,
-                isFetchingExternalSubtitles: isFetchingExternalSubtitles,
-                skipSegment: skipSegment,
-                onImportDanmaku: {
-                    isShowingPlaybackPanel = false
-                    isImportingDanmaku = true
-                },
-                onMatchDanmaku: {
-                    isShowingPlaybackPanel = false
-                    viewModel.isShowingCandidates = true
-                },
-                onImportSubtitle: {
-                    isShowingPlaybackPanel = false
-                    isImportingSubtitle = true
-                },
-                onFetchExternalSubtitles: fetchExternalSubtitles,
-                onSelectExternalSubtitle: selectExternalSubtitle,
-                onSelectOnlineSubtitle: loadOnlineSubtitle,
-                onMarkIntro: { updateSkipSegment(introEnd: currentTime) },
-                onMarkOutro: { updateSkipSegment(outroStart: currentTime) },
-                onClearSkipSegment: { clearSkipSegment() },
-                onSelectPlaybackRoute: selectPlaybackRoute,
-                onPictureInPicture: {
-                    if !viewModel.toggleUniversalPictureInPicture() {
-                        surfaceController.togglePictureInPicture()
-                    }
-                }
-            )
+        .kanataModal(isPresented: playbackPanelModalBinding) {
+            playbackOptionsPanel(onDismissPanel: nil)
             .presentationDetents([.medium, .large])
         }
-        .kanataModal(isPresented: $isShowingPlaylist) {
+        .kanataModal(isPresented: playlistModalBinding) {
             PlaylistPicker(
                 items: items,
                 currentItemID: activeItem.id,
@@ -723,6 +1062,99 @@ struct PlayerScreen: View {
     private var isPlaybackFailed: Bool {
         if case .failed = viewModel.state { return true }
         return false
+    }
+
+    /// tvOS 由播放页内嵌分集架承载，触控设备继续使用系统模态页。
+    private var playlistModalBinding: Binding<Bool> {
+        #if os(tvOS)
+        Binding(get: { false }, set: { _ in })
+        #else
+        Binding(
+            get: { isShowingPlaylist },
+            set: { isShowingPlaylist = $0 }
+        )
+        #endif
+    }
+
+    /// tvOS 在播放画面右侧显示设置抽屉，触控设备继续使用系统 Sheet。
+    private var playbackPanelModalBinding: Binding<Bool> {
+        #if os(tvOS)
+        Binding(get: { false }, set: { _ in })
+        #else
+        Binding(
+            get: { isShowingPlaybackPanel },
+            set: { isShowingPlaybackPanel = $0 }
+        )
+        #endif
+    }
+
+    /// tvOS 在播放画面右侧显示弹幕设置抽屉，触控设备继续使用系统 Sheet。
+    private var danmakuPanelModalBinding: Binding<Bool> {
+        #if os(tvOS)
+        Binding(get: { false }, set: { _ in })
+        #else
+        Binding(
+            get: { isShowingDanmakuPanel },
+            set: { isShowingDanmakuPanel = $0 }
+        )
+        #endif
+    }
+
+    /// 创建完整播放设置内容，并按承载方式注入关闭操作。
+    /// - Parameter onDismissPanel: tvOS 右侧抽屉使用的显式关闭回调；系统 Sheet 传 nil。
+    /// - Returns: 包含播放、字幕、弹幕和媒体信息的设置内容。
+    private func playbackOptionsPanel(onDismissPanel: (() -> Void)?) -> some View {
+        PlaybackOptionsPanel(
+            viewModel: viewModel,
+            scalingMode: $scalingMode,
+            queueMode: $queueMode,
+            sleepMode: $sleepMode,
+            playbackRouteMode: playbackRouteMode,
+            playbackPathLabel: playbackPathLabel,
+            isCompatibilityAvailable: isCompatibilityAvailable,
+            hasExternalSubtitle: !externalSubtitleCues.isEmpty,
+            externalSubtitleName: externalSubtitleName,
+            externalSubtitleResources: externalSubtitleResources,
+            selectedExternalSubtitleID: selectedExternalSubtitleID,
+            selectedOnlineSubtitleFileID: selectedOnlineSubtitleFileID,
+            subtitleSearchTitle: activeItem.libraryTitle,
+            subtitleVideoFileName: activeItem.displayName,
+            subtitleSearchSeason: activeItem.season,
+            subtitleSearchEpisode: activeItem.episode ?? activeItem.collectionIndex,
+            subtitleSourceProfile: activeItem.sourceProfileID.flatMap { MediaSourceProfileStore.profile(id: $0) },
+            subtitleVideoURL: activeItem.resolveURL(),
+            subtitleServerItemID: activeItem.serverItemID,
+            externalSubtitleEnabled: $isExternalSubtitleEnabled,
+            externalSubtitleOffset: $externalSubtitleOffset,
+            isFetchingExternalSubtitles: isFetchingExternalSubtitles,
+            skipSegment: skipSegment,
+            onImportDanmaku: {
+                isShowingPlaybackPanel = false
+                isImportingDanmaku = true
+            },
+            onMatchDanmaku: {
+                isShowingPlaybackPanel = false
+                viewModel.isShowingCandidates = true
+            },
+            onImportSubtitle: {
+                isShowingPlaybackPanel = false
+                isImportingSubtitle = true
+            },
+            onFetchExternalSubtitles: fetchExternalSubtitles,
+            onSelectExternalSubtitle: selectExternalSubtitle,
+            onSelectBrowsedSubtitle: selectBrowsedSubtitle,
+            onSelectOnlineSubtitle: loadOnlineSubtitle,
+            onMarkIntro: { updateSkipSegment(introEnd: currentTime) },
+            onMarkOutro: { updateSkipSegment(outroStart: currentTime) },
+            onClearSkipSegment: clearSkipSegment,
+            onSelectPlaybackRoute: selectPlaybackRoute,
+            onPictureInPicture: {
+                if !viewModel.toggleUniversalPictureInPicture() {
+                    surfaceController.togglePictureInPicture()
+                }
+            },
+            onDismissPanel: onDismissPanel
+        )
     }
 
     /// 计算弹幕可用画布；竖屏避开顶部栏，横屏只保留上下间距且不改变左右范围。
@@ -995,8 +1427,345 @@ struct PlayerScreen: View {
         }
     }
 
-    /// 播放控制层：顶部信息 + 底部进度与按钮
+    /// 根据当前平台选择适合观看距离的播放控制层。
+    @ViewBuilder
     private var controlsLayer: some View {
+        #if os(tvOS)
+        tvControlsLayer
+        #else
+        touchControlsLayer
+        #endif
+    }
+
+    #if os(tvOS)
+    /// Apple TV 播放控制层：保留完整画面，以底部渐变承载信息、时间轴和快捷操作。
+    private var tvControlsLayer: some View {
+        ZStack {
+            LinearGradient(
+                colors: [.clear, .clear, .black.opacity(0.28), .black.opacity(0.88)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+
+            VStack(spacing: 0) {
+                HStack(alignment: .center, spacing: 18) {
+                    Button(action: handleBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.title2.bold())
+                            .frame(width: 58, height: 58)
+                            .background(.black.opacity(0.28), in: Circle())
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay {
+                                Circle().strokeBorder(.white.opacity(0.20), lineWidth: 1)
+                            }
+                    }
+                    .buttonStyle(PlayerControlButtonStyle())
+                    .focused($tvFocusedControl, equals: .back)
+                    .accessibilityLabel("返回媒体库")
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(playerDisplayTitle)
+                            .font(.title3.weight(.semibold))
+                            .lineLimit(1)
+                        Text(activeItem.sourceName ?? viewModel.mediaInfo.source)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.64))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 74)
+                .padding(.top, 44)
+                .focusSection()
+
+                Spacer()
+
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .bottom, spacing: 42) {
+                        tvNowPlayingMetadata
+                        Spacer(minLength: 36)
+                        tvPlaybackActionRow
+                    }
+
+                    HStack(spacing: 14) {
+                        Text(timeLabel(currentTime))
+                            .frame(width: 78, alignment: .leading)
+                        TVSeekBar(
+                            value: currentTime,
+                            duration: max(viewModel.duration, 1),
+                            isPlaying: isPlaying,
+                            onScrubChanged: previewTVSeek,
+                            onSeek: commitTVSeek,
+                            onMoveUp: focusTVActionRow,
+                            onMoveDown: { tvFocusedControl = .playPause },
+                            onTogglePlayback: togglePlayback
+                        )
+                        .focused($tvFocusedControl, equals: .progress)
+                        Text(timeLabel(viewModel.duration))
+                            .frame(width: 78, alignment: .trailing)
+                    }
+                    .font(.caption.monospacedDigit().weight(.semibold))
+
+                    HStack(alignment: .center, spacing: 20) {
+                        tvTransportRow
+                        Spacer()
+                        Label(
+                            isPlaying ? "左右键快进或快退" : "左右滑动可快速拖动进度",
+                            systemImage: "hand.draw"
+                        )
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.58))
+                    }
+                    .focusSection()
+                }
+                .padding(.horizontal, 74)
+                .padding(.bottom, 42)
+            }
+        }
+        .foregroundStyle(.white)
+        .transaction { transaction in transaction.animation = nil }
+    }
+
+    /// Apple TV 时间轴上方的当前媒体信息。
+    private var tvNowPlayingMetadata: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(activeItem.episodeLabel ?? "正在播放")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(KanataTheme.accent)
+            Text(activeItem.libraryTitle)
+                .font(.title2.bold())
+                .lineLimit(1)
+            HStack(spacing: 8) {
+                Text(viewModel.mediaInfo.resolution)
+                Text("·")
+                Text(activeItem.sourceName ?? viewModel.mediaInfo.source)
+                if !viewModel.danmakuStats.isEmpty {
+                    Text("·")
+                    Text(viewModel.danmakuStats)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.white.opacity(0.62))
+            .lineLimit(1)
+        }
+        .frame(maxWidth: 680, alignment: .leading)
+    }
+
+    /// Apple TV 时间轴上方的圆形玻璃快捷操作。
+    private var tvPlaybackActionRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if items.count > 1 {
+                Button(action: presentTVPlaylist) {
+                    TVPlayerActionLabel(
+                        symbol: "rectangle.stack.fill",
+                        title: "分集",
+                        detail: "\(activeIndex + 1)/\(items.count)",
+                        isActive: false
+                    )
+                }
+                .buttonStyle(TVPlayerActionButtonStyle())
+                .focused($tvFocusedControl, equals: .playlist)
+                .accessibilityLabel("选择分集")
+            }
+
+            Button(action: presentPlaybackOptions) {
+                TVPlayerActionLabel(
+                    symbol: "captions.bubble.fill",
+                    title: "字幕",
+                    detail: externalSubtitleName == nil ? nil : "已加载",
+                    isActive: isExternalSubtitleEnabled && externalSubtitleName != nil
+                )
+            }
+            .buttonStyle(TVPlayerActionButtonStyle())
+            .focused($tvFocusedControl, equals: .subtitle)
+            .accessibilityLabel("字幕与音轨")
+
+            Button(action: toggleDanmaku) {
+                TVPlayerActionLabel(
+                    symbol: settings.danmakuConfig.enabled ? "text.bubble.fill" : "text.bubble",
+                    title: "弹幕",
+                    detail: settings.danmakuConfig.enabled ? "开启" : "关闭",
+                    isActive: settings.danmakuConfig.enabled
+                )
+            }
+            .buttonStyle(TVPlayerActionButtonStyle())
+            .focused($tvFocusedControl, equals: .danmakuToggle)
+            .accessibilityLabel(settings.danmakuConfig.enabled ? "关闭弹幕" : "开启弹幕")
+
+            Button(action: presentDanmakuSettings) {
+                TVPlayerActionLabel(
+                    symbol: "slider.horizontal.3",
+                    title: "弹幕设置",
+                    detail: nil,
+                    isActive: false
+                )
+            }
+            .buttonStyle(TVPlayerActionButtonStyle())
+            .focused($tvFocusedControl, equals: .danmakuSettings)
+            .accessibilityLabel("弹幕设置")
+
+            if settings.isFullFeatureAccessEnabled {
+                Button(action: presentDanmakuCandidates) {
+                    TVPlayerActionLabel(
+                        symbol: "text.magnifyingglass",
+                        title: "匹配",
+                        detail: nil,
+                        isActive: false
+                    )
+                }
+                .buttonStyle(TVPlayerActionButtonStyle())
+                .focused($tvFocusedControl, equals: .manualMatch)
+                .accessibilityLabel("选择弹幕来源")
+            }
+
+            Button(action: presentTVQuickSettings) {
+                TVPlayerActionLabel(
+                    symbol: "ellipsis",
+                    title: "更多",
+                    detail: nil,
+                    isActive: false
+                )
+            }
+            .buttonStyle(TVPlayerActionButtonStyle())
+            .focused($tvFocusedControl, equals: .more)
+            .accessibilityLabel("更多播放设置")
+        }
+    }
+
+    /// Apple TV 时间轴下方只保留高频传输控制，避免与快捷操作重复。
+    private var tvTransportRow: some View {
+        HStack(spacing: 14) {
+            Button {
+                commitSeek(to: currentTime - 10)
+                showOSD("后退 10 秒")
+            } label: {
+                controlSymbol("gobackward.10", prominent: false)
+            }
+            .buttonStyle(PlayerControlButtonStyle())
+            .focused($tvFocusedControl, equals: .rewind)
+            .accessibilityLabel("后退 10 秒")
+
+            if items.count > 1 {
+                Button { moveEpisode(by: -1) } label: {
+                    controlSymbol("backward.end.fill", prominent: false)
+                }
+                .buttonStyle(PlayerControlButtonStyle())
+                .focused($tvFocusedControl, equals: .previousEpisode)
+                .disabled(activeIndex == 0)
+                .accessibilityLabel("上一集")
+            }
+
+            Button(action: togglePlayback) {
+                controlSymbol(isPlaying ? "pause.fill" : "play.fill", prominent: true)
+            }
+            .buttonStyle(PlayerControlButtonStyle())
+            .focused($tvFocusedControl, equals: .playPause)
+            .accessibilityLabel(isPlaying ? "暂停" : "播放")
+
+            if items.count > 1 {
+                Button { moveEpisode(by: 1) } label: {
+                    controlSymbol("forward.end.fill", prominent: false)
+                }
+                .buttonStyle(PlayerControlButtonStyle())
+                .focused($tvFocusedControl, equals: .nextEpisode)
+                .disabled(activeIndex >= items.count - 1)
+                .accessibilityLabel("下一集")
+            }
+
+            Button {
+                commitSeek(to: currentTime + 10)
+                showOSD("前进 10 秒")
+            } label: {
+                controlSymbol("goforward.10", prominent: false)
+            }
+            .buttonStyle(PlayerControlButtonStyle())
+            .focused($tvFocusedControl, equals: .forward)
+            .accessibilityLabel("前进 10 秒")
+        }
+    }
+
+    /// Apple TV 右侧浮动播放选项，保持视频和时间轴可见。
+    private var tvQuickSettingsOverlay: some View {
+        VStack {
+            HStack {
+                Spacer()
+                TVPlayerQuickSettingsPanel(
+                    playbackRate: viewModel.playbackRate,
+                    scalingMode: scalingMode,
+                    subtitleDetail: externalSubtitleName ?? "自动",
+                    onCycleRate: cycleTVPlaybackRate,
+                    onCycleScaling: cycleTVScalingMode,
+                    onRestart: restartFromTVQuickSettings,
+                    onOpenSubtitles: openPlaybackOptionsFromTVQuickSettings,
+                    onOpenSettings: openPlaybackOptionsFromTVQuickSettings,
+                    onDismiss: dismissTVQuickSettings
+                )
+            }
+            Spacer()
+        }
+        .padding(.top, 112)
+        .padding(.trailing, 74)
+        .background(Color.black.opacity(0.12))
+    }
+
+    /// Apple TV 完整播放设置使用不超过半屏的右侧抽屉。
+    private var tvPlaybackOptionsDrawer: some View {
+        HStack(spacing: 0) {
+            Color.black.opacity(0.10)
+                .allowsHitTesting(false)
+            playbackOptionsPanel(onDismissPanel: dismissTVPlaybackOptions)
+                .frame(width: 820)
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 34, style: .continuous)
+                        .strokeBorder(.white.opacity(0.20), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.38), radius: 34, x: -12)
+                .padding(.vertical, 34)
+                .padding(.trailing, 38)
+        }
+        .background(Color.black.opacity(0.16))
+    }
+
+    /// Apple TV 弹幕设置沿用与播放设置一致的半屏右侧抽屉。
+    private var tvDanmakuSettingsDrawer: some View {
+        HStack(spacing: 0) {
+            Color.black.opacity(0.10)
+                .allowsHitTesting(false)
+            DanmakuSettingsPanel(
+                config: Binding(
+                    get: { settings.danmakuConfig },
+                    set: { settings.danmakuConfig = $0 }
+                ),
+                offset: $viewModel.offset,
+                onOffsetChanged: {
+                    showOSD(String(
+                        format: "弹幕延迟 %@%.1fs",
+                        viewModel.offset >= 0 ? "+" : "",
+                        viewModel.offset
+                    ))
+                },
+                onDismissPanel: dismissTVDanmakuSettings
+            )
+            .frame(width: 820)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 34, style: .continuous)
+                    .strokeBorder(.white.opacity(0.20), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.38), radius: 34, x: -12)
+            .padding(.vertical, 34)
+            .padding(.trailing, 38)
+        }
+        .background(Color.black.opacity(0.16))
+    }
+    #endif
+
+    /// 触控设备播放控制层：顶部信息 + 底部进度与按钮。
+    private var touchControlsLayer: some View {
         VStack {
             HStack(alignment: .top) {
                 Button {
@@ -1334,9 +2103,137 @@ struct PlayerScreen: View {
     }
 
     #if os(tvOS)
+    /// 时间轴拖动过程中只更新预览位置，松手前不重复向解码器提交跳转。
+    /// - Parameter target: 遥控器当前预览的目标秒数。
+    private func previewTVSeek(_ target: Double) {
+        isSeeking = true
+        pendingSeekTarget = nil
+        controlsTask?.cancel()
+        currentTime = target
+    }
+
+    /// 提交 Apple TV 时间轴的最终目标并保持控制层可见。
+    /// - Parameter target: 用户松开方向键或触控区时的目标秒数。
+    private func commitTVSeek(_ target: Double) {
+        currentTime = target
+        commitSeek(to: target)
+        showOSD("跳转至 \(timeLabel(target))")
+        setControlsVisible(true)
+    }
+
+    /// 时间轴向上移动时优先进入右侧快捷操作区域。
+    private func focusTVActionRow() {
+        tvFocusedControl = items.count > 1 ? .playlist : .subtitle
+    }
+
+    /// 切换弹幕显示并提供电视端即时反馈。
+    private func toggleDanmaku() {
+        settings.danmakuConfig.enabled.toggle()
+        showOSD(settings.danmakuConfig.enabled ? "弹幕已开启" : "弹幕已关闭")
+        setControlsVisible(true)
+    }
+
+    /// 打开弹幕设置并暂停控制层自动隐藏。
+    private func presentDanmakuSettings() {
+        controlsTask?.cancel()
+        isShowingDanmakuPanel = true
+        tvFocusedControl = nil
+    }
+
+    /// 收起右侧弹幕设置并恢复弹幕设置入口焦点。
+    private func dismissTVDanmakuSettings() {
+        isShowingDanmakuPanel = false
+        tvFocusedControl = .danmakuSettings
+        setControlsVisible(true)
+    }
+
+    /// 打开弹幕候选列表并暂停控制层自动隐藏。
+    private func presentDanmakuCandidates() {
+        controlsTask?.cancel()
+        viewModel.isShowingCandidates = true
+    }
+
+    /// 打开完整播放设置面板。
+    private func presentPlaybackOptions() {
+        controlsTask?.cancel()
+        isShowingTVQuickSettings = false
+        isShowingPlaybackPanel = true
+        tvFocusedControl = nil
+    }
+
+    /// 收起右侧完整播放设置并恢复“更多”入口焦点。
+    private func dismissTVPlaybackOptions() {
+        isShowingPlaybackPanel = false
+        tvFocusedControl = .more
+        setControlsVisible(true)
+    }
+
+    /// 展开右侧轻量播放选项浮层。
+    private func presentTVQuickSettings() {
+        controlsTask?.cancel()
+        isShowingTVQuickSettings = true
+        tvFocusedControl = nil
+    }
+
+    /// 收起右侧轻量播放选项，并把焦点放回“更多”。
+    private func dismissTVQuickSettings() {
+        isShowingTVQuickSettings = false
+        tvFocusedControl = .more
+        scheduleControlsHide()
+    }
+
+    /// 展开当前合集的底部分集架。
+    private func presentTVPlaylist() {
+        controlsTask?.cancel()
+        isShowingPlaylist = true
+        tvFocusedControl = nil
+    }
+
+    /// 收起底部分集架，并把焦点放回分集入口。
+    private func dismissTVPlaylist() {
+        isShowingPlaylist = false
+        tvFocusedControl = .playlist
+        scheduleControlsHide()
+    }
+
+    /// 在常用倍率之间循环切换，避免为单个选项打开新页面。
+    private func cycleTVPlaybackRate() {
+        let rates: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
+        let currentIndex = rates.firstIndex { abs($0 - viewModel.playbackRate) < 0.001 } ?? 2
+        let next = rates[(currentIndex + 1) % rates.count]
+        viewModel.setPlaybackRate(next)
+        showOSD(abs(next - 1) < 0.001 ? "播放速度：正常" : "播放速度：\(next.formatted())×")
+    }
+
+    /// 在适应、填充和拉伸三种画面比例之间循环切换。
+    private func cycleTVScalingMode() {
+        let modes = PlayerScalingMode.allCases
+        let currentIndex = modes.firstIndex(of: scalingMode) ?? 0
+        scalingMode = modes[(currentIndex + 1) % modes.count]
+        showOSD("画面比例：\(scalingMode.title)")
+    }
+
+    /// 从头播放并收起轻量设置浮层。
+    private func restartFromTVQuickSettings() {
+        commitSeek(to: 0)
+        showOSD("已从头播放")
+        dismissTVQuickSettings()
+    }
+
+    /// 从轻量浮层进入右侧完整设置抽屉。
+    private func openPlaybackOptionsFromTVQuickSettings() {
+        isShowingTVQuickSettings = false
+        presentPlaybackOptions()
+    }
+
     /// 控件隐藏时响应遥控器中间确认键，切换播放状态并显示控制层。
     private func handleTVBackgroundConfirm() {
-        guard !shouldShowPlayerControls, !isPlaybackFailed else { return }
+        guard !shouldShowPlayerControls,
+              !isPlaybackFailed,
+              !isShowingTVQuickSettings,
+              !isShowingPlaybackPanel,
+              !isShowingDanmakuPanel,
+              !isShowingPlaylist else { return }
         togglePlayback()
         setControlsVisible(true)
         showOSD(isPlaying ? "播放" : "暂停")
@@ -1345,7 +2242,12 @@ struct PlayerScreen: View {
     /// 控制层隐藏时只负责唤出控件，后续方向事件交给 tvOS 焦点引擎。
     /// - Parameter direction: Siri Remote 当前移动方向。
     private func handleTVRemoteMove(_ direction: MoveCommandDirection) {
-        guard !shouldShowPlayerControls, !isPlaybackFailed else { return }
+        guard !shouldShowPlayerControls,
+              !isPlaybackFailed,
+              !isShowingTVQuickSettings,
+              !isShowingPlaybackPanel,
+              !isShowingDanmakuPanel,
+              !isShowingPlaylist else { return }
         switch direction {
         case .left:
             seekFromTVRemote(by: -10)
@@ -1360,6 +2262,22 @@ struct PlayerScreen: View {
 
     /// 菜单键第一次隐藏播放控件，控件已隐藏时再执行返回。
     private func handleTVExitCommand() {
+        if isShowingTVQuickSettings {
+            dismissTVQuickSettings()
+            return
+        }
+        if isShowingPlaybackPanel {
+            dismissTVPlaybackOptions()
+            return
+        }
+        if isShowingDanmakuPanel {
+            dismissTVDanmakuSettings()
+            return
+        }
+        if isShowingPlaylist {
+            dismissTVPlaylist()
+            return
+        }
         if shouldShowPlayerControls {
             setControlsVisible(false)
         } else {
@@ -1885,6 +2803,12 @@ struct PlayerScreen: View {
     private func scheduleControlsHide() {
         controlsTask?.cancel()
         guard isPlaying, !isSeeking else { return }
+        #if os(tvOS)
+        guard !isShowingTVQuickSettings,
+              !isShowingPlaybackPanel,
+              !isShowingDanmakuPanel,
+              !isShowingPlaylist else { return }
+        #endif
         controlsTask = Task {
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled else { return }
@@ -2084,6 +3008,25 @@ struct PlayerScreen: View {
     /// - Parameter id: 字幕资源 URL 标识。
     private func selectExternalSubtitle(_ id: String) {
         guard let resource = externalSubtitleResources.first(where: { $0.id == id }) else { return }
+        let itemID = activeItem.id
+        subtitleFetchTask?.cancel()
+        isFetchingExternalSubtitles = true
+        subtitleFetchTask = Task {
+            defer { if activeItem.id == itemID { isFetchingExternalSubtitles = false } }
+            _ = await loadExternalSubtitle(resource, for: itemID, announcesResult: true)
+        }
+    }
+
+    /// 接收用户在媒体源目录中手动选中的字幕并立即载入。
+    /// - Parameter resource: 目录浏览器返回的字幕资源。
+    private func selectBrowsedSubtitle(_ resource: ExternalSubtitleResource) {
+        if !externalSubtitleResources.contains(where: { $0.id == resource.id }) {
+            externalSubtitleResources.append(resource)
+            externalSubtitleResources = ExternalSubtitlePreference.sorted(
+                externalSubtitleResources,
+                videoName: activeItem.displayName
+            )
+        }
         let itemID = activeItem.id
         subtitleFetchTask?.cancel()
         isFetchingExternalSubtitles = true
@@ -2765,7 +3708,209 @@ struct CandidatePicker: View {
     }
 }
 
-/// 聚合媒体同目录与在线搜索结果的字幕中心。
+/// 允许用户逐级浏览 WebDAV 或群晖目录并手动选择字幕。
+private struct SubtitleDirectoryBrowserView: View {
+    let profile: MediaSourceProfile
+    let startKey: String
+    let onSelect: (ExternalSubtitleResource) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var directoryStack: [(key: String, name: String)]
+    @State private var entries: [ExternalSubtitleBrowserEntry] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+
+    /// 使用当前视频所在目录创建字幕浏览器。
+    /// - Parameters:
+    ///   - profile: WebDAV 或群晖媒体源配置。
+    ///   - startKey: WebDAV 目录 URL 或群晖目录路径。
+    ///   - onSelect: 用户确认字幕文件后的回调。
+    init(
+        profile: MediaSourceProfile,
+        startKey: String,
+        onSelect: @escaping (ExternalSubtitleResource) -> Void
+    ) {
+        self.profile = profile
+        self.startKey = startKey
+        self.onSelect = onSelect
+        self._directoryStack = State(initialValue: [(startKey, "视频所在目录")])
+    }
+
+    var body: some View {
+        List {
+            Section("当前位置") {
+                HStack(spacing: 14) {
+                    Image(systemName: profile.kind.symbol)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(KanataTheme.accent)
+                        .frame(width: 44, height: 44)
+                        .background(KanataTheme.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(directoryStack.last?.name ?? "视频所在目录")
+                            .font(.headline)
+                        Text(profile.name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .frame(minHeight: 64)
+                .kanataGlassSurface(cornerRadius: 16)
+                .listRowBackground(Color.clear)
+
+                if let rootKey = mediaSourceRootKey,
+                   directoryStack.last?.key != rootKey {
+                    Button {
+                        Task { await returnToMediaSourceRoot(rootKey) }
+                    } label: {
+                        Label("返回媒体源根目录", systemImage: "externaldrive.badge.chevron.backward")
+                            .frame(maxWidth: .infinity, minHeight: 54)
+                    }
+                    .buttonStyle(KanataSecondaryButtonStyle())
+                    .listRowBackground(Color.clear)
+                }
+            }
+
+            if let errorMessage {
+                Section {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(KanataTheme.warning)
+                }
+            }
+
+            Section("文件夹与字幕") {
+                ForEach(entries) { entry in
+                    Button {
+                        select(entry)
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: entry.isDirectory ? "folder.fill" : "captions.bubble.fill")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(entry.isDirectory ? KanataTheme.accent : KanataTheme.success)
+                                .frame(width: 42)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(entry.name)
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                                Text(entry.isDirectory ? "打开文件夹" : "使用这份字幕")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: entry.isDirectory ? "chevron.right" : "checkmark.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity, minHeight: 70, alignment: .leading)
+                    }
+                    .kanataDirectoryRowStyle(cornerRadius: 16)
+                    .listRowBackground(Color.clear)
+                }
+            }
+
+            if !isLoading && entries.isEmpty && errorMessage == nil {
+                ContentUnavailableView(
+                    "当前目录没有字幕",
+                    systemImage: "captions.bubble",
+                    description: Text("可继续进入子文件夹；支持 SRT、VTT、ASS 和 SSA。")
+                )
+            }
+        }
+        .kanataFormBackground()
+        .navigationTitle("选择字幕文件")
+        .kanataInlineNavigationTitle()
+        .overlay {
+            if isLoading {
+                ProgressView("正在读取目录…")
+                    .padding(22)
+                    .kanataGlassSurface(cornerRadius: 18, isElevated: true)
+                    .allowsHitTesting(false)
+            }
+        }
+        .toolbar {
+            if directoryStack.count > 1 {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("上一级") { Task { await goBack() } }
+                }
+            }
+        }
+        .kanataTVExitCommand(isEnabled: directoryStack.count > 1) {
+            Task { await goBack() }
+        }
+        .task { await load(startKey) }
+    }
+
+    /// 进入子文件夹，或确认并返回选中的字幕资源。
+    /// - Parameter entry: 用户点击的目录浏览条目。
+    private func select(_ entry: ExternalSubtitleBrowserEntry) {
+        if entry.isDirectory, let key = entry.navigationKey {
+            directoryStack.append((key, entry.name))
+            Task { await load(key) }
+        } else if let resource = entry.resource {
+            onSelect(resource)
+            dismiss()
+        }
+    }
+
+    /// 返回上一级已访问目录并重新加载其内容。
+    private func goBack() async {
+        guard directoryStack.count > 1 else { return }
+        directoryStack.removeLast()
+        if let key = directoryStack.last?.key { await load(key) }
+    }
+
+    /// 清空当前路径并从媒体源根目录重新浏览。
+    /// - Parameter rootKey: WebDAV 根 URL 或群晖空根路径。
+    private func returnToMediaSourceRoot(_ rootKey: String) async {
+        directoryStack = [(rootKey, profile.name)]
+        await load(rootKey)
+    }
+
+    /// 返回当前媒体源可浏览的根目录标识。
+    private var mediaSourceRootKey: String? {
+        switch profile.kind {
+        case .webDAV:
+            guard let server = profile.serverURL else { return nil }
+            return URL(
+                string: profile.rootPath ?? "/",
+                relativeTo: server.appendingPathComponent("")
+            )?.absoluteURL.absoluteString
+        case .synology:
+            return ""
+        case .jellyfin, .emby, .plex:
+            return nil
+        }
+    }
+
+    /// 根据媒体源类型读取当前目录中的文件夹与字幕。
+    /// - Parameter key: WebDAV 目录 URL 或群晖目录路径。
+    private func load(_ key: String) async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            switch profile.kind {
+            case .webDAV:
+                guard let directory = URL(string: key) else { throw MediaSourceError.invalidResponse }
+                entries = try await WebDAVClient(profile: profile).subtitleBrowserEntries(directory: directory)
+            case .synology:
+                entries = try await SynologyFileStationClient().subtitleBrowserEntries(
+                    profile: profile,
+                    parentPath: key.isEmpty ? nil : key
+                )
+            case .jellyfin, .emby, .plex:
+                entries = []
+                errorMessage = "该媒体源通过服务器字幕轨道选择，无需浏览文件目录。"
+            }
+        } catch {
+            entries = []
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+/// 聚合媒体同目录、手动目录浏览与在线搜索结果的字幕中心。
 private struct SubtitleCenterView: View {
     let searchTitle: String
     let videoFileName: String
@@ -2775,8 +3920,12 @@ private struct SubtitleCenterView: View {
     let selectedDirectoryID: String?
     let selectedOnlineFileID: Int?
     let isDiscoveringDirectory: Bool
+    let sourceProfile: MediaSourceProfile?
+    let videoURL: URL?
+    let serverItemID: String?
     let onRefreshDirectory: () -> Void
     let onSelectDirectory: (String) -> Void
+    let onSelectBrowsedSubtitle: (ExternalSubtitleResource) -> Void
     let onSelectOnline: (OnlineSubtitleCandidate) async -> Bool
     @Environment(AppSettings.self) private var settings
     @State private var query: String
@@ -2795,8 +3944,12 @@ private struct SubtitleCenterView: View {
     ///   - selectedDirectoryID: 当前目录字幕标识。
     ///   - selectedOnlineFileID: 当前在线字幕文件标识。
     ///   - isDiscoveringDirectory: 是否正在扫描媒体目录。
+    ///   - sourceProfile: 当前网络媒体源配置。
+    ///   - videoURL: 当前视频原始地址。
+    ///   - serverItemID: 媒体源中的原始条目标识。
     ///   - onRefreshDirectory: 重新扫描媒体目录操作。
     ///   - onSelectDirectory: 选择目录字幕操作。
+    ///   - onSelectBrowsedSubtitle: 手动浏览后选择字幕的操作。
     ///   - onSelectOnline: 下载并选择在线字幕操作。
     init(
         searchTitle: String,
@@ -2807,8 +3960,12 @@ private struct SubtitleCenterView: View {
         selectedDirectoryID: String?,
         selectedOnlineFileID: Int?,
         isDiscoveringDirectory: Bool,
+        sourceProfile: MediaSourceProfile?,
+        videoURL: URL?,
+        serverItemID: String?,
         onRefreshDirectory: @escaping () -> Void,
         onSelectDirectory: @escaping (String) -> Void,
+        onSelectBrowsedSubtitle: @escaping (ExternalSubtitleResource) -> Void,
         onSelectOnline: @escaping (OnlineSubtitleCandidate) async -> Bool
     ) {
         self.searchTitle = searchTitle
@@ -2819,8 +3976,12 @@ private struct SubtitleCenterView: View {
         self.selectedDirectoryID = selectedDirectoryID
         self.selectedOnlineFileID = selectedOnlineFileID
         self.isDiscoveringDirectory = isDiscoveringDirectory
+        self.sourceProfile = sourceProfile
+        self.videoURL = videoURL
+        self.serverItemID = serverItemID
         self.onRefreshDirectory = onRefreshDirectory
         self.onSelectDirectory = onSelectDirectory
+        self.onSelectBrowsedSubtitle = onSelectBrowsedSubtitle
         self.onSelectOnline = onSelectOnline
         self._query = State(initialValue: searchTitle)
     }
@@ -2889,6 +4050,23 @@ private struct SubtitleCenterView: View {
                 actionTitle: "重新扫描",
                 action: onRefreshDirectory
             )
+            if let sourceProfile, let startKey = subtitleBrowserStartKey {
+                NavigationLink {
+                    SubtitleDirectoryBrowserView(
+                        profile: sourceProfile,
+                        startKey: startKey,
+                        onSelect: onSelectBrowsedSubtitle
+                    )
+                } label: {
+                    KanataRowLabel(
+                        title: "浏览媒体目录",
+                        detail: "逐级打开文件夹并手动选择字幕文件",
+                        symbol: "folder.badge.plus"
+                    )
+                    .padding(.horizontal, 14)
+                }
+                .kanataDirectoryRowStyle(cornerRadius: 18)
+            }
             if directoryResources.isEmpty {
                 emptyCard(
                     title: isDiscoveringDirectory ? "正在扫描媒体目录" : "当前目录没有可用字幕",
@@ -2907,6 +4085,20 @@ private struct SubtitleCenterView: View {
                     .disabled(isDiscoveringDirectory || loadingOnlineFileID != nil)
                 }
             }
+        }
+    }
+
+    /// 返回可手动浏览的 WebDAV 或群晖起始目录标识。
+    private var subtitleBrowserStartKey: String? {
+        guard let sourceProfile else { return nil }
+        switch sourceProfile.kind {
+        case .webDAV:
+            return videoURL?.deletingLastPathComponent().absoluteString
+        case .synology:
+            guard let raw = serverItemID?.replacingOccurrences(of: "synology:", with: "") else { return nil }
+            return (raw as NSString).deletingLastPathComponent
+        case .jellyfin, .emby, .plex:
+            return nil
         }
     }
 
@@ -3299,6 +4491,9 @@ struct PlaybackOptionsPanel: View {
     let subtitleVideoFileName: String
     let subtitleSearchSeason: Int?
     let subtitleSearchEpisode: Int?
+    let subtitleSourceProfile: MediaSourceProfile?
+    let subtitleVideoURL: URL?
+    let subtitleServerItemID: String?
     @Binding var externalSubtitleEnabled: Bool
     @Binding var externalSubtitleOffset: Double
     let isFetchingExternalSubtitles: Bool
@@ -3308,12 +4503,14 @@ struct PlaybackOptionsPanel: View {
     let onImportSubtitle: () -> Void
     let onFetchExternalSubtitles: () -> Void
     let onSelectExternalSubtitle: (String) -> Void
+    let onSelectBrowsedSubtitle: (ExternalSubtitleResource) -> Void
     let onSelectOnlineSubtitle: (OnlineSubtitleCandidate) async -> Bool
     let onMarkIntro: () -> Void
     let onMarkOutro: () -> Void
     let onClearSkipSegment: () -> Void
     let onSelectPlaybackRoute: (PlaybackRouteMode) -> Void
     let onPictureInPicture: () -> Void
+    let onDismissPanel: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -3416,8 +4613,12 @@ struct PlaybackOptionsPanel: View {
                             selectedDirectoryID: selectedExternalSubtitleID,
                             selectedOnlineFileID: selectedOnlineSubtitleFileID,
                             isDiscoveringDirectory: isFetchingExternalSubtitles,
+                            sourceProfile: subtitleSourceProfile,
+                            videoURL: subtitleVideoURL,
+                            serverItemID: subtitleServerItemID,
                             onRefreshDirectory: onFetchExternalSubtitles,
                             onSelectDirectory: onSelectExternalSubtitle,
+                            onSelectBrowsedSubtitle: onSelectBrowsedSubtitle,
                             onSelectOnline: onSelectOnlineSubtitle
                         )
                     } label: {
@@ -3461,7 +4662,7 @@ struct PlaybackOptionsPanel: View {
                 #if os(iOS)
                 Section("输出") {
                     Button {
-                        dismiss()
+                        closePanel()
                         onPictureInPicture()
                     } label: {
                         Label("进入画中画", systemImage: "pip.enter")
@@ -3508,11 +4709,20 @@ struct PlaybackOptionsPanel: View {
             .kanataInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
+                    Button("完成", action: closePanel)
                         .kanataToolbarTextButton()
             }
         }
     }
+    }
+
+    /// 根据当前承载方式关闭系统 Sheet 或 tvOS 右侧抽屉。
+    private func closePanel() {
+        if let onDismissPanel {
+            onDismissPanel()
+        } else {
+            dismiss()
+        }
     }
 
     /// 返回字幕中心入口的动态状态摘要。

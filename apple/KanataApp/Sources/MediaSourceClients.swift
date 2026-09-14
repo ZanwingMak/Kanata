@@ -56,6 +56,26 @@ actor WebDAVClient {
             }
     }
 
+    /// 列出可继续进入的文件夹与可手动选择的字幕文件。
+    /// - Parameter directory: 用户当前浏览的 WebDAV 目录。
+    /// - Returns: 仅包含文件夹和受支持字幕格式的浏览条目。
+    func subtitleBrowserEntries(directory: URL) async throws -> [ExternalSubtitleBrowserEntry] {
+        try await rawEntries(directory: directory)
+            .filter { $0.isDirectory || Self.isSubtitle($0.url) }
+            .sorted(by: Self.sortEntries)
+            .map { entry in
+                ExternalSubtitleBrowserEntry(
+                    id: entry.id,
+                    name: entry.name,
+                    isDirectory: entry.isDirectory,
+                    navigationKey: entry.isDirectory ? entry.url.absoluteString : nil,
+                    resource: entry.isDirectory
+                        ? nil
+                        : ExternalSubtitleResource(url: entry.url, name: entry.name, requestHeaders: headers)
+                )
+            }
+    }
+
     /// 发送 PROPFIND 并返回未按媒体类型过滤的直接子项。
     /// - Parameter directory: 要读取的 WebDAV 目录。
     /// - Returns: 排除目录自身后的原始条目。
@@ -326,6 +346,82 @@ actor SynologyFileStationClient {
             guard let url = components.url else { return nil }
             return ExternalSubtitleResource(url: url, name: file.name, requestHeaders: [:])
         }
+    }
+
+    /// 列出群晖目录中的子文件夹与可手动选择的字幕文件。
+    /// - Parameters:
+    ///   - profile: 已保存的 DSM 连接。
+    ///   - parentPath: 当前文件夹路径；nil 表示共享文件夹根列表。
+    /// - Returns: 可用于字幕目录浏览器的统一条目。
+    func subtitleBrowserEntries(
+        profile: MediaSourceProfile,
+        parentPath: String?
+    ) async throws -> [ExternalSubtitleBrowserEntry] {
+        guard let server = profile.serverURL,
+              let sid = MediaSourceProfileStore.secret(for: profile)?.token,
+              !sid.isEmpty else { throw MediaSourceError.missingCredential }
+        var fields = [
+            "api": "SYNO.FileStation.List",
+            "version": "2",
+            "method": parentPath == nil ? "list_share" : "list",
+            "_sid": sid,
+        ]
+        if let parentPath { fields["folder_path"] = parentPath }
+        let data = try await request(server: server, path: "entry.cgi", fields: fields)
+        let response = try JSONDecoder().decode(SynologyListEnvelope.self, from: data)
+        guard response.success, let payload = response.data else {
+            throw Self.error(code: response.error?.code)
+        }
+        let values = payload.shares ?? payload.files ?? []
+        return values.compactMap { file in
+            if file.isdir {
+                return ExternalSubtitleBrowserEntry(
+                    id: "synology:\(file.path)",
+                    name: file.name,
+                    isDirectory: true,
+                    navigationKey: file.path,
+                    resource: nil
+                )
+            }
+            guard Self.isSubtitle(path: file.path),
+                  let resource = subtitleResource(profile: profile, fileName: file.name, path: file.path, sid: sid) else {
+                return nil
+            }
+            return ExternalSubtitleBrowserEntry(
+                id: "synology:\(file.path)",
+                name: file.name,
+                isDirectory: false,
+                navigationKey: nil,
+                resource: resource
+            )
+        }
+        .sorted {
+            if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    /// 构建携带当前 DSM 会话的单个字幕下载资源。
+    /// - Parameters:
+    ///   - profile: 群晖媒体源。
+    ///   - fileName: 字幕显示名称。
+    ///   - path: File Station 文件绝对路径。
+    ///   - sid: 当前 File Station 会话标识。
+    /// - Returns: 地址有效时返回可加载字幕资源。
+    private func subtitleResource(
+        profile: MediaSourceProfile,
+        fileName: String,
+        path: String,
+        sid: String
+    ) -> ExternalSubtitleResource? {
+        guard let downloadURL = try? streamURL(profile: profile, path: path),
+              var components = URLComponents(url: downloadURL, resolvingAgainstBaseURL: false) else { return nil }
+        var queryItems = components.queryItems ?? []
+        queryItems.removeAll { $0.name == "_sid" }
+        queryItems.append(URLQueryItem(name: "_sid", value: sid))
+        components.queryItems = queryItems
+        guard let url = components.url else { return nil }
+        return ExternalSubtitleResource(url: url, name: fileName, requestHeaders: [:])
     }
 
     /// 构建不含 sid 的 File Station 下载地址，播放时由 LibraryItem 动态注入会话。

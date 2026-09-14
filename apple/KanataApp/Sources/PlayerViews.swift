@@ -237,6 +237,8 @@ struct DanmakuSettingsPanel: View {
     @Binding var config: DanmakuRenderConfig
     @Binding var offset: Double
     let onOffsetChanged: () -> Void
+    let onDismissPanel: (() -> Void)?
+    @Environment(\.dismiss) private var dismiss
     @State private var fontOptions = DanmakuFontRegistry.availableFonts()
     @State private var isImportingFont = false
     @State private var fontImportError: String?
@@ -450,6 +452,12 @@ struct DanmakuSettingsPanel: View {
             .kanataFormBackground()
             .navigationTitle("弹幕设置")
             .kanataInlineNavigationTitle()
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成", action: closePanel)
+                        .kanataToolbarTextButton()
+                }
+            }
             .kanataFileImporter(
                 isPresented: $isImportingFont,
                 allowedContentTypes: fontFileTypes,
@@ -467,6 +475,15 @@ struct DanmakuSettingsPanel: View {
             } message: {
                 Text(fontImportError ?? "未知错误")
             }
+        }
+    }
+
+    /// 根据承载方式关闭系统 Sheet 或 tvOS 右侧抽屉。
+    private func closePanel() {
+        if let onDismissPanel {
+            onDismissPanel()
+        } else {
+            dismiss()
         }
     }
 
