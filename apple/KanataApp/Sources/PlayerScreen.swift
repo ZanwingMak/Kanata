@@ -115,34 +115,126 @@ enum SleepTimerMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// 播放器专用的系统液态玻璃承载层；旧系统自动降级为轻量材质。
+private struct PlayerGlassSurfaceModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    let tint: Color?
+    let isInteractive: Bool
+
+    /// 根据系统版本绘制原生 Liquid Glass 或兼容材质。
+    /// - Parameter content: 需要悬浮在视频内容上方的控件。
+    /// - Returns: 保持同一圆角与主题染色的玻璃表面。
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, tvOS 26.0, *) {
+            let glass = tint.map { Glass.regular.tint($0) } ?? .regular
+            content.glassEffect(
+                isInteractive ? glass.interactive() : glass,
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+        } else {
+            content
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .background {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(tint?.opacity(0.18) ?? Color.clear)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(.white.opacity(0.16), lineWidth: 1)
+                }
+        }
+    }
+}
+
+/// 将相邻播放器玻璃控件放入同一采样区域，避免折射和高光彼此割裂。
+private struct PlayerGlassEffectGroup<Content: View>: View {
+    let spacing: CGFloat?
+    let content: Content
+
+    /// 创建共享采样区域的播放器玻璃控件组。
+    /// - Parameters:
+    ///   - spacing: 相邻玻璃元素开始融合的距离。
+    ///   - content: 需要共享背景采样的控件集合。
+    init(spacing: CGFloat? = nil, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        if #available(iOS 26.0, tvOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private extension View {
+    /// 为播放器悬浮控件应用原生液态玻璃，并为旧系统提供材质降级。
+    /// - Parameters:
+    ///   - cornerRadius: 玻璃轮廓圆角。
+    ///   - tint: 用于表达焦点或主操作的可选主题染色。
+    ///   - isInteractive: 是否让玻璃实时响应按压、触控和焦点。
+    /// - Returns: 适合覆盖在视频画面上的功能层。
+    func playerGlassSurface(
+        cornerRadius: CGFloat,
+        tint: Color? = nil,
+        isInteractive: Bool = false
+    ) -> some View {
+        modifier(PlayerGlassSurfaceModifier(
+            cornerRadius: cornerRadius,
+            tint: tint,
+            isInteractive: isInteractive
+        ))
+    }
+}
+
 /// 播放器专用按钮样式；保留按压反馈但不改变尺寸，避免焦点或触控造成画面缩放。
 private struct PlayerControlButtonStyle: ButtonStyle {
+    let isProminent: Bool
     #if os(tvOS)
     @Environment(\.isFocused) private var isFocused
     #endif
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// 构建不带缩放动画的播放器按钮。
+    /// 创建播放器玻璃按钮样式。
+    /// - Parameter isProminent: 是否为播放/暂停等主要操作。
+    init(isProminent: Bool = false) {
+        self.isProminent = isProminent
+    }
+
+    /// 构建带系统液态玻璃和克制焦点反馈的播放器按钮。
     /// - Parameter configuration: SwiftUI 按钮按压状态。
-    /// - Returns: 仅改变透明度的按钮内容。
+    /// - Returns: 不改变布局尺寸的玻璃按钮内容。
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(configuration.isPressed ? 0.72 : 1)
+            .foregroundStyle(Color.white)
+            .playerGlassSurface(
+                cornerRadius: isProminent ? 30 : 24,
+                tint: controlTint,
+                isInteractive: true
+            )
             #if os(tvOS)
             .focusEffectDisabled()
-            .foregroundStyle(isFocused ? Color.black : Color.white)
-            .background {
-                if isFocused {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(Color.white)
-                        .shadow(color: .black.opacity(0.34), radius: 18, y: 8)
-                }
-            }
-            .scaleEffect(isFocused ? 1.06 : 1)
-            .animation(.easeOut(duration: 0.12), value: isFocused)
+            .scaleEffect(isFocused ? 1.08 : 1)
+            .shadow(color: isFocused ? KanataTheme.accent.opacity(0.30) : .clear, radius: 18, y: 7)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.20), value: isFocused)
             #else
             .scaleEffect(1)
             .animation(nil, value: configuration.isPressed)
             #endif
+    }
+
+    /// 返回主操作或当前电视焦点对应的玻璃染色。
+    private var controlTint: Color? {
+        #if os(tvOS)
+        if isFocused { return KanataTheme.accent.opacity(0.58) }
+        #endif
+        return isProminent ? KanataTheme.accent.opacity(0.32) : Color.black.opacity(0.10)
     }
 }
 
@@ -379,6 +471,7 @@ private struct TVSeekBar: View {
     let onMoveDown: () -> Void
     let onTogglePlayback: () -> Void
     @Environment(\.isFocused) private var isFocused
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var scrubStartValue: Double?
     @State private var directionalSeekTarget: Double?
     @State private var directionalRepeatCount = 0
@@ -412,18 +505,15 @@ private struct TVSeekBar: View {
         .contentShape(Rectangle())
         .focusable()
         .focusEffectDisabled()
-        .padding(.horizontal, 7)
-        .background {
-            if showsFocus {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.black.opacity(0.56))
-                    .shadow(color: .black.opacity(0.34), radius: 14, y: 6)
-            }
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(showsFocus ? Color.white.opacity(0.88) : .clear, lineWidth: 1.5)
-        }
+        .padding(.horizontal, 12)
+        .playerGlassSurface(
+            cornerRadius: 19,
+            tint: showsFocus ? KanataTheme.accent.opacity(0.48) : Color.black.opacity(0.08),
+            isInteractive: true
+        )
+        .scaleEffect(showsFocus ? 1.012 : 1)
+        .shadow(color: showsFocus ? KanataTheme.accent.opacity(0.24) : .clear, radius: 16, y: 6)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.20), value: showsFocus)
         .onKeyPress(keys: [.leftArrow, .rightArrow], phases: .all, action: handleDirectionalKeyPress)
         .onMoveCommand(perform: handleMove)
         .onTapGesture(perform: onTogglePlayback)
@@ -561,12 +651,13 @@ private struct TVPlayerActionLabel: View {
     let detail: String?
     let isActive: Bool
     @Environment(\.isFocused) private var isFocused
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.title3.weight(.semibold))
-                .foregroundStyle(isFocused ? Color.black : (isActive ? KanataTheme.accent : .white))
+                .foregroundStyle(isActive ? KanataTheme.accent : .white)
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
@@ -575,24 +666,30 @@ private struct TVPlayerActionLabel: View {
                 if let detail {
                     Text(detail)
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.white.opacity(0.62))
+                        .foregroundStyle(Color.white.opacity(0.68))
                         .lineLimit(1)
                 }
             }
         }
-        .foregroundStyle(isFocused ? Color.black : Color.white)
+        .foregroundStyle(Color.white)
         .padding(.horizontal, 15)
         .frame(minWidth: 108, minHeight: 58, alignment: .center)
-        .background {
-            if isFocused {
-                Capsule(style: .continuous)
-                    .fill(Color.white)
-                    .shadow(color: .black.opacity(0.34), radius: 16, y: 7)
-            }
-        }
-        .scaleEffect(isFocused ? 1.04 : 1)
-        .animation(.easeOut(duration: 0.12), value: isFocused)
+        .playerGlassSurface(
+            cornerRadius: 29,
+            tint: actionTint,
+            isInteractive: true
+        )
+        .scaleEffect(isFocused ? 1.055 : 1)
+        .shadow(color: isFocused ? KanataTheme.accent.opacity(0.26) : .clear, radius: 16, y: 6)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.20), value: isFocused)
         .contentShape(Capsule(style: .continuous))
+    }
+
+    /// 返回快捷操作当前状态对应的玻璃染色。
+    private var actionTint: Color? {
+        if isFocused { return KanataTheme.accent.opacity(0.58) }
+        if isActive { return KanataTheme.accent.opacity(0.18) }
+        return Color.black.opacity(0.08)
     }
 }
 
@@ -620,16 +717,14 @@ private struct TVPlayerQuickMenuRowStyle: ButtonStyle {
             .foregroundStyle(Color.white)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity, minHeight: 62)
-            .background(
-                isFocused ? KanataTheme.accent.opacity(0.90) : Color.white.opacity(0.07),
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .playerGlassSurface(
+                cornerRadius: 18,
+                tint: isFocused ? KanataTheme.accent.opacity(0.64) : Color.black.opacity(0.05),
+                isInteractive: true
             )
-            .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(isFocused ? Color.white.opacity(0.72) : Color.white.opacity(0.10), lineWidth: 1)
-            }
             .focusEffectDisabled()
             .opacity(configuration.isPressed ? 0.74 : 1)
+            .scaleEffect(isFocused ? 1.025 : 1)
     }
 }
 
@@ -655,64 +750,63 @@ private struct TVPlayerQuickSettingsPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("播放选项")
-                        .font(.title2.bold())
-                    Text("常用设置无需离开画面")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.62))
+        PlayerGlassEffectGroup(spacing: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("播放选项")
+                            .font(.title2.bold())
+                        Text("常用设置无需离开画面")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.62))
+                    }
+                    Spacer()
+                    Image(systemName: "ellipsis.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(KanataTheme.accent)
                 }
-                Spacer()
-                Image(systemName: "ellipsis.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(KanataTheme.accent)
-            }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 6)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 6)
 
-            Button(action: onCycleRate) {
-                quickMenuLabel(
-                    title: "播放速度",
-                    value: playbackRateText,
-                    symbol: "gauge.with.dots.needle.50percent"
-                )
-            }
-            .buttonStyle(TVPlayerQuickMenuRowStyle())
-            .focused($focusedAction, equals: .speed)
+                Button(action: onCycleRate) {
+                    quickMenuLabel(
+                        title: "播放速度",
+                        value: playbackRateText,
+                        symbol: "gauge.with.dots.needle.50percent"
+                    )
+                }
+                .buttonStyle(TVPlayerQuickMenuRowStyle())
+                .focused($focusedAction, equals: .speed)
 
-            Button(action: onCycleScaling) {
-                quickMenuLabel(title: "画面比例", value: scalingMode.title, symbol: "rectangle.inset.filled")
-            }
-            .buttonStyle(TVPlayerQuickMenuRowStyle())
-            .focused($focusedAction, equals: .scaling)
+                Button(action: onCycleScaling) {
+                    quickMenuLabel(title: "画面比例", value: scalingMode.title, symbol: "rectangle.inset.filled")
+                }
+                .buttonStyle(TVPlayerQuickMenuRowStyle())
+                .focused($focusedAction, equals: .scaling)
 
-            Button(action: onRestart) {
-                quickMenuLabel(title: "从头播放", value: nil, symbol: "backward.end.fill")
-            }
-            .buttonStyle(TVPlayerQuickMenuRowStyle())
-            .focused($focusedAction, equals: .restart)
+                Button(action: onRestart) {
+                    quickMenuLabel(title: "从头播放", value: nil, symbol: "backward.end.fill")
+                }
+                .buttonStyle(TVPlayerQuickMenuRowStyle())
+                .focused($focusedAction, equals: .restart)
 
-            Button(action: onOpenSubtitles) {
-                quickMenuLabel(title: "字幕与音轨", value: subtitleDetail, symbol: "captions.bubble.fill")
-            }
-            .buttonStyle(TVPlayerQuickMenuRowStyle())
-            .focused($focusedAction, equals: .subtitles)
+                Button(action: onOpenSubtitles) {
+                    quickMenuLabel(title: "字幕与音轨", value: subtitleDetail, symbol: "captions.bubble.fill")
+                }
+                .buttonStyle(TVPlayerQuickMenuRowStyle())
+                .focused($focusedAction, equals: .subtitles)
 
-            Button(action: onOpenSettings) {
-                quickMenuLabel(title: "全部播放设置", value: nil, symbol: "slider.horizontal.3")
+                Button(action: onOpenSettings) {
+                    quickMenuLabel(title: "全部播放设置", value: nil, symbol: "slider.horizontal.3")
+                }
+                .buttonStyle(TVPlayerQuickMenuRowStyle())
+                .focused($focusedAction, equals: .settings)
             }
-            .buttonStyle(TVPlayerQuickMenuRowStyle())
-            .focused($focusedAction, equals: .settings)
         }
-        .padding(22)
-        .frame(width: 440)
-        .background(KanataTheme.overlaySurface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .strokeBorder(.white.opacity(0.14), lineWidth: 1)
-        }
+        .padding(24)
+        .frame(width: 460)
+        .playerGlassSurface(cornerRadius: 34, tint: Color.black.opacity(0.20))
+        .shadow(color: .black.opacity(0.30), radius: 28, y: 14)
         .focusSection()
         .onAppear(perform: focusInitialAction)
     }
@@ -806,16 +900,14 @@ private struct TVPlayerEpisodeShelf: View {
             .padding(.horizontal, 74)
             .padding(.top, 34)
             .padding(.bottom, 48)
-            .background(Color.black.opacity(0.84))
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(.white.opacity(0.16))
-                    .frame(height: 1)
-            }
+            .playerGlassSurface(cornerRadius: 36, tint: Color.black.opacity(0.26))
+            .shadow(color: .black.opacity(0.30), radius: 28, y: 14)
+            .padding(.horizontal, 38)
+            .padding(.bottom, 26)
         }
         .background(
             LinearGradient(
-                colors: [.clear, .black.opacity(0.18), .black.opacity(0.54)],
+                colors: [.clear, .black.opacity(0.10), .black.opacity(0.42)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -1091,16 +1183,18 @@ struct PlayerScreen: View {
                 ProgressView()
                     .controlSize(.large)
                     .tint(.white)
-                    .padding(16)
-                    .background(.black.opacity(0.55), in: Circle())
+                    .padding(18)
+                    .playerGlassSurface(cornerRadius: 40, tint: Color.black.opacity(0.22))
                     .allowsHitTesting(false)
             }
             stateOverlay
             if let osdText {
                 Text(osdText)
                     .font(.title3.monospacedDigit())
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .playerGlassSurface(cornerRadius: 18, tint: Color.black.opacity(0.22))
+                    .shadow(color: .black.opacity(0.20), radius: 14, y: 6)
                     .foregroundStyle(.white)
                     .transition(.opacity)
             }
@@ -1547,7 +1641,7 @@ struct PlayerScreen: View {
                 Text(message).font(.callout)
             }
             .padding(20)
-            .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
+            .playerGlassSurface(cornerRadius: 20, tint: Color.black.opacity(0.24))
             .foregroundStyle(.white)
         case .failed(let message):
             VStack(spacing: 18) {
@@ -1592,7 +1686,8 @@ struct PlayerScreen: View {
             .padding(.horizontal, 46)
             .padding(.vertical, 38)
             .foregroundStyle(.white)
-            .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .playerGlassSurface(cornerRadius: 30, tint: Color.black.opacity(0.28))
+            .shadow(color: .black.opacity(0.30), radius: 28, y: 14)
         case .idle, .ready:
             EmptyView()
         }
@@ -1613,7 +1708,7 @@ struct PlayerScreen: View {
     private var tvControlsLayer: some View {
         ZStack {
             LinearGradient(
-                colors: [.clear, .clear, .black.opacity(0.20), .black.opacity(0.82)],
+                colors: [.clear, .clear, .black.opacity(0.14), .black.opacity(0.72)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -1621,27 +1716,29 @@ struct PlayerScreen: View {
             .allowsHitTesting(false)
 
             VStack(spacing: 0) {
-                HStack(alignment: .center, spacing: 18) {
-                    Button(action: handleBack) {
-                        Image(systemName: "chevron.left")
-                            .font(.title2.bold())
-                            .frame(width: 58, height: 58)
-                    }
-                    .buttonStyle(PlayerControlButtonStyle())
-                    .focused($tvFocusedControl, equals: .back)
-                    .onMoveCommand(perform: handleTVHeaderMove)
-                    .accessibilityLabel("返回媒体库")
+                PlayerGlassEffectGroup(spacing: 18) {
+                    HStack(alignment: .center, spacing: 18) {
+                        Button(action: handleBack) {
+                            Image(systemName: "chevron.left")
+                                .font(.title2.bold())
+                                .frame(width: 58, height: 58)
+                        }
+                        .buttonStyle(PlayerControlButtonStyle())
+                        .focused($tvFocusedControl, equals: .back)
+                        .onMoveCommand(perform: handleTVHeaderMove)
+                        .accessibilityLabel("返回媒体库")
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(playerDisplayTitle)
-                            .font(.title3.weight(.semibold))
-                            .lineLimit(1)
-                        Text(activeItem.sourceName ?? viewModel.mediaInfo.source)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.64))
-                            .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(playerDisplayTitle)
+                                .font(.title3.weight(.semibold))
+                                .lineLimit(1)
+                            Text(activeItem.sourceName ?? viewModel.mediaInfo.source)
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.68))
+                                .lineLimit(1)
+                        }
+                        Spacer()
                     }
-                    Spacer()
                 }
                 .padding(.horizontal, 74)
                 .padding(.top, 44)
@@ -1672,10 +1769,12 @@ struct PlayerScreen: View {
                     }
                     .font(.caption.monospacedDigit().weight(.semibold))
 
-                    HStack(alignment: .center, spacing: 28) {
-                        tvTransportRow
-                        Spacer()
-                        tvPlaybackActionRow
+                    PlayerGlassEffectGroup(spacing: 22) {
+                        HStack(alignment: .center, spacing: 28) {
+                            tvTransportRow
+                            Spacer()
+                            tvPlaybackActionRow
+                        }
                     }
                     .focusSection()
                 }
@@ -1690,9 +1789,12 @@ struct PlayerScreen: View {
     /// Apple TV 时间轴上方的当前媒体信息。
     private var tvNowPlayingMetadata: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(activeItem.episodeLabel ?? "正在播放")
+            Label(activeItem.episodeLabel ?? "正在播放", systemImage: "play.circle.fill")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(KanataTheme.accent)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .playerGlassSurface(cornerRadius: 16, tint: KanataTheme.accent.opacity(0.34))
             Text(activeItem.libraryTitle)
                 .font(.title2.bold())
                 .lineLimit(1)
@@ -1814,7 +1916,7 @@ struct PlayerScreen: View {
             Button(action: togglePlayback) {
                 controlSymbol(isPlaying ? "pause.fill" : "play.fill", prominent: true)
             }
-            .buttonStyle(PlayerControlButtonStyle())
+            .buttonStyle(PlayerControlButtonStyle(isProminent: true))
             .focused($tvFocusedControl, equals: .playPause)
             .onMoveCommand { handleTVTransportMove($0, from: .playPause) }
             .accessibilityLabel(isPlaying ? "暂停" : "播放")
@@ -1863,7 +1965,7 @@ struct PlayerScreen: View {
         }
         .padding(.top, 112)
         .padding(.trailing, 74)
-        .background(Color.black.opacity(0.12))
+        .background(Color.black.opacity(0.08))
     }
 
     /// Apple TV 完整播放设置使用不超过半屏的右侧抽屉。
@@ -1873,12 +1975,9 @@ struct PlayerScreen: View {
                 .allowsHitTesting(false)
             playbackOptionsPanel(onDismissPanel: dismissTVPlaybackOptions)
                 .frame(width: 820)
-                .background(Color.black.opacity(0.94))
-                .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 34, style: .continuous)
-                        .strokeBorder(.white.opacity(0.20), lineWidth: 1)
-                }
+                .playerGlassSurface(cornerRadius: 38, tint: Color.black.opacity(0.30))
+                .clipShape(RoundedRectangle(cornerRadius: 38, style: .continuous))
+                .shadow(color: .black.opacity(0.34), radius: 32, y: 14)
                 .padding(.vertical, 34)
                 .padding(.trailing, 38)
         }
@@ -1906,12 +2005,9 @@ struct PlayerScreen: View {
                 onDismissPanel: dismissTVDanmakuSettings
             )
             .frame(width: 820)
-            .background(Color.black.opacity(0.94))
-            .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 34, style: .continuous)
-                    .strokeBorder(.white.opacity(0.20), lineWidth: 1)
-            }
+            .playerGlassSurface(cornerRadius: 38, tint: Color.black.opacity(0.30))
+            .clipShape(RoundedRectangle(cornerRadius: 38, style: .continuous))
+            .shadow(color: .black.opacity(0.34), radius: 32, y: 14)
             .padding(.vertical, 34)
             .padding(.trailing, 38)
         }
@@ -1922,7 +2018,8 @@ struct PlayerScreen: View {
     /// 触控设备播放控制层：顶部信息 + 底部进度与按钮。
     private var touchControlsLayer: some View {
         VStack {
-            HStack(alignment: .top) {
+            PlayerGlassEffectGroup(spacing: 12) {
+                HStack(alignment: .top) {
                 Button {
                     handleBack()
                 } label: {
@@ -1969,6 +2066,7 @@ struct PlayerScreen: View {
                 .focused($tvFocusedControl, equals: .more)
                 #endif
                 .accessibilityLabel("更多播放设置")
+                }
             }
             #if os(tvOS)
             .focusSection()
@@ -2036,9 +2134,11 @@ struct PlayerScreen: View {
                 playbackControlRow(showAllActions: true, compact: false)
                     .focusSection()
                 #else
-                ViewThatFits(in: .horizontal) {
-                    playbackControlRow(showAllActions: true, compact: false)
-                    playbackControlRow(showAllActions: false, compact: true)
+                PlayerGlassEffectGroup(spacing: 12) {
+                    ViewThatFits(in: .horizontal) {
+                        playbackControlRow(showAllActions: true, compact: false)
+                        playbackControlRow(showAllActions: false, compact: true)
+                    }
                 }
                 #endif
             }
@@ -2052,7 +2152,7 @@ struct PlayerScreen: View {
             .padding(.bottom, playerControlBottomPadding)
             .background(
                 LinearGradient(
-                    colors: [.clear, .black.opacity(0.4), .black.opacity(0.82)],
+                    colors: [.clear, .black.opacity(0.28), .black.opacity(0.72)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -2103,7 +2203,7 @@ struct PlayerScreen: View {
                     } label: {
                         controlSymbol(isPlaying ? "pause.fill" : "play.fill", prominent: true, compact: compact)
                     }
-                    .buttonStyle(PlayerControlButtonStyle())
+                    .buttonStyle(PlayerControlButtonStyle(isProminent: true))
                     #if os(tvOS)
                     .focused($tvFocusedControl, equals: .playPause)
                     #endif
@@ -2239,23 +2339,8 @@ struct PlayerScreen: View {
                 width: prominent ? primarySize : regularSize,
                 height: prominent ? primarySize : regularSize
             )
-            .background(
-                playerControlBackground(prominent: prominent),
-                in: RoundedRectangle(cornerRadius: prominent ? 22 : 17, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: prominent ? 22 : 17, style: .continuous)
-                    .strokeBorder(.white.opacity(prominent ? 0.22 : 0.10), lineWidth: 1)
-            }
             .contentShape(RoundedRectangle(cornerRadius: prominent ? 22 : 17, style: .continuous))
         #endif
-    }
-
-    /// 返回 iPhone 与 iPad 播放按钮的默认背景。
-    /// - Parameter prominent: 是否为中央播放或暂停按钮。
-    /// - Returns: 播放主按钮或普通工具按钮的背景色。
-    private func playerControlBackground(prominent: Bool) -> Color {
-        prominent ? .white.opacity(0.23) : .black.opacity(0.42)
     }
 
     #if os(tvOS)
