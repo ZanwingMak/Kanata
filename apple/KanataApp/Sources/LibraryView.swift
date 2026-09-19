@@ -257,7 +257,7 @@ struct LibraryView: View {
                 } else {
                     ScrollViewReader { proxy in
                         ScrollView {
-                            VStack(alignment: .leading, spacing: librarySectionSpacing) {
+                            LazyVStack(alignment: .leading, spacing: librarySectionSpacing) {
                                 #if os(tvOS)
                                 tvLibraryHeader
                                 #endif
@@ -625,7 +625,7 @@ struct LibraryView: View {
                     .foregroundStyle(.secondary)
             }
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 14) {
+                LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(continueWatchingItems) { item in
                         mediaCard(item, showsHistoryContext: true)
                             .frame(width: horizontalCardWidth)
@@ -651,7 +651,7 @@ struct LibraryView: View {
                     .foregroundStyle(.secondary)
             }
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 14) {
+                LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(recentlyAddedEntries) { entry in
                         switch entry {
                         case let .item(item):
@@ -676,7 +676,7 @@ struct LibraryView: View {
             Text("我的收藏")
                 .font(.title2.bold())
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 14) {
+                LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(favoriteItems) { item in
                         mediaCard(item)
                             .frame(width: horizontalCardWidth)
@@ -702,7 +702,7 @@ struct LibraryView: View {
                     .foregroundStyle(.secondary)
             }
             ScrollView(.horizontal) {
-                HStack(spacing: 14) {
+                LazyHStack(spacing: 14) {
                     ForEach(mediaCollections) { collection in
                         collectionCard(collection)
                     }
@@ -796,7 +796,7 @@ struct LibraryView: View {
                 #endif
             }
             ScrollView(.horizontal) {
-                HStack(spacing: 12) {
+                LazyHStack(spacing: 12) {
                     ForEach(mediaSources) { profile in
                         Button {
                             browsingSource = profile
@@ -836,7 +836,11 @@ struct LibraryView: View {
                             }
                             .frame(width: sourceCardWidth, alignment: .leading)
                             .padding(18)
-                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .strokeBorder(KanataTheme.separator, lineWidth: 1)
+                            }
                         }
                         .kanataTVFocus(cornerRadius: 18)
                         #if os(tvOS)
@@ -1465,6 +1469,35 @@ private struct MediaArtworkFrame: View {
     }
 }
 
+/// 在首页和横向栏目之间复用已解码的缩略图，避免滚动时重复下载与解码。
+@MainActor
+private final class MediaArtworkCache {
+    static let shared = MediaArtworkCache()
+    private let images = NSCache<NSString, UIImage>()
+
+    /// 创建有容量上限的内存缓存，系统内存紧张时会自动回收。
+    private init() {
+        images.countLimit = 80
+        images.totalCostLimit = 96 * 1_024 * 1_024
+    }
+
+    /// 返回指定媒体键对应的缓存缩略图。
+    /// - Parameter key: 媒体条目和海报地址组合成的稳定缓存键。
+    /// - Returns: 已缓存的图片；不存在时返回 nil。
+    func image(for key: String) -> UIImage? {
+        images.object(forKey: key as NSString)
+    }
+
+    /// 保存已经缩放解码的缩略图，并用像素内存估算缓存成本。
+    /// - Parameters:
+    ///   - image: 要缓存的缩略图。
+    ///   - key: 媒体条目和海报地址组合成的稳定缓存键。
+    func insert(_ image: UIImage, for key: String) {
+        let pixels = Int(image.size.width * image.scale * image.size.height * image.scale)
+        images.setObject(image, forKey: key as NSString, cost: pixels * 4)
+    }
+}
+
 /// 媒体卡片的异步视频缩略图；优先使用服务器海报，本地视频截取第一秒。
 private struct MediaArtworkView: View {
     let item: LibraryItem
@@ -1493,6 +1526,11 @@ private struct MediaArtworkView: View {
 
     /// 下载带认证头的服务器海报，或从本地视频第一秒生成缩略图。
     private func loadThumbnail() async {
+        let cacheKey = "\(item.id)|\(item.artworkURLString ?? "local")"
+        if let cached = MediaArtworkCache.shared.image(for: cacheKey) {
+            thumbnail = cached
+            return
+        }
         if let rawURL = item.artworkURLString, let url = URL(string: rawURL) {
             var request = URLRequest(url: url)
             item.requestHeaders().forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
@@ -1500,7 +1538,9 @@ private struct MediaArtworkView: View {
             if let (data, response) = try? await URLSession.shared.data(for: request),
                let http = response as? HTTPURLResponse,
                (200..<300).contains(http.statusCode),
-               let image = UIImage(data: data) {
+               let source = UIImage(data: data),
+               let image = await source.byPreparingThumbnail(ofSize: CGSize(width: 640, height: 360)) {
+                MediaArtworkCache.shared.insert(image, for: cacheKey)
                 thumbnail = image
             }
             return
@@ -1513,7 +1553,9 @@ private struct MediaArtworkView: View {
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 640, height: 360)
         if let (image, _) = try? await generator.image(at: CMTime(seconds: 1, preferredTimescale: 600)) {
-            thumbnail = UIImage(cgImage: image)
+            let prepared = UIImage(cgImage: image)
+            MediaArtworkCache.shared.insert(prepared, for: cacheKey)
+            thumbnail = prepared
         }
     }
 }

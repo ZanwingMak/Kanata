@@ -96,6 +96,12 @@ struct MediaSourceSheet: View {
     /// 构建可由弹窗或独立导航页面共同复用的媒体源列表。
     private var content: some View {
         List {
+                Section {
+                    mediaSourceHero
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+
                 #if os(tvOS)
                 Section("手机辅助配置") {
                     NavigationLink {
@@ -195,6 +201,7 @@ struct MediaSourceSheet: View {
         }
         .tint(settings.accentTheme.accent)
         .kanataFormBackground()
+        .contentMargins(.horizontal, sourceListHorizontalMargin, for: .scrollContent)
         #if os(tvOS)
         .listStyle(.plain)
         #else
@@ -251,6 +258,44 @@ struct MediaSourceSheet: View {
                 onReturnHome: onReturnHome
             )
         }
+    }
+
+    /// 媒体源入口顶部说明卡，清晰区分直链、本地目录和媒体服务器三类入口。
+    private var mediaSourceHero: some View {
+        HStack(spacing: 18) {
+            Image(systemName: "play.rectangle.on.rectangle")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 58, height: 58)
+                .background(
+                    LinearGradient(
+                        colors: [KanataTheme.accent, KanataTheme.accentStrong],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
+            VStack(alignment: .leading, spacing: 5) {
+                Text("连接你的媒体")
+                    .font(.title3.weight(.bold))
+                Text("选择直链、文件目录或媒体服务器；连接信息可复用，密码和令牌只存储在钥匙串。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .kanataGlassSurface(cornerRadius: 22, isElevated: true)
+    }
+
+    /// 返回媒体源入口在当前平台使用的水平留白。
+    private var sourceListHorizontalMargin: CGFloat {
+        #if os(tvOS)
+        110
+        #else
+        16
+        #endif
     }
 
     /// 生成带说明的媒体来源列表标签。
@@ -1437,7 +1482,7 @@ private struct WebDAVChannelView: View {
             if isLoading {
                 ProgressView("正在读取目录…")
                     .padding(24)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 16))
                     .allowsHitTesting(false)
             }
         }
@@ -1555,15 +1600,12 @@ private struct WebDAVChannelView: View {
     /// - Parameter entry: 当前 WebDAV 条目。
     /// - Returns: 带稳定内边距和单层焦点边框的列表行。
     private func webDAVEntryRow(_ entry: WebDAVEntry) -> some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 10) {
             webDAVBrowseButton(entry)
             if entry.isDirectory {
-                Divider()
-                    .padding(.vertical, 14)
                 webDAVAddButton(entry)
             }
         }
-        .kanataGlassSurface(cornerRadius: 14)
         .listRowInsets(webDAVEntryInsets)
         .listRowBackground(Color.clear)
         #if !os(tvOS)
@@ -1622,7 +1664,7 @@ private struct WebDAVChannelView: View {
                 Text("加入")
             }
             .font(.headline.weight(.semibold))
-            .frame(width: 144)
+            .frame(width: 156)
             .frame(minHeight: tvDirectoryRowHeight)
             #else
             Image(systemName: "plus.circle.fill")
@@ -1901,7 +1943,7 @@ private struct MediaServerChannelView: View {
             if isLoading {
                 ProgressView("正在读取 \(profile.kind.title)…")
                     .padding(24)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 16))
                     .allowsHitTesting(false)
             }
         }
@@ -1977,15 +2019,12 @@ private struct MediaServerChannelView: View {
     /// - Parameter entry: 当前服务器条目。
     /// - Returns: 带统一留白和单层边框的列表行。
     private func mediaServerEntryRow(_ entry: MediaSourceEntry) -> some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 10) {
             mediaServerBrowseButton(entry)
             if entry.isDirectory {
-                Divider()
-                    .padding(.vertical, 16)
                 mediaServerAddButton(entry)
             }
         }
-        .kanataGlassSurface(cornerRadius: 14)
         .listRowBackground(Color.clear)
         #if !os(tvOS)
         .listRowSeparator(.hidden)
@@ -2046,7 +2085,7 @@ private struct MediaServerChannelView: View {
                 Text("加入")
             }
             .font(.headline.weight(.semibold))
-            .frame(width: 132)
+            .frame(width: 156)
             .frame(minHeight: tvServerRowHeight)
             #else
             Image(systemName: "plus.circle.fill")
@@ -2349,17 +2388,14 @@ private struct MediaServerJoinedButtonStyle: ButtonStyle {
             .background {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(focusBackground)
-                    .padding(3)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(focusBorder, lineWidth: focusBorderWidth)
-                    .padding(3)
             }
             .contentShape(Rectangle())
             #if os(tvOS)
             .focusEffectDisabled()
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.16 : 0), radius: 10)
             #endif
             .opacity(configuration.isPressed ? 0.72 : 1)
     }
@@ -2367,27 +2403,27 @@ private struct MediaServerJoinedButtonStyle: ButtonStyle {
     /// 返回当前焦点对应的内嵌背景色。
     private var focusBackground: Color {
         #if os(tvOS)
-        isFocused ? KanataTheme.accent.opacity(0.13) : .clear
+        isFocused ? KanataTheme.accent.opacity(0.20) : KanataTheme.surface
         #else
-        .clear
+        KanataTheme.surface
         #endif
     }
 
     /// 返回当前焦点对应的内嵌边框色。
     private var focusBorder: Color {
         #if os(tvOS)
-        isFocused ? KanataTheme.accent.opacity(0.95) : .clear
+        isFocused ? KanataTheme.accent.opacity(0.95) : KanataTheme.separator
         #else
-        .clear
+        KanataTheme.separator
         #endif
     }
 
     /// 返回当前焦点对应的内嵌边框宽度。
     private var focusBorderWidth: CGFloat {
         #if os(tvOS)
-        isFocused ? 2 : 0
+        isFocused ? 2 : 1
         #else
-        0
+        1
         #endif
     }
 }
@@ -2403,6 +2439,35 @@ private extension MediaSourceEntry {
         case "collectionfolder", "userview": "媒体库"
         default: isDirectory ? "文件夹" : "视频"
         }
+    }
+}
+
+/// 在媒体源目录滚动时复用已经缩放解码的海报，减少网络与图片解码开销。
+@MainActor
+private final class MediaSourceArtworkCache {
+    static let shared = MediaSourceArtworkCache()
+    private let images = NSCache<NSString, UIImage>()
+
+    /// 创建自动受系统内存压力管理的海报缓存。
+    private init() {
+        images.countLimit = 100
+        images.totalCostLimit = 96 * 1_024 * 1_024
+    }
+
+    /// 返回地址对应的缓存海报。
+    /// - Parameter key: 海报 URL 字符串。
+    /// - Returns: 已经完成缩放解码的图片；不存在时返回 nil。
+    func image(for key: String) -> UIImage? {
+        images.object(forKey: key as NSString)
+    }
+
+    /// 保存海报并用像素内存估算缓存成本。
+    /// - Parameters:
+    ///   - image: 已经完成缩放解码的海报。
+    ///   - key: 海报 URL 字符串。
+    func insert(_ image: UIImage, for key: String) {
+        let pixels = Int(image.size.width * image.scale * image.size.height * image.scale)
+        images.setObject(image, forKey: key as NSString, cost: pixels * 4)
     }
 }
 
@@ -2434,13 +2499,20 @@ private struct MediaServerArtworkView: View {
     /// 下载海报并校验 HTTP 与图片数据。
     private func load() async {
         guard let url else { return }
+        let key = url.absoluteString
+        if let cached = MediaSourceArtworkCache.shared.image(for: key) {
+            image = cached
+            return
+        }
         var request = URLRequest(url: url)
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         request.cachePolicy = .returnCacheDataElseLoad
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode),
-              let value = UIImage(data: data) else { return }
+              let source = UIImage(data: data),
+              let value = await source.byPreparingThumbnail(ofSize: CGSize(width: 216, height: 288)) else { return }
+        MediaSourceArtworkCache.shared.insert(value, for: key)
         image = value
     }
 }

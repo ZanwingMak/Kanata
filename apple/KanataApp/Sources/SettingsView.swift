@@ -75,13 +75,19 @@ struct SettingsView: View {
         @Bindable var settings = settings
         @Bindable var cloudSync = cloudSync
         return Form {
+                Section {
+                    settingsHero
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+
                 Section("外观与个性化") {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("主题氛围")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                         ScrollView(.horizontal) {
-                            HStack(spacing: 14) {
+                            LazyHStack(spacing: 14) {
                                 ForEach(KanataAccentTheme.allCases) { theme in
                                     Button {
                                         settings.accentTheme = theme
@@ -109,7 +115,7 @@ struct SettingsView: View {
                         Text("应用图标")
                             .font(.subheadline.weight(.semibold))
                         ScrollView(.horizontal) {
-                            HStack(spacing: 14) {
+                            LazyHStack(spacing: 14) {
                                 ForEach(KanataAppIconChoice.all) { choice in
                                     Button {
                                         applyAppIcon(choice)
@@ -424,6 +430,7 @@ struct SettingsView: View {
             }
             .tint(settings.accentTheme.accent)
             .kanataFormBackground()
+            .contentMargins(.horizontal, settingsHorizontalMargin, for: .scrollContent)
             .navigationTitle("设置")
             .kanataInlineNavigationTitle()
             .toolbar {
@@ -473,6 +480,44 @@ struct SettingsView: View {
             } message: {
                 Text("完整功能与弹幕功能已开启。")
             }
+    }
+
+    /// 设置页顶部概览卡片，说明当前页面的主要设置范围并建立稳定视觉层级。
+    private var settingsHero: some View {
+        HStack(spacing: 18) {
+            Image(systemName: "slider.horizontal.3")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(
+                    LinearGradient(
+                        colors: [KanataTheme.accent, KanataTheme.accentStrong],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
+            VStack(alignment: .leading, spacing: 5) {
+                Text("按你的观看方式调整 Kanata")
+                    .font(.title3.weight(.bold))
+                Text("外观、弹幕、字幕、同步和账户集中管理；敏感凭据仅保存在设备钥匙串。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .kanataGlassSurface(cornerRadius: 22, isElevated: true)
+    }
+
+    /// 返回设置表单在当前平台使用的水平安全留白。
+    private var settingsHorizontalMargin: CGFloat {
+        #if os(tvOS)
+        110
+        #else
+        16
+        #endif
     }
 
     /// 生成设置行统一的图标与文本标签，保证开关和按钮左缘一致。

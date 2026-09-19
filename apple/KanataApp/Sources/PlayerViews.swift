@@ -626,7 +626,7 @@ private struct TVDanmakuFontPicker: View {
     }
 }
 
-/// 弹幕选项统一焦点样式；聚焦时使用浅底深字保证电视远距可读性。
+/// 弹幕选项统一焦点样式；聚焦时使用主题底色和白字保证电视远距可读性。
 private struct TVDanmakuChoiceButtonStyle: ButtonStyle {
     let isSelected: Bool
     @Environment(\.isFocused) private var isFocused
@@ -637,7 +637,7 @@ private struct TVDanmakuChoiceButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline.weight(.semibold))
-            .foregroundStyle(isFocused ? Color.black.opacity(0.9) : .white)
+            .foregroundStyle(.white)
             .padding(.horizontal, 24)
             .frame(minHeight: 58)
             .background(backgroundColor, in: Capsule())
@@ -645,22 +645,19 @@ private struct TVDanmakuChoiceButtonStyle: ButtonStyle {
                 Capsule()
                     .strokeBorder(borderColor, lineWidth: isFocused ? 3 : 1)
             }
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.28 : 0), radius: 14)
-            .scaleEffect(isFocused ? 1.025 : 1)
             .opacity(configuration.isPressed ? 0.72 : 1)
             .focusEffectDisabled()
-            .animation(.easeOut(duration: 0.14), value: isFocused)
     }
 
-    /// 返回当前选项背景色，焦点态始终使用浅底。
+    /// 返回当前选项背景色，焦点态始终使用高对比度主题色。
     private var backgroundColor: Color {
-        if isFocused { return .white.opacity(0.94) }
+        if isFocused { return KanataTheme.accent }
         return isSelected ? KanataTheme.accent.opacity(0.34) : .white.opacity(0.08)
     }
 
     /// 返回当前选项边框，选中项在失焦时仍保留状态提示。
     private var borderColor: Color {
-        if isFocused { return KanataTheme.accent }
+        if isFocused { return .white.opacity(0.72) }
         return isSelected ? KanataTheme.accent.opacity(0.9) : .white.opacity(0.12)
     }
 }
@@ -737,9 +734,7 @@ private struct TVValueAdjusterButtonStyle: ButtonStyle {
                     .strokeBorder(isFocused ? Color.white.opacity(0.72) : Color.clear, lineWidth: 2)
             }
             .focusEffectDisabled()
-            .scaleEffect(isFocused ? 1.06 : 1)
             .opacity(configuration.isPressed ? 0.72 : 1)
-            .animation(.easeOut(duration: 0.14), value: isFocused)
     }
 }
 #endif

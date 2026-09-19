@@ -193,6 +193,7 @@ struct MediaImportPreview: View {
         }
         .listStyle(.plain)
         .kanataFormBackground()
+        .contentMargins(.horizontal, importHorizontalMargin, for: .scrollContent)
         .navigationTitle("确认导入")
         .kanataInlineNavigationTitle()
         .toolbar {
@@ -513,6 +514,15 @@ struct MediaImportPreview: View {
         76
         #else
         52
+        #endif
+    }
+
+    /// 返回导入确认页在当前平台使用的水平留白。
+    private var importHorizontalMargin: CGFloat {
+        #if os(tvOS)
+        100
+        #else
+        12
         #endif
     }
 

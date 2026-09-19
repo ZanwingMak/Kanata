@@ -131,9 +131,6 @@ private struct PlayerControlButtonStyle: ButtonStyle {
             .focusEffectDisabled()
             .foregroundStyle(isFocused ? KanataTheme.accent : Color.white)
             .shadow(color: .black.opacity(0.82), radius: 4, y: 2)
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.72 : 0), radius: 12)
-            .scaleEffect(isFocused ? 1.12 : 1)
-            .animation(.easeOut(duration: 0.14), value: isFocused)
             #else
             .scaleEffect(1)
             .animation(nil, value: configuration.isPressed)
@@ -292,7 +289,6 @@ private struct TVSeekBar: View {
         .accessibilityLabel("播放进度")
         .accessibilityValue("已播放 \(Int(value)) 秒，共 \(Int(duration)) 秒")
         .accessibilityAdjustableAction(adjustAccessibilityValue)
-        .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 
     /// 返回限制在 0 到 1 之间的播放进度。
@@ -408,7 +404,7 @@ private struct TVSeekBar: View {
     }
 }
 
-/// Apple TV 播放器底部快捷操作的圆形玻璃标签。
+/// Apple TV 播放器底部快捷操作标签，默认不遮挡视频内容。
 private struct TVPlayerActionLabel: View {
     let symbol: String
     let title: String
@@ -420,16 +416,11 @@ private struct TVPlayerActionLabel: View {
         VStack(spacing: 8) {
             ZStack {
                 Circle()
-                    .fill(isFocused ? Color.white.opacity(0.96) : Color.black.opacity(0.34))
-                    .background(.ultraThinMaterial, in: Circle())
-                Circle()
-                    .strokeBorder(
-                        isFocused ? Color.white.opacity(0.92) : Color.white.opacity(0.22),
-                        lineWidth: isFocused ? 2 : 1
-                    )
+                    .fill(isFocused ? KanataTheme.accent.opacity(0.88) : Color.clear)
                 Image(systemName: symbol)
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(isFocused ? Color.black.opacity(0.88) : (isActive ? KanataTheme.accent : .white))
+                    .foregroundStyle(isFocused ? Color.white : (isActive ? KanataTheme.accent : .white))
+                    .shadow(color: .black.opacity(0.72), radius: 3, y: 1)
             }
             .frame(width: 58, height: 58)
             Text(title)
@@ -450,18 +441,13 @@ private struct TVPlayerActionLabel: View {
 
 /// Apple TV 播放器快捷操作的克制焦点样式。
 private struct TVPlayerActionButtonStyle: ButtonStyle {
-    @Environment(\.isFocused) private var isFocused
-
-    /// 绘制轻微抬升的圆形操作，不在视频画面上叠加厚重边框。
+    /// 绘制尺寸稳定的快捷操作，避免焦点动画触发视频层重复合成。
     /// - Parameter configuration: SwiftUI 按钮状态。
     /// - Returns: 保持尺寸稳定的播放器快捷操作。
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .focusEffectDisabled()
-            .scaleEffect(isFocused ? 1.08 : 1)
-            .shadow(color: .black.opacity(isFocused ? 0.38 : 0.18), radius: 14, y: 8)
             .opacity(configuration.isPressed ? 0.72 : 1)
-            .animation(.easeOut(duration: 0.14), value: isFocused)
     }
 }
 
@@ -469,26 +455,24 @@ private struct TVPlayerActionButtonStyle: ButtonStyle {
 private struct TVPlayerQuickMenuRowStyle: ButtonStyle {
     @Environment(\.isFocused) private var isFocused
 
-    /// 让聚焦行使用白底深色字，避免玻璃背景上的文字丢失。
+    /// 让聚焦行使用主题底色与白字，避免高亮后文字丢失。
     /// - Parameter configuration: SwiftUI 按钮状态。
     /// - Returns: 适合遥控器上下选择的整行按钮。
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(isFocused ? Color.black.opacity(0.9) : Color.white)
+            .foregroundStyle(Color.white)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity, minHeight: 62)
             .background(
-                isFocused ? Color.white.opacity(0.94) : Color.white.opacity(0.075),
+                isFocused ? KanataTheme.accent.opacity(0.90) : Color.white.opacity(0.07),
                 in: RoundedRectangle(cornerRadius: 16, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(isFocused ? Color.white : Color.white.opacity(0.12), lineWidth: 1)
+                    .strokeBorder(isFocused ? Color.white.opacity(0.72) : Color.white.opacity(0.10), lineWidth: 1)
             }
             .focusEffectDisabled()
-            .scaleEffect(isFocused ? 1.018 : 1)
             .opacity(configuration.isPressed ? 0.74 : 1)
-            .animation(.easeOut(duration: 0.14), value: isFocused)
     }
 }
 
@@ -568,7 +552,11 @@ private struct TVPlayerQuickSettingsPanel: View {
         }
         .padding(22)
         .frame(width: 440)
-        .kanataGlassSurface(cornerRadius: 30, isElevated: true)
+        .background(KanataTheme.overlaySurface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .strokeBorder(.white.opacity(0.14), lineWidth: 1)
+        }
         .focusSection()
         .onAppear(perform: focusInitialAction)
         .onExitCommand(perform: onDismiss)
@@ -663,8 +651,7 @@ private struct TVPlayerEpisodeShelf: View {
             .padding(.horizontal, 74)
             .padding(.top, 34)
             .padding(.bottom, 48)
-            .background(.ultraThinMaterial)
-            .background(Color.black.opacity(0.48))
+            .background(Color.black.opacity(0.84))
             .overlay(alignment: .top) {
                 Rectangle()
                     .fill(.white.opacity(0.16))
@@ -1454,11 +1441,6 @@ struct PlayerScreen: View {
                         Image(systemName: "chevron.left")
                             .font(.title2.bold())
                             .frame(width: 58, height: 58)
-                            .background(.black.opacity(0.28), in: Circle())
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay {
-                                Circle().strokeBorder(.white.opacity(0.20), lineWidth: 1)
-                            }
                     }
                     .buttonStyle(PlayerControlButtonStyle())
                     .focused($tvFocusedControl, equals: .back)
@@ -1716,13 +1698,12 @@ struct PlayerScreen: View {
                 .allowsHitTesting(false)
             playbackOptionsPanel(onDismissPanel: dismissTVPlaybackOptions)
                 .frame(width: 820)
-                .background(.regularMaterial)
+                .background(Color.black.opacity(0.94))
                 .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 34, style: .continuous)
                         .strokeBorder(.white.opacity(0.20), lineWidth: 1)
                 }
-                .shadow(color: .black.opacity(0.38), radius: 34, x: -12)
                 .padding(.vertical, 34)
                 .padding(.trailing, 38)
         }
@@ -1750,13 +1731,12 @@ struct PlayerScreen: View {
                 onDismissPanel: dismissTVDanmakuSettings
             )
             .frame(width: 820)
-            .background(.regularMaterial)
+            .background(Color.black.opacity(0.94))
             .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 34, style: .continuous)
                     .strokeBorder(.white.opacity(0.20), lineWidth: 1)
             }
-            .shadow(color: .black.opacity(0.38), radius: 34, x: -12)
             .padding(.vertical, 34)
             .padding(.trailing, 38)
         }
@@ -4016,7 +3996,7 @@ private struct SubtitleCenterView: View {
                 .font(heroIconFont)
                 .foregroundStyle(KanataTheme.accent)
                 .frame(width: heroIconSize, height: heroIconSize)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .background(KanataTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(KanataTheme.accent.opacity(0.25), lineWidth: 1)
@@ -4132,7 +4112,7 @@ private struct SubtitleCenterView: View {
                 }
                 .padding(.horizontal, 16)
                 .frame(minHeight: searchFieldHeight)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(KanataTheme.separator, lineWidth: 1)

@@ -193,9 +193,18 @@ enum KanataTheme {
             ? UIColor(red: 0.95, green: 0.96, blue: 0.98, alpha: 1)
             : UIColor(red: 0.025, green: 0.035, blue: 0.065, alpha: 1)
     })
-    static let surface = Color.primary.opacity(0.07)
-    static let elevatedSurface = Color.primary.opacity(0.11)
-    static let separator = Color.primary.opacity(0.10)
+    static let surface = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .light
+            ? UIColor(red: 0.98, green: 0.985, blue: 0.995, alpha: 0.88)
+            : UIColor(red: 0.055, green: 0.07, blue: 0.11, alpha: 0.94)
+    })
+    static let elevatedSurface = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .light
+            ? UIColor(red: 1, green: 1, blue: 1, alpha: 0.96)
+            : UIColor(red: 0.075, green: 0.09, blue: 0.14, alpha: 0.98)
+    })
+    static let overlaySurface = Color.black.opacity(0.82)
+    static let separator = Color.primary.opacity(0.12)
     static let success = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .light
             ? UIColor(red: 0.04, green: 0.47, blue: 0.28, alpha: 1)
@@ -210,68 +219,33 @@ enum KanataTheme {
 
 /// 在所有层级页面后方绘制随主题变化的柔和环境光背景。
 struct KanataAmbientBackground: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        GeometryReader { proxy in
-            let span = max(proxy.size.width, proxy.size.height)
-            ZStack {
-                LinearGradient(
-                    colors: [KanataTheme.backgroundTop, KanataTheme.background],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                if !reduceTransparency {
-                    ambientOrb(
-                        color: KanataTheme.ambientCompanion,
-                        diameter: span * 0.95,
-                        opacity: colorScheme == .dark ? 0.32 : 0.24
-                    )
-                    .offset(x: -span * 0.28, y: -span * 0.30)
-
-                    ambientOrb(
-                        color: KanataTheme.accent,
-                        diameter: span * 0.82,
-                        opacity: colorScheme == .dark ? 0.27 : 0.20
-                    )
-                    .offset(x: span * 0.34, y: span * 0.24)
-
-                    ambientOrb(
-                        color: KanataTheme.ambientHighlight,
-                        diameter: span * 0.50,
-                        opacity: colorScheme == .dark ? 0.18 : 0.14
-                    )
-                    .offset(x: span * 0.10, y: -span * 0.34)
-
-                    Rectangle()
-                        .fill(.ultraThinMaterial)
-                        .opacity(colorScheme == .dark ? 0.10 : 0.18)
-                }
-            }
+        ZStack {
+            LinearGradient(
+                colors: [KanataTheme.backgroundTop, KanataTheme.background],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            LinearGradient(
+                colors: [
+                    KanataTheme.ambientCompanion.opacity(colorScheme == .dark ? 0.20 : 0.12),
+                    .clear,
+                    KanataTheme.accent.opacity(colorScheme == .dark ? 0.14 : 0.08),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            LinearGradient(
+                colors: [.clear, KanataTheme.ambientHighlight.opacity(colorScheme == .dark ? 0.07 : 0.04)],
+                startPoint: .top,
+                endPoint: .bottomTrailing
+            )
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-    }
-
-    /// 构建边缘自然消散的环境光斑。
-    /// - Parameters:
-    ///   - color: 光斑中心色。
-    ///   - diameter: 光斑直径。
-    ///   - opacity: 光斑整体透明度。
-    /// - Returns: 不产生硬边缘的径向渐变圆。
-    private func ambientOrb(color: Color, diameter: CGFloat, opacity: Double) -> some View {
-        Circle()
-            .fill(
-                RadialGradient(
-                    colors: [color.opacity(opacity), color.opacity(0)],
-                    center: .center,
-                    startRadius: 0,
-                    endRadius: diameter * 0.5
-                )
-            )
-            .frame(width: diameter, height: diameter)
     }
 }
 
@@ -284,37 +258,24 @@ private struct KanataGlassSurfaceModifier: ViewModifier {
     /// - Parameter content: 需要承载的卡片内容。
     /// - Returns: 统一视觉深度的玻璃卡片。
     func body(content: Content) -> some View {
-        Group {
-            if #available(iOS 26.0, tvOS 26.0, *) {
-                content
-                    .glassEffect(
-                        .regular.tint(KanataTheme.accent.opacity(isElevated ? 0.12 : 0.065)),
-                        in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    )
-            } else {
-                content
-                    .background {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(isElevated ? .regularMaterial : .thinMaterial)
-                            .overlay {
-                                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                                    .fill(KanataTheme.accent.opacity(isElevated ? 0.075 : 0.035))
-                            }
+        content
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(isElevated ? KanataTheme.elevatedSurface : KanataTheme.surface)
+                    .overlay(alignment: .top) {
+                        LinearGradient(
+                            colors: [.white.opacity(isElevated ? 0.13 : 0.08), .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                     }
             }
-        }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [.white.opacity(0.34), KanataTheme.accent.opacity(0.16), .white.opacity(0.05)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
+                    .strokeBorder(isElevated ? Color.white.opacity(0.18) : KanataTheme.separator, lineWidth: 1)
             }
-            .shadow(color: .black.opacity(isElevated ? 0.20 : 0.07), radius: isElevated ? 26 : 12, y: 8)
+            .shadow(color: .black.opacity(isElevated ? 0.14 : 0), radius: isElevated ? 16 : 0, y: 8)
     }
 }
 
@@ -343,23 +304,12 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
                 ),
                 in: RoundedRectangle(cornerRadius: 13, style: .continuous)
             )
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [.white.opacity(0.55), .white.opacity(primaryFocusOpacity)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: max(1, primaryFocusLineWidth)
-                    )
+                    .stroke(.white.opacity(primaryFocusOpacity), lineWidth: primaryFocusLineWidth)
             }
-            .shadow(color: KanataTheme.accent.opacity(primaryFocusOpacity), radius: 14)
             #if os(tvOS)
-            .scaleEffect(isFocused ? 1.018 : 1)
             .focusEffectDisabled()
-            .animation(.easeOut(duration: 0.16), value: isFocused)
             #endif
             .opacity(configuration.isPressed ? 0.78 : 1)
     }
@@ -387,7 +337,6 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
 struct KanataSecondaryButtonStyle: ButtonStyle {
     #if os(tvOS)
     @Environment(\.isFocused) private var isFocused
-    @Environment(\.colorScheme) private var colorScheme
     #endif
 
     /// 根据按压状态绘制带细边框的次级按钮。
@@ -395,9 +344,6 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     /// - Returns: 无缩放动画的次级按钮视图。
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            #if os(tvOS)
-            .environment(\.colorScheme, isFocused ? .light : colorScheme)
-            #endif
             .font(.body.weight(.medium))
             .foregroundStyle(secondaryForeground)
             .multilineTextAlignment(.center)
@@ -406,21 +352,14 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
             .frame(minHeight: 48, alignment: .center)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.thinMaterial)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(secondaryTint(configuration: configuration))
-                    }
+                    .fill(secondaryTint(configuration: configuration))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(secondaryBorder, lineWidth: secondaryLineWidth)
             }
-            .shadow(color: KanataTheme.accent.opacity(secondaryFocusOpacity), radius: 12)
             #if os(tvOS)
-            .scaleEffect(isFocused ? 1.015 : 1)
             .focusEffectDisabled()
-            .animation(.easeOut(duration: 0.16), value: isFocused)
             #endif
     }
 
@@ -428,17 +367,17 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     /// - Parameter configuration: SwiftUI 按钮状态。
     /// - Returns: 不依赖缩放的清晰焦点背景。
     private func secondaryTint(configuration: Configuration) -> Color {
-        if configuration.isPressed { return KanataTheme.accent.opacity(0.14) }
+        if configuration.isPressed { return KanataTheme.accent.opacity(0.72) }
         #if os(tvOS)
-        if isFocused { return .white.opacity(0.82) }
+        if isFocused { return KanataTheme.accent }
         #endif
-        return KanataTheme.accent.opacity(0.045)
+        return KanataTheme.surface
     }
 
     /// 返回次级按钮在电视高亮状态下的高对比度文字颜色。
     private var secondaryForeground: Color {
         #if os(tvOS)
-        isFocused ? .black.opacity(0.9) : .primary
+        isFocused ? .white : .primary
         #else
         .primary
         #endif
@@ -447,7 +386,7 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     /// 返回次级按钮当前描边颜色。
     private var secondaryBorder: Color {
         #if os(tvOS)
-        if isFocused { return KanataTheme.accent }
+        if isFocused { return .white.opacity(0.72) }
         #endif
         return KanataTheme.separator
     }
@@ -461,14 +400,6 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
         #endif
     }
 
-    /// 返回次级按钮 Apple TV 焦点阴影透明度。
-    private var secondaryFocusOpacity: Double {
-        #if os(tvOS)
-        isFocused ? 0.24 : 0
-        #else
-        0
-        #endif
-    }
 }
 
 #if os(tvOS)
@@ -476,32 +407,24 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
 struct KanataTVActionButtonStyle: ButtonStyle {
     @Environment(\.isFocused) private var isFocused
 
-    /// 绘制带文字的电视操作按钮，聚焦时仅轻微放大并使用主题色描边。
+    /// 绘制带文字的电视操作按钮，聚焦时使用高对比度主题底色。
     /// - Parameter configuration: SwiftUI 按钮状态。
     /// - Returns: 适合遥控器焦点移动的操作按钮。
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline.weight(.semibold))
-            .foregroundStyle(isFocused ? Color.black.opacity(0.90) : Color.primary)
+            .foregroundStyle(isFocused ? Color.white : Color.primary)
             .padding(.horizontal, 20)
             .frame(minHeight: 58)
             .background {
                 Capsule()
-                    .fill(.thinMaterial)
-                    .overlay {
-                        Capsule()
-                            .fill(isFocused ? .white.opacity(0.80) : KanataTheme.accent.opacity(0.06))
-                    }
+                    .fill(isFocused ? KanataTheme.accent : KanataTheme.surface)
             }
             .overlay {
-                Capsule()
-                    .stroke(isFocused ? KanataTheme.accent : KanataTheme.separator, lineWidth: isFocused ? 2 : 1)
+                Capsule().stroke(isFocused ? Color.white.opacity(0.66) : KanataTheme.separator, lineWidth: 1)
             }
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.22 : 0), radius: 14)
-            .scaleEffect(isFocused ? 1.025 : 1)
             .opacity(configuration.isPressed ? 0.72 : 1)
             .focusEffectDisabled()
-            .animation(.easeOut(duration: 0.14), value: isFocused)
     }
 }
 #endif
@@ -524,14 +447,13 @@ private struct KanataTVFocusButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(isFocused ? KanataTheme.accent.opacity(0.92) : Color.clear, lineWidth: 2)
             }
-            .shadow(color: .black.opacity(isFocused ? 0.34 : 0), radius: 18, y: 10)
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.20 : 0), radius: 12)
-            .brightness(isFocused ? 0.035 : 0)
-            .saturation(isFocused ? 1.05 : 1)
-            .scaleEffect(isFocused ? 1.022 : 1)
+            .background(
+                isFocused ? KanataTheme.accent.opacity(0.12) : Color.clear,
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+            .brightness(isFocused ? 0.025 : 0)
             .opacity(configuration.isPressed ? 0.78 : 1)
             .zIndex(isFocused ? 1 : 0)
-            .animation(.easeOut(duration: 0.16), value: isFocused)
     }
 }
 #endif
@@ -550,11 +472,7 @@ private struct KanataDirectoryRowButtonStyle: ButtonStyle {
         configuration.label
             .background {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(.thinMaterial)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(rowBackground)
-                    }
+                    .fill(rowBackground)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -563,17 +481,15 @@ private struct KanataDirectoryRowButtonStyle: ButtonStyle {
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             #if os(tvOS)
             .focusEffectDisabled()
-            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.18 : 0), radius: 10)
             .brightness(isFocused ? 0.025 : 0)
             #endif
             .opacity(configuration.isPressed ? 0.76 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 
     /// 当前焦点状态对应的行背景。
     private var rowBackground: Color {
         #if os(tvOS)
-        isFocused ? KanataTheme.accent.opacity(0.13) : KanataTheme.surface
+        isFocused ? KanataTheme.accent.opacity(0.20) : KanataTheme.surface
         #else
         KanataTheme.surface
         #endif
@@ -582,7 +498,7 @@ private struct KanataDirectoryRowButtonStyle: ButtonStyle {
     /// 当前焦点状态对应的单层边框颜色。
     private var rowBorder: Color {
         #if os(tvOS)
-        isFocused ? KanataTheme.accent.opacity(0.95) : KanataTheme.separator.opacity(0.65)
+        isFocused ? KanataTheme.accent : KanataTheme.separator.opacity(0.65)
         #else
         KanataTheme.separator.opacity(0.55)
         #endif
@@ -629,7 +545,7 @@ struct KanataRowLabel: View {
                 .frame(width: 30, height: 30)
                 #endif
                 .foregroundStyle(tint)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(tint.opacity(0.22), lineWidth: 1)
