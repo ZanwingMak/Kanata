@@ -129,8 +129,16 @@ private struct PlayerControlButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.72 : 1)
             #if os(tvOS)
             .focusEffectDisabled()
-            .foregroundStyle(isFocused ? KanataTheme.accent : Color.white)
-            .shadow(color: .black.opacity(0.82), radius: 4, y: 2)
+            .foregroundStyle(isFocused ? Color.black : Color.white)
+            .background {
+                if isFocused {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color.white)
+                        .shadow(color: .black.opacity(0.34), radius: 18, y: 8)
+                }
+            }
+            .scaleEffect(isFocused ? 1.06 : 1)
+            .animation(.easeOut(duration: 0.12), value: isFocused)
             #else
             .scaleEffect(1)
             .animation(nil, value: configuration.isPressed)
@@ -139,6 +147,134 @@ private struct PlayerControlButtonStyle: ButtonStyle {
 }
 
 #if os(tvOS)
+/// 在播放控件隐藏时直接接收 Siri Remote 按键，避免透明全屏按钮产生巨大焦点光晕。
+private struct TVRemoteCommandCaptureView: UIViewRepresentable {
+    let onSelect: () -> Void
+    let onLeft: () -> Void
+    let onRight: () -> Void
+    let onUp: () -> Void
+    let onDown: () -> Void
+    let onExit: () -> Void
+
+    /// 创建透明的遥控器按键接收视图。
+    /// - Parameter context: SwiftUI 表示层上下文。
+    /// - Returns: 可成为第一响应者但不参与绘制的 UIKit 视图。
+    func makeUIView(context: Context) -> RemoteCommandView {
+        let view = RemoteCommandView()
+        updateCallbacks(for: view)
+        view.activate()
+        return view
+    }
+
+    /// 同步最新回调，并在视图重新挂载后恢复第一响应者。
+    /// - Parameters:
+    ///   - uiView: 当前遥控器按键接收视图。
+    ///   - context: SwiftUI 表示层上下文。
+    func updateUIView(_ uiView: RemoteCommandView, context: Context) {
+        updateCallbacks(for: uiView)
+        uiView.activate()
+    }
+
+    /// 视图移除时释放第一响应者，避免抢占已显示控件的焦点事件。
+    /// - Parameters:
+    ///   - uiView: 即将移除的按键接收视图。
+    ///   - coordinator: SwiftUI 协调器上下文。
+    static func dismantleUIView(_ uiView: RemoteCommandView, coordinator: Void) {
+        uiView.onSelect = nil
+        uiView.onLeft = nil
+        uiView.onRight = nil
+        uiView.onUp = nil
+        uiView.onDown = nil
+        uiView.onExit = nil
+        uiView.resignFirstResponder()
+    }
+
+    /// 把 SwiftUI 回调同步到 UIKit 事件视图。
+    /// - Parameter view: 需要更新的遥控器事件视图。
+    private func updateCallbacks(for view: RemoteCommandView) {
+        view.onSelect = onSelect
+        view.onLeft = onLeft
+        view.onRight = onRight
+        view.onUp = onUp
+        view.onDown = onDown
+        view.onExit = onExit
+    }
+
+    /// 不绘制内容、只处理 tvOS 遥控器按键的响应视图。
+    final class RemoteCommandView: UIView {
+        var onSelect: (() -> Void)?
+        var onLeft: (() -> Void)?
+        var onRight: (() -> Void)?
+        var onUp: (() -> Void)?
+        var onDown: (() -> Void)?
+        var onExit: (() -> Void)?
+
+        override var canBecomeFirstResponder: Bool { true }
+
+        /// 视图进入窗口后主动取得第一响应者。
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            activate()
+        }
+
+        /// 在下一次主线程循环取得按键事件，确保视图已经加入窗口。
+        func activate() {
+            guard window != nil else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.window != nil else { return }
+                _ = self.becomeFirstResponder()
+            }
+        }
+
+        /// 根据 tvOS 按键类型触发播放器动作。
+        /// - Parameters:
+        ///   - presses: 当前结束的遥控器按键集合。
+        ///   - event: tvOS 按键事件。
+        override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            var handled = false
+            for press in presses {
+                switch press.type {
+                case .select:
+                    if let onSelect {
+                        onSelect()
+                        handled = true
+                    }
+                case .leftArrow:
+                    if let onLeft {
+                        onLeft()
+                        handled = true
+                    }
+                case .rightArrow:
+                    if let onRight {
+                        onRight()
+                        handled = true
+                    }
+                case .upArrow:
+                    if let onUp {
+                        onUp()
+                        handled = true
+                    }
+                case .downArrow:
+                    if let onDown {
+                        onDown()
+                        handled = true
+                    }
+                case .menu:
+                    if let onExit {
+                        onExit()
+                        handled = true
+                    }
+                default:
+                    break
+                }
+            }
+            if !handled {
+                super.pressesEnded(presses, with: event)
+            }
+        }
+    }
+}
+
 /// 把 Siri Remote 触控区的连续平移手势转发给 SwiftUI 时间轴。
 private struct TVRemotePanGestureView: UIViewRepresentable {
     let isEnabled: Bool
@@ -236,6 +372,7 @@ private struct TVSeekBar: View {
     let value: Double
     let duration: Double
     let isPlaying: Bool
+    let isHighlighted: Bool
     let onScrubChanged: (Double) -> Void
     let onSeek: (Double) -> Void
     let onMoveUp: () -> Void
@@ -251,21 +388,21 @@ private struct TVSeekBar: View {
             let width = max(proxy.size.width, 1)
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(.white.opacity(isFocused ? 0.32 : 0.24))
+                    .fill(.white.opacity(showsFocus ? 0.32 : 0.24))
                 Capsule()
                     .fill(KanataTheme.accent)
                     .frame(width: width * progress)
                 Circle()
                     .fill(.white)
-                    .frame(width: isFocused ? 24 : 16, height: isFocused ? 24 : 16)
-                    .offset(x: max(0, width * progress - (isFocused ? 12 : 8)))
-                    .opacity(isFocused ? 1 : 0.82)
+                    .frame(width: showsFocus ? 24 : 16, height: showsFocus ? 24 : 16)
+                    .offset(x: max(0, width * progress - (showsFocus ? 12 : 8)))
+                    .opacity(showsFocus ? 1 : 0.82)
             }
-            .frame(height: isFocused ? 14 : 8)
+            .frame(height: showsFocus ? 14 : 8)
             .frame(maxHeight: .infinity, alignment: .center)
             .overlay {
                 TVRemotePanGestureView(
-                    isEnabled: isFocused && !isPlaying,
+                    isEnabled: showsFocus && !isPlaying,
                     onChanged: { updatePausedScrub(translation: $0, width: width) },
                     onEnded: { finishPausedScrub(translation: $0, width: width) }
                 )
@@ -275,14 +412,22 @@ private struct TVSeekBar: View {
         .contentShape(Rectangle())
         .focusable()
         .focusEffectDisabled()
+        .padding(.horizontal, 7)
+        .background {
+            if showsFocus {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.black.opacity(0.56))
+                    .shadow(color: .black.opacity(0.34), radius: 14, y: 6)
+            }
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(isFocused ? KanataTheme.accent.opacity(0.9) : .clear, lineWidth: 2)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(showsFocus ? Color.white.opacity(0.88) : .clear, lineWidth: 1.5)
         }
         .onKeyPress(keys: [.leftArrow, .rightArrow], phases: .all, action: handleDirectionalKeyPress)
         .onMoveCommand(perform: handleMove)
         .onTapGesture(perform: onTogglePlayback)
-        .onChange(of: isFocused) { _, focused in
+        .onChange(of: showsFocus) { _, focused in
             if !focused { finishDirectionalSeek() }
         }
         .onDisappear(perform: finishDirectionalSeek)
@@ -297,12 +442,17 @@ private struct TVSeekBar: View {
         return CGFloat(min(max(value / duration, 0), 1))
     }
 
+    /// 合并系统焦点环境与播放器显式焦点状态，确保高亮反馈始终可见。
+    private var showsFocus: Bool {
+        isFocused || isHighlighted
+    }
+
     /// 暂停时根据遥控器横向滑动持续更新进度预览。
     /// - Parameters:
     ///   - translation: 当前累计水平位移。
     ///   - width: 时间轴可用宽度。
     private func updatePausedScrub(translation: CGFloat, width: CGFloat) {
-        guard isFocused, !isPlaying else { return }
+        guard showsFocus, !isPlaying else { return }
         let start = scrubStartValue ?? value
         if scrubStartValue == nil { scrubStartValue = start }
         onScrubChanged(scrubTarget(from: start, translation: translation, width: width))
@@ -313,7 +463,7 @@ private struct TVSeekBar: View {
     ///   - translation: 已包含松手速度投影的水平位移。
     ///   - width: 时间轴可用宽度。
     private func finishPausedScrub(translation: CGFloat, width: CGFloat) {
-        guard let start = scrubStartValue, isFocused, !isPlaying else {
+        guard let start = scrubStartValue, showsFocus, !isPlaying else {
             scrubStartValue = nil
             return
         }
@@ -336,7 +486,7 @@ private struct TVSeekBar: View {
     /// - Parameter press: SwiftUI 转发的左右方向按键事件。
     /// - Returns: 焦点在时间轴上时接管事件，否则交回系统。
     private func handleDirectionalKeyPress(_ press: KeyPress) -> KeyPress.Result {
-        guard isFocused else { return .ignored }
+        guard showsFocus else { return .ignored }
         let direction = press.key == .leftArrow ? -1.0 : 1.0
         if press.phase.contains(.down) {
             directionalRepeatCount = 0
@@ -413,29 +563,36 @@ private struct TVPlayerActionLabel: View {
     @Environment(\.isFocused) private var isFocused
 
     var body: some View {
-        VStack(spacing: 8) {
-            ZStack {
-                Circle()
-                    .fill(isFocused ? KanataTheme.accent.opacity(0.88) : Color.clear)
-                Image(systemName: symbol)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(isFocused ? Color.white : (isActive ? KanataTheme.accent : .white))
-                    .shadow(color: .black.opacity(0.72), radius: 3, y: 1)
-            }
-            .frame(width: 58, height: 58)
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-            if let detail {
-                Text(detail)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.68))
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(isFocused ? Color.black : (isActive ? KanataTheme.accent : .white))
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
                     .lineLimit(1)
+                if let detail {
+                    Text(detail)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(isFocused ? Color.black.opacity(0.62) : Color.white.opacity(0.62))
+                        .lineLimit(1)
+                }
             }
         }
-        .frame(minWidth: 82)
-        .contentShape(Rectangle())
+        .foregroundStyle(isFocused ? Color.black : Color.white)
+        .padding(.horizontal, 15)
+        .frame(minWidth: 108, minHeight: 58, alignment: .center)
+        .background {
+            if isFocused {
+                Capsule(style: .continuous)
+                    .fill(Color.white)
+                    .shadow(color: .black.opacity(0.34), radius: 16, y: 7)
+            }
+        }
+        .scaleEffect(isFocused ? 1.04 : 1)
+        .animation(.easeOut(duration: 0.12), value: isFocused)
+        .contentShape(Capsule(style: .continuous))
     }
 }
 
@@ -486,7 +643,6 @@ private struct TVPlayerQuickSettingsPanel: View {
     let onRestart: () -> Void
     let onOpenSubtitles: () -> Void
     let onOpenSettings: () -> Void
-    let onDismiss: () -> Void
     @FocusState private var focusedAction: Action?
 
     /// 浮层内可由遥控器选择的操作。
@@ -559,7 +715,6 @@ private struct TVPlayerQuickSettingsPanel: View {
         }
         .focusSection()
         .onAppear(perform: focusInitialAction)
-        .onExitCommand(perform: onDismiss)
     }
 
     /// 构建浮层中图标、标题和值对齐的单行标签。
@@ -667,7 +822,6 @@ private struct TVPlayerEpisodeShelf: View {
         )
         .focusSection()
         .onAppear(perform: focusCurrentItem)
-        .onExitCommand(perform: onDismiss)
     }
 
     /// 构建带缩略图、集数和当前播放状态的横向分集卡片。
@@ -783,6 +937,7 @@ private enum PlayerGestureMode {
 /// 播放页。视频、弹幕、控制三层叠加。
 struct PlayerScreen: View {
     let items: [LibraryItem]
+    private let onDismissPlayer: (() -> Void)?
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -828,6 +983,7 @@ struct PlayerScreen: View {
     @State private var playbackRouteMode = PlaybackRouteMode.automatic
     #if os(tvOS)
     @State private var isShowingTVQuickSettings = false
+    @State private var lastTVExitCommandDate = Date.distantPast
     @FocusState private var tvFocusedControl: TVPlayerFocus?
     #endif
     #if os(iOS)
@@ -841,10 +997,15 @@ struct PlayerScreen: View {
     /// - Parameters:
     ///   - items: 同一合集的有序媒体条目，单视频时只有一项。
     ///   - initialItemID: 用户点击的起始条目 ID。
-    init(items: [LibraryItem], initialItemID: String) {
+    init(
+        items: [LibraryItem],
+        initialItemID: String,
+        onDismissPlayer: (() -> Void)? = nil
+    ) {
         let playable = items.filter { $0.resolveURL() != nil }
         let values = playable.isEmpty ? items : playable
         self.items = values
+        self.onDismissPlayer = onDismissPlayer
         let index = values.firstIndex(where: { $0.id == initialItemID }) ?? 0
         self._activeIndex = State(initialValue: index)
     }
@@ -1032,7 +1193,7 @@ struct PlayerScreen: View {
         }
         .alert("退出播放器？", isPresented: $isConfirmingExit) {
             Button("继续观看", role: .cancel) { cancelExitConfirmation() }
-            Button("退出并返回首页", role: .destructive) { dismiss() }
+            Button("退出并返回首页", role: .destructive) { dismissPlayer() }
         } message: {
             Text("当前播放进度会自动保存，下次可以继续观看。")
         }
@@ -1258,14 +1419,37 @@ struct PlayerScreen: View {
                 .onMoveCommand(perform: handleTVRemoteMove)
                 #endif
         } else {
+            #if os(tvOS)
+            if !shouldShowPlayerControls && !isPlaybackFailed {
+                TVRemoteCommandCaptureView(
+                    onSelect: handleTVBackgroundConfirm,
+                    onLeft: {
+                        guard !shouldShowPlayerControls else { return }
+                        seekFromTVRemote(by: -10)
+                    },
+                    onRight: {
+                        guard !shouldShowPlayerControls else { return }
+                        seekFromTVRemote(by: 10)
+                    },
+                    onUp: {
+                        guard !shouldShowPlayerControls else { return }
+                        setControlsVisible(true)
+                    },
+                    onDown: {
+                        guard !shouldShowPlayerControls else { return }
+                        setControlsVisible(true)
+                    },
+                    onExit: handleTVExitCommand
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel(isPlaying ? "暂停播放" : "继续播放")
+            } else {
+                Color.clear
+                    .allowsHitTesting(false)
+            }
+            #else
             Color.clear
                 .contentShape(Rectangle())
-                #if os(tvOS)
-                .onTapGesture(perform: handleTVBackgroundConfirm)
-                .focusable(!shouldShowPlayerControls && !isPlaybackFailed)
-                .focused($tvFocusedControl, equals: .background)
-                .onMoveCommand(perform: handleTVRemoteMove)
-                #else
                 .onTapGesture(count: 2) {
                     togglePlayback()
                     showOSD(isPlaying ? "播放" : "暂停")
@@ -1274,7 +1458,7 @@ struct PlayerScreen: View {
                     setControlsVisible(!isShowingControls)
                 }
                 .gesture(playerDragGesture)
-                #endif
+            #endif
         }
     }
 
@@ -1429,10 +1613,11 @@ struct PlayerScreen: View {
     private var tvControlsLayer: some View {
         ZStack {
             LinearGradient(
-                colors: [.clear, .clear, .black.opacity(0.28), .black.opacity(0.88)],
+                colors: [.clear, .clear, .black.opacity(0.20), .black.opacity(0.82)],
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .ignoresSafeArea()
             .allowsHitTesting(false)
 
             VStack(spacing: 0) {
@@ -1444,6 +1629,7 @@ struct PlayerScreen: View {
                     }
                     .buttonStyle(PlayerControlButtonStyle())
                     .focused($tvFocusedControl, equals: .back)
+                    .onMoveCommand(perform: handleTVHeaderMove)
                     .accessibilityLabel("返回媒体库")
 
                     VStack(alignment: .leading, spacing: 3) {
@@ -1463,23 +1649,20 @@ struct PlayerScreen: View {
 
                 Spacer()
 
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .bottom, spacing: 42) {
-                        tvNowPlayingMetadata
-                        Spacer(minLength: 36)
-                        tvPlaybackActionRow
-                    }
+                VStack(alignment: .leading, spacing: 14) {
+                    tvNowPlayingMetadata
 
-                    HStack(spacing: 14) {
+                    HStack(spacing: 12) {
                         Text(timeLabel(currentTime))
                             .frame(width: 78, alignment: .leading)
                         TVSeekBar(
                             value: currentTime,
                             duration: max(viewModel.duration, 1),
                             isPlaying: isPlaying,
+                            isHighlighted: tvFocusedControl == .progress,
                             onScrubChanged: previewTVSeek,
                             onSeek: commitTVSeek,
-                            onMoveUp: focusTVActionRow,
+                            onMoveUp: focusTVHeader,
                             onMoveDown: { tvFocusedControl = .playPause },
                             onTogglePlayback: togglePlayback
                         )
@@ -1489,20 +1672,15 @@ struct PlayerScreen: View {
                     }
                     .font(.caption.monospacedDigit().weight(.semibold))
 
-                    HStack(alignment: .center, spacing: 20) {
+                    HStack(alignment: .center, spacing: 28) {
                         tvTransportRow
                         Spacer()
-                        Label(
-                            isPlaying ? "左右键快进或快退" : "左右滑动可快速拖动进度",
-                            systemImage: "hand.draw"
-                        )
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.58))
+                        tvPlaybackActionRow
                     }
                     .focusSection()
                 }
                 .padding(.horizontal, 74)
-                .padding(.bottom, 42)
+                .padding(.bottom, 46)
             }
         }
         .foregroundStyle(.white)
@@ -1534,9 +1712,9 @@ struct PlayerScreen: View {
         .frame(maxWidth: 680, alignment: .leading)
     }
 
-    /// Apple TV 时间轴上方的圆形玻璃快捷操作。
+    /// Apple TV 底部的固定宽度快捷操作，未聚焦时保持轻量。
     private var tvPlaybackActionRow: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 6) {
             if items.count > 1 {
                 Button(action: presentTVPlaylist) {
                     TVPlayerActionLabel(
@@ -1548,6 +1726,7 @@ struct PlayerScreen: View {
                 }
                 .buttonStyle(TVPlayerActionButtonStyle())
                 .focused($tvFocusedControl, equals: .playlist)
+                .onMoveCommand { handleTVActionMove($0, from: .playlist) }
                 .accessibilityLabel("选择分集")
             }
 
@@ -1561,6 +1740,7 @@ struct PlayerScreen: View {
             }
             .buttonStyle(TVPlayerActionButtonStyle())
             .focused($tvFocusedControl, equals: .subtitle)
+            .onMoveCommand { handleTVActionMove($0, from: .subtitle) }
             .accessibilityLabel("字幕与音轨")
 
             Button(action: toggleDanmaku) {
@@ -1573,19 +1753,8 @@ struct PlayerScreen: View {
             }
             .buttonStyle(TVPlayerActionButtonStyle())
             .focused($tvFocusedControl, equals: .danmakuToggle)
+            .onMoveCommand { handleTVActionMove($0, from: .danmakuToggle) }
             .accessibilityLabel(settings.danmakuConfig.enabled ? "关闭弹幕" : "开启弹幕")
-
-            Button(action: presentDanmakuSettings) {
-                TVPlayerActionLabel(
-                    symbol: "slider.horizontal.3",
-                    title: "弹幕设置",
-                    detail: nil,
-                    isActive: false
-                )
-            }
-            .buttonStyle(TVPlayerActionButtonStyle())
-            .focused($tvFocusedControl, equals: .danmakuSettings)
-            .accessibilityLabel("弹幕设置")
 
             if settings.isFullFeatureAccessEnabled {
                 Button(action: presentDanmakuCandidates) {
@@ -1598,6 +1767,7 @@ struct PlayerScreen: View {
                 }
                 .buttonStyle(TVPlayerActionButtonStyle())
                 .focused($tvFocusedControl, equals: .manualMatch)
+                .onMoveCommand { handleTVActionMove($0, from: .manualMatch) }
                 .accessibilityLabel("选择弹幕来源")
             }
 
@@ -1611,6 +1781,7 @@ struct PlayerScreen: View {
             }
             .buttonStyle(TVPlayerActionButtonStyle())
             .focused($tvFocusedControl, equals: .more)
+            .onMoveCommand { handleTVActionMove($0, from: .more) }
             .accessibilityLabel("更多播放设置")
         }
     }
@@ -1626,6 +1797,7 @@ struct PlayerScreen: View {
             }
             .buttonStyle(PlayerControlButtonStyle())
             .focused($tvFocusedControl, equals: .rewind)
+            .onMoveCommand { handleTVTransportMove($0, from: .rewind) }
             .accessibilityLabel("后退 10 秒")
 
             if items.count > 1 {
@@ -1634,6 +1806,7 @@ struct PlayerScreen: View {
                 }
                 .buttonStyle(PlayerControlButtonStyle())
                 .focused($tvFocusedControl, equals: .previousEpisode)
+                .onMoveCommand { handleTVTransportMove($0, from: .previousEpisode) }
                 .disabled(activeIndex == 0)
                 .accessibilityLabel("上一集")
             }
@@ -1643,6 +1816,7 @@ struct PlayerScreen: View {
             }
             .buttonStyle(PlayerControlButtonStyle())
             .focused($tvFocusedControl, equals: .playPause)
+            .onMoveCommand { handleTVTransportMove($0, from: .playPause) }
             .accessibilityLabel(isPlaying ? "暂停" : "播放")
 
             if items.count > 1 {
@@ -1651,6 +1825,7 @@ struct PlayerScreen: View {
                 }
                 .buttonStyle(PlayerControlButtonStyle())
                 .focused($tvFocusedControl, equals: .nextEpisode)
+                .onMoveCommand { handleTVTransportMove($0, from: .nextEpisode) }
                 .disabled(activeIndex >= items.count - 1)
                 .accessibilityLabel("下一集")
             }
@@ -1663,6 +1838,7 @@ struct PlayerScreen: View {
             }
             .buttonStyle(PlayerControlButtonStyle())
             .focused($tvFocusedControl, equals: .forward)
+            .onMoveCommand { handleTVTransportMove($0, from: .forward) }
             .accessibilityLabel("前进 10 秒")
         }
     }
@@ -1680,8 +1856,7 @@ struct PlayerScreen: View {
                     onCycleScaling: cycleTVScalingMode,
                     onRestart: restartFromTVQuickSettings,
                     onOpenSubtitles: openPlaybackOptionsFromTVQuickSettings,
-                    onOpenSettings: openPlaybackOptionsFromTVQuickSettings,
-                    onDismiss: dismissTVQuickSettings
+                    onOpenSettings: openPlaybackOptionsFromTVQuickSettings
                 )
             }
             Spacer()
@@ -1821,6 +1996,7 @@ struct PlayerScreen: View {
                         value: currentTime,
                         duration: max(viewModel.duration, 1),
                         isPlaying: isPlaying,
+                        isHighlighted: tvFocusedControl == .progress,
                         onScrubChanged: { target in
                             isSeeking = true
                             pendingSeekTarget = nil
@@ -2101,9 +2277,81 @@ struct PlayerScreen: View {
         setControlsVisible(true)
     }
 
-    /// 时间轴向上移动时优先进入右侧快捷操作区域。
-    private func focusTVActionRow() {
-        tvFocusedControl = items.count > 1 ? .playlist : .subtitle
+    /// 时间轴向上移动时回到顶部返回入口。
+    private func focusTVHeader() {
+        tvFocusedControl = .back
+    }
+
+    /// 返回当前播放器快捷操作从左到右的焦点顺序。
+    /// - Returns: 与画面显示一致的可聚焦操作列表。
+    private func tvActionFocusOrder() -> [TVPlayerFocus] {
+        var controls: [TVPlayerFocus] = []
+        if items.count > 1 { controls.append(.playlist) }
+        controls.append(contentsOf: [.subtitle, .danmakuToggle])
+        if settings.isFullFeatureAccessEnabled { controls.append(.manualMatch) }
+        controls.append(.more)
+        return controls
+    }
+
+    /// 返回当前播放器运输控件从左到右的焦点顺序。
+    /// - Returns: 与当前分集边界状态一致的运输控件列表。
+    private func tvTransportFocusOrder() -> [TVPlayerFocus] {
+        var controls: [TVPlayerFocus] = [.rewind]
+        if activeIndex > 0 { controls.append(.previousEpisode) }
+        controls.append(.playPause)
+        if activeIndex < items.count - 1 { controls.append(.nextEpisode) }
+        controls.append(.forward)
+        return controls
+    }
+
+    /// 处理顶部返回入口的向下移动，直接进入时间轴。
+    /// - Parameter direction: Siri Remote 当前移动方向。
+    private func handleTVHeaderMove(_ direction: MoveCommandDirection) {
+        if direction == .down { tvFocusedControl = .progress }
+    }
+
+    /// 让底部快捷操作拥有稳定的左右顺序，并可向上回到时间轴。
+    /// - Parameters:
+    ///   - direction: Siri Remote 当前移动方向。
+    ///   - control: 当前获得焦点的快捷操作。
+    private func handleTVActionMove(_ direction: MoveCommandDirection, from control: TVPlayerFocus) {
+        let controls = tvActionFocusOrder()
+        guard let index = controls.firstIndex(of: control) else { return }
+        switch direction {
+        case .left:
+            tvFocusedControl = index > 0 ? controls[index - 1] : tvTransportFocusOrder().last
+        case .right:
+            if index + 1 < controls.count { tvFocusedControl = controls[index + 1] }
+        case .up:
+            tvFocusedControl = .progress
+        case .down:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    /// 让运输控件拥有稳定的左右顺序，并把最右侧与快捷操作连接起来。
+    /// - Parameters:
+    ///   - direction: Siri Remote 当前移动方向。
+    ///   - control: 当前获得焦点的运输控件。
+    private func handleTVTransportMove(_ direction: MoveCommandDirection, from control: TVPlayerFocus) {
+        let controls = tvTransportFocusOrder()
+        guard let index = controls.firstIndex(of: control) else { return }
+        switch direction {
+        case .left:
+            if index > 0 { tvFocusedControl = controls[index - 1] }
+        case .right:
+            tvFocusedControl = index + 1 < controls.count
+                ? controls[index + 1]
+                : tvActionFocusOrder().first
+        case .up:
+            tvFocusedControl = .progress
+        case .down:
+            break
+        @unknown default:
+            break
+        }
     }
 
     /// 切换弹幕显示并提供电视端即时反馈。
@@ -2123,7 +2371,7 @@ struct PlayerScreen: View {
     /// 收起右侧弹幕设置并恢复弹幕设置入口焦点。
     private func dismissTVDanmakuSettings() {
         isShowingDanmakuPanel = false
-        tvFocusedControl = .danmakuSettings
+        tvFocusedControl = .more
         setControlsVisible(true)
     }
 
@@ -2157,9 +2405,13 @@ struct PlayerScreen: View {
 
     /// 收起右侧轻量播放选项，并把焦点放回“更多”。
     private func dismissTVQuickSettings() {
-        isShowingTVQuickSettings = false
-        tvFocusedControl = .more
-        scheduleControlsHide()
+        guard isShowingTVQuickSettings else { return }
+        Task { @MainActor in
+            await Task.yield()
+            isShowingTVQuickSettings = false
+            tvFocusedControl = .more
+            scheduleControlsHide()
+        }
     }
 
     /// 展开当前合集的底部分集架。
@@ -2216,6 +2468,7 @@ struct PlayerScreen: View {
               !isShowingPlaylist else { return }
         togglePlayback()
         setControlsVisible(true)
+        tvFocusedControl = .playPause
         showOSD(isPlaying ? "播放" : "暂停")
     }
 
@@ -2242,6 +2495,9 @@ struct PlayerScreen: View {
 
     /// 菜单键第一次隐藏播放控件，控件已隐藏时再执行返回。
     private func handleTVExitCommand() {
+        let now = Date()
+        guard now.timeIntervalSince(lastTVExitCommandDate) > 0.45 else { return }
+        lastTVExitCommandDate = now
         if isShowingTVQuickSettings {
             dismissTVQuickSettings()
             return
@@ -2276,7 +2532,7 @@ struct PlayerScreen: View {
             }
             if isVisible {
                 if tvFocusedControl == nil || tvFocusedControl == .background {
-                    tvFocusedControl = .progress
+                    tvFocusedControl = .playPause
                 }
             } else {
                 tvFocusedControl = .background
@@ -2301,7 +2557,7 @@ struct PlayerScreen: View {
                 controlsTask?.cancel()
                 focusPlaybackFailureActions()
             case .ready:
-                tvFocusedControl = .progress
+                tvFocusedControl = .playPause
             case .idle, .preparing:
                 tvFocusedControl = nil
             }
@@ -2738,8 +2994,21 @@ struct PlayerScreen: View {
         isConfirmingExit = true
     }
 
+    /// 关闭播放器；电视端内嵌覆盖层优先回调首页，触屏端继续使用系统模态关闭。
+    private func dismissPlayer() {
+        if let onDismissPlayer {
+            onDismissPlayer()
+        } else {
+            dismiss()
+        }
+    }
+
     /// 取消退出确认，并在弹窗出现前处于播放状态时继续播放。
     private func cancelExitConfirmation() {
+        setControlsVisible(true)
+        #if os(tvOS)
+        tvFocusedControl = .playPause
+        #endif
         guard resumesAfterExitCancellation else { return }
         resumesAfterExitCancellation = false
         viewModel.play()
@@ -2779,7 +3048,7 @@ struct PlayerScreen: View {
         if visible { scheduleControlsHide() }
     }
 
-    /// 播放时在四秒无操作后自动隐藏控制层。
+    /// 播放时在六秒无操作后自动隐藏控制层。
     private func scheduleControlsHide() {
         controlsTask?.cancel()
         guard isPlaying, !isSeeking else { return }
@@ -2790,7 +3059,7 @@ struct PlayerScreen: View {
               !isShowingPlaylist else { return }
         #endif
         controlsTask = Task {
-            try? await Task.sleep(for: .seconds(4))
+            try? await Task.sleep(for: .seconds(6))
             guard !Task.isCancelled else { return }
             if reduceMotion {
                 isShowingControls = false

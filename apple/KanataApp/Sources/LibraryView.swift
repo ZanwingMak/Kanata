@@ -405,6 +405,25 @@ struct LibraryView: View {
             } message: {
                 Text(mediaSourceNotice ?? "")
             }
+            #if os(tvOS)
+            .overlay {
+                if let queue = playing {
+                    if queue.items.contains(where: { $0.resolveURL() != nil }) {
+                        PlayerScreen(
+                            items: queue.items,
+                            initialItemID: queue.initialItemID,
+                            onDismissPlayer: closeTVPlayer
+                        )
+                    } else {
+                        ContentUnavailableView(
+                            "无法访问该文件",
+                            systemImage: "exclamationmark.triangle",
+                            description: Text("文件可能已被移动或删除，请重新导入")
+                        )
+                    }
+                }
+            }
+            #else
             .fullScreenCover(item: $playing, onDismiss: {
                 progressRevision += 1
             }) { queue in
@@ -418,6 +437,7 @@ struct LibraryView: View {
                     )
                 }
             }
+            #endif
             .kanataModal(item: $pendingLocalImport) { draft in
                 MediaImportPreview(draft: draft, onConfirm: addMediaItems)
             }
@@ -1090,6 +1110,12 @@ struct LibraryView: View {
         mediaSourceNotice = nil
         browsingSource = nil
         isAddingMediaSource = false
+    }
+
+    /// 关闭电视端内嵌播放器并刷新首页播放进度。
+    private func closeTVPlayer() {
+        playing = nil
+        progressRevision += 1
     }
 
     /// 从历史存储刷新首页媒体源频道。

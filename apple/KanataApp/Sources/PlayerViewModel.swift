@@ -413,15 +413,15 @@ final class PlayerViewModel {
         guard let best = result.candidates.first else {
             let detail = result.errors.isEmpty ? "" : "（\(result.errors.joined(separator: "；"))）"
             danmakuStats = failureMessage("未匹配到弹幕\(detail)，可输入剧名、集数或平台链接搜索")
-            isShowingCandidates = true
+            isShowingCandidates = false
             return
         }
-        // 置信度足够高时直接采用，否则让用户确认。
+        // 置信度足够高时直接采用，否则保留候选并等待用户主动打开。
         if best.confidence >= 0.9 {
             await loadDanmaku(for: best)
         } else {
-            danmakuStats = "找到 \(result.candidates.count) 个候选，请选择"
-            isShowingCandidates = true
+            danmakuStats = "找到 \(result.candidates.count) 个候选，可打开匹配选择"
+            isShowingCandidates = false
         }
     }
 
