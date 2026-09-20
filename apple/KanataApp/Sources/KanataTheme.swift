@@ -29,6 +29,10 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         adaptiveColor(light: lightAccentStrong, dark: darkAccentStrong)
     }
 
+    /// 实心操作按钮始终使用深色底，保证白色标签在所有主题下可读。
+    var actionFill: Color { Color(uiColor: lightAccent) }
+    var actionFillStrong: Color { Color(uiColor: lightAccentStrong) }
+
     /// 返回主题用于大面积环境光的陪衬色，避免界面只剩单一强调色。
     var ambientCompanion: Color {
         adaptiveColor(light: lightAmbientCompanion, dark: darkAmbientCompanion)
@@ -181,27 +185,29 @@ enum KanataTheme {
 
     static var accent: Color { currentAccentTheme.accent }
     static var accentStrong: Color { currentAccentTheme.accentStrong }
+    static var actionFill: Color { currentAccentTheme.actionFill }
+    static var actionFillStrong: Color { currentAccentTheme.actionFillStrong }
     static var ambientCompanion: Color { currentAccentTheme.ambientCompanion }
     static var ambientHighlight: Color { currentAccentTheme.ambientHighlight }
     static let backgroundTop = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .light
             ? UIColor(red: 0.87, green: 0.92, blue: 0.97, alpha: 1)
-            : UIColor(red: 0.005, green: 0.01, blue: 0.025, alpha: 1)
+            : UIColor(red: 0.025, green: 0.029, blue: 0.038, alpha: 1)
     })
     static let background = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .light
             ? UIColor(red: 0.95, green: 0.96, blue: 0.98, alpha: 1)
-            : UIColor(red: 0.025, green: 0.035, blue: 0.065, alpha: 1)
+            : UIColor(red: 0.035, green: 0.041, blue: 0.055, alpha: 1)
     })
     static let surface = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .light
             ? UIColor(red: 0.98, green: 0.985, blue: 0.995, alpha: 0.88)
-            : UIColor(red: 0.055, green: 0.07, blue: 0.11, alpha: 0.94)
+            : UIColor(red: 0.085, green: 0.095, blue: 0.115, alpha: 0.96)
     })
     static let elevatedSurface = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .light
             ? UIColor(red: 1, green: 1, blue: 1, alpha: 0.96)
-            : UIColor(red: 0.075, green: 0.09, blue: 0.14, alpha: 0.98)
+            : UIColor(red: 0.13, green: 0.145, blue: 0.17, alpha: 0.98)
     })
     static let overlaySurface = Color.black.opacity(0.82)
     static let separator = Color.primary.opacity(0.12)
@@ -230,9 +236,9 @@ struct KanataAmbientBackground: View {
             )
             LinearGradient(
                 colors: [
-                    KanataTheme.ambientCompanion.opacity(colorScheme == .dark ? 0.20 : 0.12),
+                    KanataTheme.ambientCompanion.opacity(colorScheme == .dark ? 0.08 : 0.08),
                     .clear,
-                    KanataTheme.accent.opacity(colorScheme == .dark ? 0.14 : 0.08),
+                    KanataTheme.accent.opacity(colorScheme == .dark ? 0.06 : 0.06),
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -257,25 +263,38 @@ private struct KanataGlassSurfaceModifier: ViewModifier {
     /// 绘制带主题染色、内高光和柔和阴影的玻璃表面。
     /// - Parameter content: 需要承载的卡片内容。
     /// - Returns: 统一视觉深度的玻璃卡片。
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(isElevated ? KanataTheme.elevatedSurface : KanataTheme.surface)
-                    .overlay(alignment: .top) {
-                        LinearGradient(
-                            colors: [.white.opacity(isElevated ? 0.13 : 0.08), .clear],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                    }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(isElevated ? Color.white.opacity(0.18) : KanataTheme.separator, lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(isElevated ? 0.14 : 0), radius: isElevated ? 16 : 0, y: 8)
+        if isElevated {
+            content.kanataFloatingSurface(cornerRadius: cornerRadius)
+        } else {
+            content.background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: cornerRadius))
+        }
+    }
+}
+
+/// 仅浮层采样系统玻璃，静态列表不叠加昂贵的背景折射。
+private struct KanataFloatingSurface: ViewModifier {
+    let cornerRadius: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    /// 原生玻璃支持降低透明度设置，旧系统使用常规材质。
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: cornerRadius))
+        } else if #available(iOS 26, tvOS 26, *) {
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius))
+        } else {
+            content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+        }
+    }
+}
+
+extension View {
+    /// 为导航与弹出面板提供统一玻璃表面。
+    func kanataFloatingSurface(cornerRadius: CGFloat = 24) -> some View {
+        modifier(KanataFloatingSurface(cornerRadius: cornerRadius))
     }
 }
 
@@ -298,7 +317,7 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
             .frame(minHeight: 50, alignment: .center)
             .background(
                 LinearGradient(
-                    colors: [KanataTheme.accent, KanataTheme.accentStrong],
+                    colors: [KanataTheme.actionFill, KanataTheme.actionFillStrong],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
@@ -367,9 +386,9 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     /// - Parameter configuration: SwiftUI 按钮状态。
     /// - Returns: 不依赖缩放的清晰焦点背景。
     private func secondaryTint(configuration: Configuration) -> Color {
-        if configuration.isPressed { return KanataTheme.accent.opacity(0.72) }
+        if configuration.isPressed { return KanataTheme.elevatedSurface }
         #if os(tvOS)
-        if isFocused { return KanataTheme.accent }
+        if isFocused { return KanataTheme.elevatedSurface }
         #endif
         return KanataTheme.surface
     }
@@ -377,7 +396,7 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
     /// 返回次级按钮在电视高亮状态下的高对比度文字颜色。
     private var secondaryForeground: Color {
         #if os(tvOS)
-        isFocused ? .white : .primary
+        .primary
         #else
         .primary
         #endif
@@ -406,6 +425,7 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
 /// Apple TV 顶部操作使用的紧凑文字按钮，保证图标、文案和焦点都清晰可见。
 struct KanataTVActionButtonStyle: ButtonStyle {
     @Environment(\.isFocused) private var isFocused
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 绘制带文字的电视操作按钮，聚焦时使用高对比度主题底色。
     /// - Parameter configuration: SwiftUI 按钮状态。
@@ -413,18 +433,17 @@ struct KanataTVActionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline.weight(.semibold))
-            .foregroundStyle(isFocused ? Color.white : Color.primary)
+            .foregroundStyle(isFocused ? Color.black : Color.primary)
             .padding(.horizontal, 20)
             .frame(minHeight: 58)
             .background {
                 Capsule()
-                    .fill(isFocused ? KanataTheme.accent : KanataTheme.surface)
-            }
-            .overlay {
-                Capsule().stroke(isFocused ? Color.white.opacity(0.66) : KanataTheme.separator, lineWidth: 1)
+                    .fill(isFocused ? Color.white : Color.clear)
             }
             .opacity(configuration.isPressed ? 0.72 : 1)
             .focusEffectDisabled()
+            .scaleEffect(isFocused ? 1.04 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isFocused)
     }
 }
 #endif
@@ -434,26 +453,29 @@ struct KanataTVActionButtonStyle: ButtonStyle {
 private struct KanataTVFocusButtonStyle: ButtonStyle {
     let cornerRadius: CGFloat
     @Environment(\.isFocused) private var isFocused
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 直接接管按钮焦点绘制，避免系统白色材质与自定义效果叠加。
     /// - Parameter configuration: SwiftUI 按钮状态。
     /// - Returns: 仅使用主题色描边、轻微提亮和阴影的按钮。
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(6)
+            .padding(4)
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .focusEffectDisabled()
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(isFocused ? KanataTheme.accent.opacity(0.92) : Color.clear, lineWidth: 2)
+                    .strokeBorder(isFocused ? Color.primary.opacity(0.92) : Color.clear, lineWidth: 3)
             }
             .background(
-                isFocused ? KanataTheme.accent.opacity(0.12) : Color.clear,
+                isFocused ? KanataTheme.accent.opacity(0.08) : Color.clear,
                 in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             )
             .brightness(isFocused ? 0.025 : 0)
             .opacity(configuration.isPressed ? 0.78 : 1)
             .zIndex(isFocused ? 1 : 0)
+            .scaleEffect(isFocused ? 1.025 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isFocused)
     }
 }
 #endif
@@ -584,6 +606,30 @@ struct KanataThemePreview: View {
     let isSelected: Bool
 
     var body: some View {
+        #if os(tvOS)
+        VStack(alignment: .leading, spacing: 14) {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(LinearGradient(colors: theme.palette, startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(height: 100)
+                .overlay(alignment: .bottomLeading) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "play.fill")
+                        Capsule().frame(width: 68, height: 5)
+                    }
+                    .foregroundStyle(.white.opacity(0.85))
+                    .font(.caption)
+                    .padding(16)
+                }
+            HStack {
+                Text(theme.title).font(.system(size: 23, weight: .medium))
+                Spacer()
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? theme.accent : Color.secondary.opacity(0.4))
+            }
+        }
+        .padding(14)
+        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+        #else
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(
@@ -610,6 +656,7 @@ struct KanataThemePreview: View {
         .frame(minHeight: 58)
         .kanataGlassSurface(cornerRadius: 16, isElevated: isSelected)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        #endif
     }
 }
 

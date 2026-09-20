@@ -131,6 +131,18 @@ enum PlaybackProgressStore {
         )
     }
 
+    /// 一次解码媒体库所需的全部续播信息，避免每张卡片反复读取相同 JSON。
+    static func snapshots() -> [String: Snapshot] {
+        let now = Date()
+        return loadEntries().compactMapValues { entry in
+            guard now.timeIntervalSince(entry.updatedAt) < 180 * 86_400,
+                  entry.position >= 5, entry.duration > 0,
+                  entry.position < max(entry.duration - 20, 15) else { return nil }
+            return Snapshot(position: min(entry.position, entry.duration),
+                            duration: entry.duration, updatedAt: entry.updatedAt)
+        }
+    }
+
     /// 保存当前播放进度；接近片尾时删除记录，下一次从头播放。
     /// - Parameters:
     ///   - position: 当前播放秒数。

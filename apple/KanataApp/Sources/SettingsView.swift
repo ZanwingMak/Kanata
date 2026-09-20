@@ -27,6 +27,14 @@ struct SettingsView: View {
     @State private var isShowingBilibiliQRCode = false
     @State private var versionTapCount = 0
     @State private var isShowingFeatureAccessNotice = false
+    @State private var selectedCategory: SettingsCategory = .appearance
+    #if os(tvOS)
+    @FocusState private var appearanceFocus: AppearanceFocus?
+    private enum AppearanceFocus: Hashable {
+        case category(SettingsCategory)
+        case theme(KanataAccentTheme)
+    }
+    #endif
     #if os(iOS)
     @State private var selectedIconName: String?
     @State private var iconResult: String?
@@ -61,6 +69,35 @@ struct SettingsView: View {
         }
     }
 
+    /// 设置按任务分组，避免电视上连续滚动一整页配置。
+    private enum SettingsCategory: String, CaseIterable, Identifiable {
+        case appearance = "外观"
+        case danmaku = "弹幕与账户"
+        case subtitles = "字幕"
+        case storage = "同步与存储"
+        case about = "关于与支持"
+
+        var id: String { rawValue }
+        var symbol: String {
+            switch self {
+            case .appearance: "paintpalette"
+            case .danmaku: "text.bubble"
+            case .subtitles: "captions.bubble"
+            case .storage: "externaldrive"
+            case .about: "info.circle"
+            }
+        }
+        var detail: String {
+            switch self {
+            case .appearance: "选择让你看得舒服的色彩与外观。"
+            case .danmaku: "管理弹幕渠道、连接与登录凭据。"
+            case .subtitles: "为影片找到合适的语言。"
+            case .storage: "让观看进度随设备同步，按需管理空间。"
+            case .about: "一个免费、开放的私人影院。"
+            }
+        }
+    }
+
     @ViewBuilder
     var body: some View {
         if usesParentNavigation {
@@ -74,35 +111,15 @@ struct SettingsView: View {
     private var content: some View {
         @Bindable var settings = settings
         @Bindable var cloudSync = cloudSync
-        return Form {
-                Section {
-                    settingsHero
-                }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
-
+        return settingsLayout {
+            Form {
+                if selectedCategory == .appearance {
                 Section("外观与个性化") {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("主题氛围")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        ScrollView(.horizontal) {
-                            LazyHStack(spacing: 14) {
-                                ForEach(KanataAccentTheme.allCases) { theme in
-                                    Button {
-                                        settings.accentTheme = theme
-                                    } label: {
-                                        KanataThemePreview(
-                                            theme: theme,
-                                            isSelected: settings.accentTheme == theme
-                                        )
-                                    }
-                                    .kanataTVFocus(cornerRadius: 18)
-                                }
-                            }
-                            .padding(.vertical, 8)
-                        }
-                        .scrollIndicators(.hidden)
+                        themeChoices
                     }
                     Picker("界面外观", selection: $settings.appearance) {
                         ForEach(KanataAppearance.allCases) { appearance in
@@ -155,6 +172,8 @@ struct SettingsView: View {
                     #endif
                 }
 
+                }
+                if selectedCategory == .danmaku {
                 if settings.isFullFeatureAccessEnabled {
                     Section("开箱即用弹幕") {
                         Toggle(isOn: $settings.builtInBilibiliEnabled) {
@@ -245,6 +264,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                }
+                if selectedCategory == .subtitles {
                 Section("在线字幕") {
                     KanataRowLabel(
                         title: "OpenSubtitles",
@@ -273,6 +294,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                }
+                if selectedCategory == .danmaku {
                 Section("扩展弹幕网关（可选）") {
                     LabeledContent("网关地址") {
                         TextField("http://192.168.1.7:9321", text: $settings.gatewayURLString)
@@ -365,6 +388,8 @@ struct SettingsView: View {
                     }
                 }
 
+                }
+                if selectedCategory == .storage {
                 Section("iCloud 同步") {
                     Toggle(isOn: $cloudSync.isEnabled) {
                         settingsLabel("跨设备同步", symbol: "icloud")
@@ -398,7 +423,8 @@ struct SettingsView: View {
                 }
 
                 storageSection
-
+                }
+                if selectedCategory == .about {
                 Section("支持 Kanata") {
                     NavigationLink {
                         SponsorshipView()
@@ -427,10 +453,16 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                }
             }
-            .tint(settings.accentTheme.accent)
-            .kanataFormBackground()
+            .id(selectedCategory)
+            #if !os(tvOS)
+            .scrollContentBackground(.hidden)
+            #endif
             .contentMargins(.horizontal, settingsHorizontalMargin, for: .scrollContent)
+        }
+            .tint(settings.accentTheme.accent)
+            .background { KanataAmbientBackground() }
             .navigationTitle("设置")
             .kanataInlineNavigationTitle()
             .toolbar {
@@ -482,6 +514,127 @@ struct SettingsView: View {
             }
     }
 
+    /// 电视使用两行主题预览，手机保留横向滑动，避免长色带挤压文字。
+    @ViewBuilder
+    private var themeChoices: some View {
+        #if os(tvOS)
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 18), count: 3), spacing: 18) {
+            ForEach(KanataAccentTheme.allCases) { theme in themeButton(theme) }
+        }
+        .padding(8)
+        #else
+        ScrollView(.horizontal) {
+            HStack(spacing: 12) {
+                ForEach(KanataAccentTheme.allCases) { theme in themeButton(theme) }
+            }
+            .padding(.vertical, 8)
+        }
+        .scrollIndicators(.hidden)
+        #endif
+    }
+
+    /// 主题切换保持明确焦点，并连通侧栏到右侧第一行的方向键路径。
+    private func themeButton(_ theme: KanataAccentTheme) -> some View {
+        Button { settings.accentTheme = theme } label: {
+            KanataThemePreview(theme: theme, isSelected: settings.accentTheme == theme)
+        }
+        .kanataTVFocus(cornerRadius: 18)
+        #if os(tvOS)
+        .focused($appearanceFocus, equals: .theme(theme))
+        .onMoveCommand { direction in
+            if direction == .left, theme == .galaxy || theme == .amethyst {
+                appearanceFocus = .category(.appearance)
+            }
+        }
+        #endif
+    }
+
+    /// 使用电视侧栏和手机横向分类承载同一组配置，不复制设置逻辑。
+    @ViewBuilder
+    private func settingsLayout<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        #if os(tvOS)
+        HStack(alignment: .top, spacing: 56) {
+            VStack(alignment: .leading, spacing: 30) {
+                Text("你的 Kanata")
+                    .font(.system(size: 42, weight: .bold))
+                VStack(spacing: 12) {
+                    ForEach(SettingsCategory.allCases) { category in
+                        categoryButton(category)
+                    }
+                }
+                Spacer()
+                Text("KANATA / SETTINGS")
+                    .font(.caption2.weight(.medium))
+                    .tracking(3)
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(width: 330)
+            .focusSection()
+            VStack(alignment: .leading, spacing: 14) {
+                Text(selectedCategory.rawValue).font(.title2.bold())
+                Text(selectedCategory.detail).font(.callout).foregroundStyle(.secondary)
+                content()
+                    .frame(maxWidth: .infinity)
+                    .focusSection()
+            }
+            .padding(.top, 8)
+        }
+        .padding(.horizontal, 80)
+        .padding(.top, 36)
+        .padding(.bottom, 44)
+        #else
+        VStack(spacing: 0) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(SettingsCategory.allCases) { category in
+                        categoryButton(category)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+            }
+            .scrollIndicators(.hidden)
+            content()
+        }
+        #endif
+    }
+
+    /// 分类选中状态与遥控焦点分开呈现，切换分类不会自动抢走侧栏焦点。
+    private func categoryButton(_ category: SettingsCategory) -> some View {
+        Button {
+            selectedCategory = category
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: category.symbol).frame(width: 28)
+                Text(category.rawValue)
+                #if os(tvOS)
+                Spacer()
+                #endif
+                if selectedCategory == category {
+                    Circle().fill(KanataTheme.accent).frame(width: 6, height: 6)
+                }
+            }
+            #if os(tvOS)
+            .font(.system(size: 25, weight: .medium))
+            #else
+            .font(.headline)
+            #endif
+            .padding(.horizontal, 18)
+            .frame(minHeight: 52)
+            .background(selectedCategory == category ? KanataTheme.elevatedSurface : .clear,
+                        in: RoundedRectangle(cornerRadius: 16))
+        }
+        .kanataTVFocus(cornerRadius: 16)
+        #if os(tvOS)
+        .focused($appearanceFocus, equals: .category(category))
+        .onMoveCommand { direction in
+            if direction == .right, selectedCategory == .appearance {
+                appearanceFocus = .theme(settings.accentTheme)
+            }
+        }
+        #endif
+    }
+
     /// 设置页顶部概览卡片，说明当前页面的主要设置范围并建立稳定视觉层级。
     private var settingsHero: some View {
         HStack(spacing: 18) {
@@ -514,7 +667,7 @@ struct SettingsView: View {
     /// 返回设置表单在当前平台使用的水平安全留白。
     private var settingsHorizontalMargin: CGFloat {
         #if os(tvOS)
-        110
+        0
         #else
         16
         #endif

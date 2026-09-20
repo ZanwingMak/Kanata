@@ -212,18 +212,19 @@ private struct PlayerControlButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(configuration.isPressed ? 0.72 : 1)
+            #if os(tvOS)
+            .foregroundStyle(isFocused ? Color.black : Color.white)
+            .background(isFocused ? Color.white : .clear, in: Circle())
+            .focusEffectDisabled()
+            .scaleEffect(isFocused ? 1.08 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isFocused)
+            #else
             .foregroundStyle(Color.white)
             .playerGlassSurface(
                 cornerRadius: isProminent ? 30 : 24,
                 tint: controlTint,
                 isInteractive: true
             )
-            #if os(tvOS)
-            .focusEffectDisabled()
-            .scaleEffect(isFocused ? 1.08 : 1)
-            .shadow(color: isFocused ? KanataTheme.accent.opacity(0.30) : .clear, radius: 18, y: 7)
-            .animation(reduceMotion ? nil : .snappy(duration: 0.20), value: isFocused)
-            #else
             .scaleEffect(1)
             .animation(nil, value: configuration.isPressed)
             #endif
@@ -506,11 +507,7 @@ private struct TVSeekBar: View {
         .focusable()
         .focusEffectDisabled()
         .padding(.horizontal, 12)
-        .playerGlassSurface(
-            cornerRadius: 19,
-            tint: showsFocus ? KanataTheme.accent.opacity(0.48) : Color.black.opacity(0.08),
-            isInteractive: true
-        )
+        .background(showsFocus ? Color.white.opacity(0.12) : .clear, in: Capsule())
         .scaleEffect(showsFocus ? 1.012 : 1)
         .shadow(color: showsFocus ? KanataTheme.accent.opacity(0.24) : .clear, radius: 16, y: 6)
         .animation(reduceMotion ? nil : .snappy(duration: 0.20), value: showsFocus)
@@ -656,31 +653,26 @@ private struct TVPlayerActionLabel: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(isActive ? KanataTheme.accent : .white)
+                .font(.system(size: 25, weight: .medium))
+                .foregroundStyle(isFocused ? Color.black : (isActive ? KanataTheme.accent : .white))
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.callout.weight(.semibold))
+                    .font(.system(size: 24, weight: .medium))
                     .lineLimit(1)
                 if let detail {
                     Text(detail)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(Color.white.opacity(0.68))
+                        .font(.system(size: 17).monospacedDigit())
+                        .foregroundStyle(isFocused ? Color.black.opacity(0.65) : Color.white.opacity(0.68))
                         .lineLimit(1)
                 }
             }
         }
-        .foregroundStyle(Color.white)
+        .foregroundStyle(isFocused ? Color.black : Color.white)
         .padding(.horizontal, 15)
         .frame(minWidth: 108, minHeight: 58, alignment: .center)
-        .playerGlassSurface(
-            cornerRadius: 29,
-            tint: actionTint,
-            isInteractive: true
-        )
+        .background(isFocused ? Color.white : .clear, in: Capsule())
         .scaleEffect(isFocused ? 1.055 : 1)
-        .shadow(color: isFocused ? KanataTheme.accent.opacity(0.26) : .clear, radius: 16, y: 6)
         .animation(reduceMotion ? nil : .snappy(duration: 0.20), value: isFocused)
         .contentShape(Capsule(style: .continuous))
     }
@@ -717,11 +709,10 @@ private struct TVPlayerQuickMenuRowStyle: ButtonStyle {
             .foregroundStyle(Color.white)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity, minHeight: 62)
-            .playerGlassSurface(
-                cornerRadius: 18,
-                tint: isFocused ? KanataTheme.accent.opacity(0.64) : Color.black.opacity(0.05),
-                isInteractive: true
-            )
+            .background(isFocused ? Color.white.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 16))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16).strokeBorder(isFocused ? .white.opacity(0.9) : .clear, lineWidth: 2)
+            }
             .focusEffectDisabled()
             .opacity(configuration.isPressed ? 0.74 : 1)
             .scaleEffect(isFocused ? 1.025 : 1)
@@ -755,14 +746,14 @@ private struct TVPlayerQuickSettingsPanel: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("播放选项")
-                            .font(.title2.bold())
+                            .font(.system(size: 30, weight: .bold))
                         Text("常用设置无需离开画面")
-                            .font(.caption)
+                            .font(.system(size: 20))
                             .foregroundStyle(.white.opacity(0.62))
                     }
                     Spacer()
                     Image(systemName: "ellipsis.circle.fill")
-                        .font(.title2)
+                        .font(.system(size: 30))
                         .foregroundStyle(KanataTheme.accent)
                 }
                 .padding(.horizontal, 8)
@@ -820,19 +811,20 @@ private struct TVPlayerQuickSettingsPanel: View {
     private func quickMenuLabel(title: String, value: String?, symbol: String) -> some View {
         HStack(spacing: 14) {
             Image(systemName: symbol)
-                .font(.body.weight(.semibold))
+                .font(.system(size: 23, weight: .medium))
                 .frame(width: 28)
             Text(title)
-                .font(.headline)
+                .font(.system(size: 25, weight: .medium))
+                .lineLimit(1)
             Spacer()
             if let value {
                 Text(value)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 22, weight: .medium))
                     .opacity(0.72)
                     .lineLimit(1)
             }
             Image(systemName: "chevron.right")
-                .font(.caption.bold())
+                .font(.system(size: 17, weight: .semibold))
                 .opacity(0.54)
         }
     }
@@ -1142,6 +1134,7 @@ struct PlayerScreen: View {
             externalSubtitleOverlay
 
             interactionLayer
+                .disabled(isShowingPlaybackPanel || isShowingDanmakuPanel || isShowingPlaylist)
 
             skipSegmentOverlay
 
@@ -1698,6 +1691,7 @@ struct PlayerScreen: View {
     private var controlsLayer: some View {
         #if os(tvOS)
         tvControlsLayer
+            .disabled(isShowingPlaybackPanel || isShowingDanmakuPanel || isShowingTVQuickSettings || isShowingPlaylist)
         #else
         touchControlsLayer
         #endif
@@ -1728,15 +1722,9 @@ struct PlayerScreen: View {
                         .onMoveCommand(perform: handleTVHeaderMove)
                         .accessibilityLabel("返回媒体库")
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(playerDisplayTitle)
-                                .font(.title3.weight(.semibold))
-                                .lineLimit(1)
-                            Text(activeItem.sourceName ?? viewModel.mediaInfo.source)
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.68))
-                                .lineLimit(1)
-                        }
+                        Text("正在播放")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.8))
                         Spacer()
                     }
                 }
@@ -1775,6 +1763,9 @@ struct PlayerScreen: View {
                             Spacer()
                             tvPlaybackActionRow
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .playerGlassSurface(cornerRadius: 40, tint: Color.black.opacity(0.24))
                     }
                     .focusSection()
                 }
@@ -1789,29 +1780,24 @@ struct PlayerScreen: View {
     /// Apple TV 时间轴上方的当前媒体信息。
     private var tvNowPlayingMetadata: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Label(activeItem.episodeLabel ?? "正在播放", systemImage: "play.circle.fill")
+            Text(activeItem.episodeLabel ?? "正在播放")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .playerGlassSurface(cornerRadius: 16, tint: KanataTheme.accent.opacity(0.34))
+                .foregroundStyle(.white.opacity(0.72))
             Text(activeItem.libraryTitle)
-                .font(.title2.bold())
+                .font(.system(size: 40, weight: .bold))
                 .lineLimit(1)
             HStack(spacing: 8) {
-                Text(viewModel.mediaInfo.resolution)
-                Text("·")
-                Text(activeItem.sourceName ?? viewModel.mediaInfo.source)
-                if !viewModel.danmakuStats.isEmpty {
+                if viewModel.mediaInfo.resolution != "未知" {
+                    Text(viewModel.mediaInfo.resolution)
                     Text("·")
-                    Text(viewModel.danmakuStats)
                 }
+                Text(activeItem.sourceName ?? viewModel.mediaInfo.source)
             }
             .font(.caption)
             .foregroundStyle(.white.opacity(0.62))
             .lineLimit(1)
         }
-        .frame(maxWidth: 680, alignment: .leading)
+        .frame(maxWidth: 1200, alignment: .leading)
     }
 
     /// Apple TV 底部的固定宽度快捷操作，未聚焦时保持轻量。
@@ -2321,10 +2307,10 @@ struct PlayerScreen: View {
     /// - Returns: 可直接放进 Button label 的图标视图。
     private func controlSymbol(_ name: String, prominent: Bool, compact: Bool = false) -> some View {
         #if os(tvOS)
-        let regularSize: CGFloat = 68
-        let primarySize: CGFloat = 82
+        let regularSize: CGFloat = 60
+        let primarySize: CGFloat = 72
         return Image(systemName: name)
-            .font(prominent ? .title.weight(.semibold) : .title2.weight(.semibold))
+            .font(.system(size: prominent ? 32 : 27, weight: .medium))
             .frame(
                 width: prominent ? primarySize : regularSize,
                 height: prominent ? primarySize : regularSize
@@ -4849,6 +4835,10 @@ struct PlaybackOptionsPanel: View {
 
     var body: some View {
         NavigationStack {
+            VStack(spacing: 0) {
+                #if os(tvOS)
+                TVPlayerPanelHeader(title: "播放设置", onClose: closePanel)
+                #endif
             Form {
                 Section("播放") {
                     NavigationLink {
@@ -5039,6 +5029,7 @@ struct PlaybackOptionsPanel: View {
                 }
             }
             .kanataFormBackground()
+            #if !os(tvOS)
             .navigationTitle("播放设置")
             .kanataInlineNavigationTitle()
             .toolbar {
@@ -5047,6 +5038,9 @@ struct PlaybackOptionsPanel: View {
                         .kanataToolbarTextButton()
             }
         }
+            #endif
+            }
+            .background(KanataTheme.background.opacity(0.96))
     }
     }
 

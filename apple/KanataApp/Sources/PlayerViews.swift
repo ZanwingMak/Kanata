@@ -7,6 +7,42 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+#if os(tvOS)
+/// 将抽屉标题与关闭操作限制在面板内，避免系统工具栏漂浮到视频上。
+struct TVPlayerPanelHeader: View {
+    let title: String
+    let onClose: () -> Void
+    @FocusState private var isCloseFocused: Bool
+
+    var body: some View {
+        HStack {
+            Text(title).font(.system(size: 32, weight: .bold))
+            Spacer()
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 22, weight: .semibold))
+                    .frame(width: 56, height: 56)
+            }
+            .buttonStyle(KanataTVActionButtonStyle())
+            .focused($isCloseFocused)
+            .accessibilityLabel("完成")
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 30)
+        .padding(.vertical, 22)
+        .onAppear(perform: focusCloseButton)
+    }
+
+    /// 抽屉展开后接管焦点，向下即可进入设置列表。
+    private func focusCloseButton() {
+        Task { @MainActor in
+            await Task.yield()
+            isCloseFocused = true
+        }
+    }
+}
+#endif
+
 /// 管理 AVPlayerLayer 关联的画中画控制器，避免 SwiftUI 重建时丢失引用。
 @MainActor
 final class PlayerSurfaceController {
@@ -245,6 +281,10 @@ struct DanmakuSettingsPanel: View {
 
     var body: some View {
         NavigationStack {
+            VStack(spacing: 0) {
+                #if os(tvOS)
+                TVPlayerPanelHeader(title: "弹幕设置", onClose: closePanel)
+                #endif
             Form {
                 Section("清晰样式") {
                     Button {
@@ -450,6 +490,7 @@ struct DanmakuSettingsPanel: View {
                 }
             }
             .kanataFormBackground()
+            #if !os(tvOS)
             .navigationTitle("弹幕设置")
             .kanataInlineNavigationTitle()
             .toolbar {
@@ -458,6 +499,7 @@ struct DanmakuSettingsPanel: View {
                         .kanataToolbarTextButton()
                 }
             }
+            #endif
             .kanataFileImporter(
                 isPresented: $isImportingFont,
                 allowedContentTypes: fontFileTypes,
@@ -475,6 +517,8 @@ struct DanmakuSettingsPanel: View {
             } message: {
                 Text(fontImportError ?? "未知错误")
             }
+            }
+            .background(KanataTheme.background.opacity(0.96))
         }
     }
 
@@ -637,7 +681,7 @@ private struct TVDanmakuChoiceButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline.weight(.semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(isFocused ? Color.black : Color.white)
             .padding(.horizontal, 24)
             .frame(minHeight: 58)
             .background(backgroundColor, in: Capsule())
@@ -651,14 +695,14 @@ private struct TVDanmakuChoiceButtonStyle: ButtonStyle {
 
     /// 返回当前选项背景色，焦点态始终使用高对比度主题色。
     private var backgroundColor: Color {
-        if isFocused { return KanataTheme.accent }
+        if isFocused { return .white }
         return isSelected ? KanataTheme.accent.opacity(0.34) : .white.opacity(0.08)
     }
 
     /// 返回当前选项边框，选中项在失焦时仍保留状态提示。
     private var borderColor: Color {
         if isFocused { return .white.opacity(0.72) }
-        return isSelected ? KanataTheme.accent.opacity(0.9) : .white.opacity(0.12)
+        return isSelected ? KanataTheme.accent.opacity(0.9) : .clear
     }
 }
 
@@ -724,9 +768,9 @@ private struct TVValueAdjusterButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline.weight(.semibold))
-            .foregroundStyle(isFocused ? Color.white : KanataTheme.accent)
+            .foregroundStyle(isFocused ? Color.black : Color.white)
             .background(
-                isFocused ? KanataTheme.accent : KanataTheme.accent.opacity(0.14),
+                isFocused ? Color.white : Color.white.opacity(0.10),
                 in: Circle()
             )
             .overlay {

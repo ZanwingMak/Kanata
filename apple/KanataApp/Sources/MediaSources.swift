@@ -95,6 +95,10 @@ struct MediaSourceSheet: View {
 
     /// 构建可由弹窗或独立导航页面共同复用的媒体源列表。
     private var content: some View {
+        Group {
+        #if os(tvOS)
+        tvSourcePicker
+        #else
         List {
                 Section {
                     mediaSourceHero
@@ -199,6 +203,8 @@ struct MediaSourceSheet: View {
                         .foregroundStyle(.secondary)
                 }
         }
+        #endif
+        }
         .tint(settings.accentTheme.accent)
         .kanataFormBackground()
         .contentMargins(.horizontal, sourceListHorizontalMargin, for: .scrollContent)
@@ -260,6 +266,98 @@ struct MediaSourceSheet: View {
         }
     }
 
+    #if os(tvOS)
+    /// 添加媒体源使用清晰的服务卡片，常用连接与新建入口不再混排。
+    private var tvSourcePicker: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 36) {
+                HStack(alignment: .center, spacing: 44) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("连接你的世界")
+                            .font(.system(size: 44, weight: .bold))
+                        Text("你的文件、服务器与私人媒体库，都在这里。")
+                            .font(.body).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    NavigationLink {
+                        TVMediaSourcePairingView(onSaved: reloadProfiles)
+                    } label: {
+                        Label("用手机配置", systemImage: "qrcode")
+                            .padding(20)
+                            .kanataFloatingSurface(cornerRadius: 24)
+                    }
+                    .kanataTVFocus(cornerRadius: 24)
+                }
+                if !profiles.isEmpty {
+                    Text("已有连接").font(.title3.bold())
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 18) {
+                        ForEach(profiles) { profile in
+                            Button { browsingProfile = profile } label: {
+                                sourceLabel(profile.name, detail: historyDetail(profile), symbol: profile.kind.symbol)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(24)
+                                    .kanataGlassSurface(cornerRadius: 22)
+                            }
+                            .kanataTVFocus(cornerRadius: 24)
+                            .contextMenu {
+                                Button("编辑连接", systemImage: "pencil") { editingProfile = profile }
+                                Button("删除登录记录", systemImage: "trash", role: .destructive) {
+                                    MediaSourceProfileStore.remove(profile)
+                                    reloadProfiles()
+                                }
+                            }
+                        }
+                    }
+                }
+                Text("添加新连接").font(.title3.bold())
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 18) {
+                    NavigationLink {
+                        DirectMediaSourceView { finish([$0]) }
+                    } label: {
+                        tvSourceTile("网络直链 / HLS", detail: "HTTP、HTTPS、m3u8", symbol: "link")
+                    }
+                    .kanataTVFocus(cornerRadius: 24)
+                    ForEach(MediaSourceKind.allCases) { kind in
+                        NavigationLink {
+                            MediaSourceConnectionView(
+                                kind: kind, onSaved: { _ in reloadProfiles() },
+                                onAdd: onImport, onReturnHome: onReturnHome
+                            )
+                        } label: {
+                            tvSourceTile(kind.title, detail: sourceDetail(kind), symbol: kind.symbol)
+                        }
+                        .kanataTVFocus(cornerRadius: 24)
+                    }
+                }
+                Text("密码与访问令牌仅保存在当前设备的钥匙串。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 80)
+            .padding(.vertical, 36)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// 统一连接卡片的内容尺寸与行距，给长服务说明留足空间。
+    private func tvSourceTile(_ title: String, detail: String, symbol: String) -> some View {
+        HStack(spacing: 24) {
+            Image(systemName: symbol)
+                .font(.system(size: 32, weight: .medium))
+                .foregroundStyle(KanataTheme.accent)
+                .frame(width: 64, height: 64)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title).font(.title3.weight(.semibold))
+                Text(detail).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer(minLength: 12)
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+        .padding(24)
+        .kanataGlassSurface(cornerRadius: 22)
+    }
+    #endif
+
     /// 媒体源入口顶部说明卡，清晰区分直链、本地目录和媒体服务器三类入口。
     private var mediaSourceHero: some View {
         HStack(spacing: 18) {
@@ -292,7 +390,7 @@ struct MediaSourceSheet: View {
     /// 返回媒体源入口在当前平台使用的水平留白。
     private var sourceListHorizontalMargin: CGFloat {
         #if os(tvOS)
-        110
+        0
         #else
         16
         #endif
@@ -1446,6 +1544,33 @@ private struct WebDAVChannelView: View {
     }
 
     var body: some View {
+        Group {
+        #if os(tvOS)
+        TVDirectoryLayout(title: "目录内容", count: entries.count) {
+            currentLocationCard
+            Button { addCurrentDirectory() } label: {
+                Label("选择当前目录", systemImage: "plus")
+                    .frame(maxWidth: .infinity, minHeight: 60)
+            }
+            .kanataDirectoryRowStyle(cornerRadius: 16)
+            .disabled(entries.isEmpty || isLoading)
+            if directoryStack.count > 1 {
+                Button { Task { await goBack() } } label: {
+                    Label("返回上一级", systemImage: "arrow.turn.up.left")
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                }
+                .kanataDirectoryRowStyle(cornerRadius: 16)
+            }
+            Text("选择文件夹浏览内容，或用右侧加号加入媒体库。")
+                .font(.caption).foregroundStyle(.secondary)
+        } rows: {
+            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            ForEach(entries) { entry in webDAVEntryRow(entry) }
+            if !isLoading && entries.isEmpty && errorMessage == nil {
+                ContentUnavailableView("目录为空", systemImage: "folder")
+            }
+        }
+        #else
         List {
             Section("当前位置") {
                 currentLocationCard
@@ -1475,6 +1600,8 @@ private struct WebDAVChannelView: View {
             if !isLoading && entries.isEmpty && errorMessage == nil {
                 ContentUnavailableView("没有视频", systemImage: "film", description: Text("该目录没有支持的视频文件"))
             }
+        }
+        #endif
         }
         .listStyle(.plain)
         .kanataFormBackground()
@@ -1529,7 +1656,7 @@ private struct WebDAVChannelView: View {
     /// 返回适合当前平台观看距离的目录行高度。
     private var tvDirectoryRowHeight: CGFloat {
         #if os(tvOS)
-        76
+        96
         #else
         52
         #endif
@@ -1554,7 +1681,12 @@ private struct WebDAVChannelView: View {
     }
 
     /// 展示当前 WebDAV 目录，固定图标占位以避免与标题重叠。
+    @ViewBuilder
     private var currentLocationCard: some View {
+        #if os(tvOS)
+        TVDirectoryLocation(title: directoryStack.last?.name ?? profile.name,
+                            detail: currentLocationDetail, symbol: profile.kind.symbol)
+        #else
         HStack(spacing: 16) {
             Image(systemName: profile.kind.symbol)
                 .font(.title2.weight(.semibold))
@@ -1588,6 +1720,7 @@ private struct WebDAVChannelView: View {
         #if !os(tvOS)
         .listRowSeparator(.hidden)
         #endif
+        #endif
     }
 
     /// 返回不重复媒体源名称的当前 WebDAV 位置说明。
@@ -1600,7 +1733,7 @@ private struct WebDAVChannelView: View {
     /// - Parameter entry: 当前 WebDAV 条目。
     /// - Returns: 带稳定内边距和单层焦点边框的列表行。
     private func webDAVEntryRow(_ entry: WebDAVEntry) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 18) {
             webDAVBrowseButton(entry)
             if entry.isDirectory {
                 webDAVAddButton(entry)
@@ -1659,12 +1792,9 @@ private struct WebDAVChannelView: View {
             Task { await addDirectory(url: entry.url, title: entry.name) }
         } label: {
             #if os(tvOS)
-            HStack(spacing: 8) {
-                Image(systemName: "plus")
-                Text("加入")
-            }
+            Image(systemName: "plus")
             .font(.headline.weight(.semibold))
-            .frame(width: 156)
+            .frame(width: 86)
             .frame(minHeight: tvDirectoryRowHeight)
             #else
             Image(systemName: "plus.circle.fill")
@@ -1901,6 +2031,38 @@ private struct MediaServerChannelView: View {
     }
 
     var body: some View {
+        Group {
+        #if os(tvOS)
+        TVDirectoryLayout(title: "浏览内容", count: visibleEntries.count) {
+            currentLocationCard
+            TextField("搜索当前频道", text: $searchText)
+            Picker("浏览分类", selection: $filter) {
+                ForEach(MediaChannelFilter.allCases) { value in
+                    Text(value.title).tag(value)
+                }
+            }
+            .pickerStyle(.menu)
+            Button { Task { await addCurrentDirectory() } } label: {
+                Label("选择当前内容", systemImage: "plus")
+                    .frame(maxWidth: .infinity, minHeight: 60)
+            }
+            .kanataDirectoryRowStyle(cornerRadius: 16)
+            .disabled(entries.isEmpty || isLoading)
+            if stack.count > 1 {
+                Button { Task { await goBack() } } label: {
+                    Label("返回上一级", systemImage: "arrow.turn.up.left")
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                }
+                .kanataDirectoryRowStyle(cornerRadius: 16)
+            }
+        } rows: {
+            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            ForEach(visibleEntries) { entry in mediaServerEntryRow(entry) }
+            if !isLoading && visibleEntries.isEmpty && errorMessage == nil {
+                ContentUnavailableView("没有匹配内容", systemImage: "film.stack")
+            }
+        }
+        #else
         List {
             Section("浏览方式") {
                 Picker("分类", selection: $filter) {
@@ -1937,6 +2099,8 @@ private struct MediaServerChannelView: View {
                 ContentUnavailableView("没有匹配内容", systemImage: "film.stack", description: Text("切换分类或搜索其他名称"))
             }
         }
+        #endif
+        }
         .listStyle(.plain)
         .kanataFormBackground()
         .overlay {
@@ -1947,7 +2111,9 @@ private struct MediaServerChannelView: View {
                     .allowsHitTesting(false)
             }
         }
+        #if !os(tvOS)
         .searchable(text: $searchText, prompt: "搜索当前频道")
+        #endif
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if stack.count > 1 {
@@ -1991,7 +2157,7 @@ private struct MediaServerChannelView: View {
     /// 返回适合当前平台观看距离的媒体服务器行高度。
     private var tvServerRowHeight: CGFloat {
         #if os(tvOS)
-        86
+        96
         #else
         62
         #endif
@@ -2019,7 +2185,7 @@ private struct MediaServerChannelView: View {
     /// - Parameter entry: 当前服务器条目。
     /// - Returns: 带统一留白和单层边框的列表行。
     private func mediaServerEntryRow(_ entry: MediaSourceEntry) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 18) {
             mediaServerBrowseButton(entry)
             if entry.isDirectory {
                 mediaServerAddButton(entry)
@@ -2080,12 +2246,9 @@ private struct MediaServerChannelView: View {
             Task { await addDirectory(entry) }
         } label: {
             #if os(tvOS)
-            HStack(spacing: 8) {
-                Image(systemName: "plus")
-                Text("加入")
-            }
+            Image(systemName: "plus")
             .font(.headline.weight(.semibold))
-            .frame(width: 156)
+            .frame(width: 86)
             .frame(minHeight: tvServerRowHeight)
             #else
             Image(systemName: "plus.circle.fill")
@@ -2098,7 +2261,12 @@ private struct MediaServerChannelView: View {
     }
 
     /// 展示当前服务器与浏览层级，避免标题、图标和路径挤在列表边缘。
+    @ViewBuilder
     private var currentLocationCard: some View {
+        #if os(tvOS)
+        TVDirectoryLocation(title: stack.last?.name ?? profile.name,
+                            detail: currentLocationDetail, symbol: profile.kind.symbol)
+        #else
         HStack(spacing: 16) {
             Image(systemName: profile.kind.symbol)
                 .font(.title2.weight(.semibold))
@@ -2131,6 +2299,7 @@ private struct MediaServerChannelView: View {
         .listRowBackground(Color.clear)
         #if !os(tvOS)
         .listRowSeparator(.hidden)
+        #endif
         #endif
     }
 
@@ -2374,6 +2543,77 @@ private struct MediaServerChannelView: View {
 }
 
 /// 媒体服务器组合行的内嵌按钮样式，让主操作和“加入”共享底板且焦点互不挤压。
+#if os(tvOS)
+/// 目录侧栏的来源信息，图标与长名称分行，不再挤在一条标题中。
+private struct TVDirectoryLocation: View {
+    let title: String
+    let detail: String
+    let symbol: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Image(systemName: symbol)
+                .font(.system(size: 36, weight: .light))
+                .foregroundStyle(KanataTheme.accent)
+                .frame(width: 72, height: 72)
+                .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22))
+            Text(title)
+                .font(.system(size: 34, weight: .bold))
+                .lineLimit(3)
+            Text(detail)
+                .font(.system(size: 21))
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 12)
+    }
+}
+
+/// 固定目录侧栏，右侧独立滚动，让浏览、返回和加入操作始终可达。
+private struct TVDirectoryLayout<Sidebar: View, Rows: View>: View {
+    let title: String
+    let count: Int
+    let sidebar: Sidebar
+    let rows: Rows
+
+    /// 复用 WebDAV 与媒体服务器的双栏布局，保留各自数据逻辑。
+    init(title: String, count: Int, @ViewBuilder sidebar: () -> Sidebar, @ViewBuilder rows: () -> Rows) {
+        self.title = title
+        self.count = count
+        self.sidebar = sidebar()
+        self.rows = rows()
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 44) {
+            VStack(alignment: .leading, spacing: 24) {
+                sidebar
+                Spacer(minLength: 0)
+            }
+            .frame(width: 380)
+            .focusSection()
+            VStack(alignment: .leading, spacing: 24) {
+                HStack {
+                    Text(title).font(.title2.bold())
+                    Spacer()
+                    Text("\(count) 项").font(.callout).foregroundStyle(.secondary)
+                }
+                ScrollView {
+                    LazyVStack(spacing: 16) { rows }
+                        .padding(6)
+                }
+                .scrollIndicators(.hidden)
+                .focusSection()
+            }
+        }
+        .padding(.horizontal, 72)
+        .padding(.top, 32)
+        .padding(.bottom, 40)
+    }
+}
+#endif
+
 private struct MediaServerJoinedButtonStyle: ButtonStyle {
     let cornerRadius: CGFloat
     #if os(tvOS)
@@ -2403,7 +2643,7 @@ private struct MediaServerJoinedButtonStyle: ButtonStyle {
     /// 返回当前焦点对应的内嵌背景色。
     private var focusBackground: Color {
         #if os(tvOS)
-        isFocused ? KanataTheme.accent.opacity(0.20) : KanataTheme.surface
+        isFocused ? KanataTheme.elevatedSurface : KanataTheme.surface
         #else
         KanataTheme.surface
         #endif
@@ -2412,7 +2652,7 @@ private struct MediaServerJoinedButtonStyle: ButtonStyle {
     /// 返回当前焦点对应的内嵌边框色。
     private var focusBorder: Color {
         #if os(tvOS)
-        isFocused ? KanataTheme.accent.opacity(0.95) : KanataTheme.separator
+        isFocused ? Color.primary.opacity(0.92) : .clear
         #else
         KanataTheme.separator
         #endif
@@ -2421,7 +2661,7 @@ private struct MediaServerJoinedButtonStyle: ButtonStyle {
     /// 返回当前焦点对应的内嵌边框宽度。
     private var focusBorderWidth: CGFloat {
         #if os(tvOS)
-        isFocused ? 2 : 1
+        isFocused ? 3 : 0
         #else
         1
         #endif

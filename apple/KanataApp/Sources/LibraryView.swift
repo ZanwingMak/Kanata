@@ -66,6 +66,7 @@ struct LibraryView: View {
     @State private var isImporting = false
     @State private var isShowingSettings = false
     @State private var items: [LibraryItem] = LibraryStore.load()
+    @State private var progressSnapshots = PlaybackProgressStore.snapshots()
     @State private var playing: PlaybackQueue?
     @State private var importError: String?
     @State private var isProcessingImport = false
@@ -95,6 +96,7 @@ struct LibraryView: View {
         case search
         case organize
         case add
+        case featured
         case source(String)
         case collection(String)
         case item(String)
@@ -113,7 +115,7 @@ struct LibraryView: View {
 
     private var librarySectionSpacing: CGFloat {
         #if os(tvOS)
-        36
+        48
         #else
         18
         #endif
@@ -161,7 +163,7 @@ struct LibraryView: View {
         _ = progressRevision
         return items.compactMap { item -> (LibraryItem, PlaybackProgressStore.Snapshot)? in
             guard let key = item.mediaKey,
-                  let snapshot = PlaybackProgressStore.snapshot(for: key) else { return nil }
+                  let snapshot = progressSnapshots[key] else { return nil }
             return (item, snapshot)
         }
         .sorted { $0.1.updatedAt > $1.1.updatedAt }
@@ -207,7 +209,7 @@ struct LibraryView: View {
             guard let first = allSorted.first else { return nil }
             let resumable = active.compactMap { item -> (LibraryItem, Date)? in
                 guard let key = item.mediaKey,
-                      let snapshot = PlaybackProgressStore.snapshot(for: key) else { return nil }
+                      let snapshot = progressSnapshots[key] else { return nil }
                 return (item, snapshot.updatedAt)
             }
             .max { $0.1 < $1.1 }
@@ -259,17 +261,19 @@ struct LibraryView: View {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: librarySectionSpacing) {
                                 #if os(tvOS)
-                                tvLibraryHeader
+                                if searchText.isEmpty, let item = featuredItem {
+                                    tvFeaturedCard(item)
+                                }
                                 #endif
                                 if !mediaSources.isEmpty {
                                     sourceChannels
                                 }
+                                if !continueWatchingItems.isEmpty {
+                                    continueWatchingSection
+                                }
                                 if !recentlyAddedEntries.isEmpty && searchText.isEmpty {
                                     recentlyAddedSection
                                         .id("recently-added")
-                                }
-                                if !continueWatchingItems.isEmpty {
-                                    continueWatchingSection
                                 }
                                 if !favoriteItems.isEmpty && searchText.isEmpty {
                                     favoritesSection
@@ -277,6 +281,7 @@ struct LibraryView: View {
                                 if !mediaCollections.isEmpty && searchText.isEmpty {
                                     collectionSection
                                 }
+                                if !filteredItems.isEmpty {
                                 HStack(alignment: .firstTextBaseline) {
                                     Text(searchText.isEmpty && filterMode != .collection ? "单个视频" : "视频项目")
                                         .font(.title2.bold())
@@ -289,6 +294,7 @@ struct LibraryView: View {
                                     ForEach(filteredItems) { item in
                                         mediaCard(item)
                                     }
+                                }
                                 }
                             }
                             .frame(maxWidth: libraryContentMaxWidth, alignment: .leading)
@@ -310,6 +316,12 @@ struct LibraryView: View {
                 }
             }
             #if os(tvOS)
+            .safeAreaInset(edge: .top, spacing: 24) {
+                tvLibraryHeader
+                    .padding(.horizontal, libraryHorizontalPadding)
+                    .padding(.bottom, 18)
+                    .background(KanataTheme.background.opacity(0.96))
+            }
             .navigationTitle("")
             #else
             .navigationTitle("媒体库")
@@ -519,8 +531,12 @@ struct LibraryView: View {
                 }
             }
             .task {
+                progressSnapshots = PlaybackProgressStore.snapshots()
                 reloadMediaSources()
                 await scanDocuments()
+            }
+            .onChange(of: progressRevision) { _, _ in
+                progressSnapshots = PlaybackProgressStore.snapshots()
             }
             .onReceive(NotificationCenter.default.publisher(for: .kanataCloudDataDidChange)) { _ in
                 items = LibraryStore.load()
@@ -537,10 +553,10 @@ struct LibraryView: View {
     private var tvLibraryHeader: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("媒体库")
-                    .font(.largeTitle.bold())
-                Text("选择媒体源、继续观看，或整理剧集合集")
-                    .font(.headline)
+                Text("Kanata")
+                    .font(.system(size: 38, weight: .bold, design: .rounded))
+                Text("你的私人影院")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 40)
@@ -586,7 +602,55 @@ struct LibraryView: View {
             .focused($tvFocusedControl, equals: .add)
             .onMoveCommand(perform: moveFromTVHeader)
         }
-        .padding(.top, 28)
+        .padding(.top, 16)
+        .focusSection()
+    }
+
+    /// 优先呈现未看完的影片，其次展示最近加入的内容。
+    private var featuredItem: LibraryItem? {
+        continueWatchingItems.first ?? items.sorted {
+            ($0.addedAt ?? .distantPast) > ($1.addedAt ?? .distantPast)
+        }.first
+    }
+
+    /// 首页主视觉使用真实封面与明确续播动作，避免巨大占位图和重复说明。
+    private func tvFeaturedCard(_ item: LibraryItem) -> some View {
+        let progress = item.mediaKey.flatMap { progressSnapshots[$0] }
+        return HStack(spacing: 44) {
+            VStack(alignment: .leading, spacing: 20) {
+                Text(progress == nil ? "从这里开始" : "继续你的故事")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(KanataTheme.accent)
+                Text(item.libraryTitle)
+                    .font(.system(size: 48, weight: .bold))
+                    .lineLimit(2)
+                Text([item.episodeLabel, item.sourceName].compactMap { $0 }.joined(separator: " · "))
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Button { play(item) } label: {
+                    Label(progress == nil ? "开始播放" : "继续播放", systemImage: "play.fill")
+                        .padding(.horizontal, 12)
+                }
+                .buttonStyle(KanataTVActionButtonStyle())
+                .background(KanataTheme.elevatedSurface, in: Capsule())
+                .focused($tvFocusedControl, equals: .featured)
+                .padding(.top, 8)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            MediaArtworkFrame(item: item)
+                .frame(width: 660)
+                .clipShape(RoundedRectangle(cornerRadius: 28))
+                .overlay(alignment: .bottom) {
+                    if let progress {
+                        ProgressView(value: progress.fraction)
+                            .tint(.white)
+                            .padding(24)
+                    }
+                }
+        }
+        .padding(36)
+        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 32))
         .focusSection()
     }
 
@@ -609,6 +673,10 @@ struct LibraryView: View {
             default: break
             }
         case .down:
+            if featuredItem != nil, searchText.isEmpty {
+                tvFocusedControl = .featured
+                return
+            }
             if let source = mediaSources.first {
                 tvFocusedControl = .source(source.id)
                 return
@@ -746,14 +814,7 @@ struct LibraryView: View {
         } label: {
             VStack(alignment: .leading, spacing: 10) {
                 ZStack {
-                    LinearGradient(
-                        colors: [KanataTheme.accentStrong.opacity(0.95), KanataTheme.accent.opacity(0.38)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    Image(systemName: "rectangle.stack.fill")
-                        .font(.system(size: 44, weight: .light))
-                        .foregroundStyle(.white.opacity(0.88))
+                    MediaArtworkFrame(item: collection.nextItem)
                 }
                 .frame(width: collectionCardWidth, height: collectionCardHeight)
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -824,8 +885,8 @@ struct LibraryView: View {
                             HStack(spacing: 16) {
                                 Image(systemName: profile.kind.symbol)
                                     #if os(tvOS)
-                                    .font(.title.weight(.semibold))
-                                    .frame(width: 64, height: 64)
+                                    .font(.system(size: 28, weight: .medium))
+                                    .frame(width: 48, height: 48)
                                     #else
                                     .font(.title2)
                                     .frame(width: 44, height: 44)
@@ -834,22 +895,19 @@ struct LibraryView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(profile.name)
                                         #if os(tvOS)
-                                        .font(.title3.weight(.semibold))
+                                        .font(.system(size: 25, weight: .semibold))
                                         #else
                                         .font(.headline)
                                         #endif
                                         .lineLimit(1)
                                     Text("\(profile.kind.title) · \(profile.subtitle)")
                                         #if os(tvOS)
-                                        .font(.body)
+                                        .font(.system(size: 20))
                                         #else
                                         .font(.caption)
                                         #endif
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
-                                    Text("最近使用 \(profile.updatedAt.formatted(.relative(presentation: .named)))")
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
                                 }
                                 Spacer(minLength: 12)
                                 sourceHealthBadge(sourceHealth[profile.id] ?? .checking)
@@ -857,10 +915,6 @@ struct LibraryView: View {
                             .frame(width: sourceCardWidth, alignment: .leading)
                             .padding(18)
                             .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .strokeBorder(KanataTheme.separator, lineWidth: 1)
-                            }
                         }
                         .kanataTVFocus(cornerRadius: 18)
                         #if os(tvOS)
@@ -934,7 +988,7 @@ struct LibraryView: View {
     /// - Parameter item: 媒体库条目。
     /// - Returns: 可点击播放的卡片视图。
     private func mediaCard(_ item: LibraryItem, showsHistoryContext: Bool = false) -> some View {
-        let progress = item.mediaKey.flatMap { PlaybackProgressStore.snapshot(for: $0) }
+        let progress = item.mediaKey.flatMap { progressSnapshots[$0] }
         return Button {
             play(item)
         } label: {
@@ -1000,7 +1054,7 @@ struct LibraryView: View {
     /// 返回首页横向媒体卡片在当前平台上的宽度。
     private var horizontalCardWidth: CGFloat {
         #if os(tvOS)
-        420
+        360
         #else
         260
         #endif
@@ -1009,7 +1063,7 @@ struct LibraryView: View {
     /// 返回媒体源频道卡片在当前平台上的宽度。
     private var sourceCardWidth: CGFloat {
         #if os(tvOS)
-        520
+        450
         #else
         260
         #endif
@@ -1018,7 +1072,7 @@ struct LibraryView: View {
     /// 返回合集封面在当前平台上的宽度。
     private var collectionCardWidth: CGFloat {
         #if os(tvOS)
-        420
+        360
         #else
         250
         #endif
@@ -1027,7 +1081,7 @@ struct LibraryView: View {
     /// 返回合集封面在当前平台上的高度。
     private var collectionCardHeight: CGFloat {
         #if os(tvOS)
-        236
+        202.5
         #else
         140
         #endif
@@ -2088,30 +2142,11 @@ private struct CollectionDetailView: View {
     }
 
     var body: some View {
+        Group {
+        #if os(tvOS)
+        tvCollectionContent
+        #else
         List {
-            #if os(tvOS)
-            Section {
-                HStack(alignment: .center, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("合集详情")
-                            .font(.largeTitle.bold())
-                        Text("查看剧集、调整顺序并管理连播")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button {
-                        pendingTitle = collectionTitle
-                        isRenaming = true
-                    } label: {
-                        Label("重命名合集", systemImage: "pencil")
-                    }
-                    .buttonStyle(KanataTVActionButtonStyle())
-                }
-                .padding(.vertical, 10)
-            }
-            .listRowBackground(Color.clear)
-            #endif
             Section {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 14) {
@@ -2202,6 +2237,9 @@ private struct CollectionDetailView: View {
                 .onMove(perform: move)
             }
         }
+        #endif
+        }
+        .kanataFormBackground()
         .navigationTitle(collectionNavigationTitle)
         .kanataInlineNavigationTitle()
         #if !os(tvOS)
@@ -2225,6 +2263,100 @@ private struct CollectionDetailView: View {
             Text("只修改媒体库中的显示名称，不会更改服务器文件夹或文件。")
         }
     }
+
+    #if os(tvOS)
+    /// 合集以封面详情和剧集队列分栏展示，主操作始终保留在左侧。
+    private var tvCollectionContent: some View {
+        HStack(alignment: .top, spacing: 56) {
+            VStack(alignment: .leading, spacing: 24) {
+                if let item = orderedItems.first {
+                    MediaArtworkFrame(item: item)
+                        .clipShape(RoundedRectangle(cornerRadius: 24))
+                }
+                Text(collectionTitle)
+                    .font(.system(size: 38, weight: .bold))
+                    .lineLimit(3)
+                Text("\(activeItems.count) 集 · \(ignoredIDs.count) 集已忽略")
+                    .font(.callout).foregroundStyle(.secondary)
+                Button {
+                    guard let item = primaryPlaybackItem else { return }
+                    onPlay(activeItems, item)
+                } label: {
+                    Label(primaryPlaybackTitle, systemImage: "play.fill")
+                        .frame(maxWidth: .infinity, minHeight: 64)
+                }
+                .kanataDirectoryRowStyle(cornerRadius: 18)
+                .disabled(activeItems.isEmpty)
+                Button {
+                    pendingTitle = collectionTitle
+                    isRenaming = true
+                } label: {
+                    Label("重命名合集", systemImage: "pencil")
+                }
+                .buttonStyle(KanataTVActionButtonStyle())
+                Spacer()
+            }
+            .frame(width: 420)
+            .focusSection()
+            VStack(alignment: .leading, spacing: 24) {
+                Text("剧集").font(.title2.bold())
+                ScrollView {
+                    LazyVStack(spacing: 18) {
+                        ForEach(Array(orderedItems.enumerated()), id: \.element.id) { index, item in
+                            tvEpisodeRow(item, index: index)
+                        }
+                    }
+                    .padding(8)
+                }
+                .scrollIndicators(.hidden)
+                .focusSection()
+            }
+        }
+        .padding(.horizontal, 76)
+        .padding(.vertical, 36)
+    }
+
+    /// 每集独立呈现播放区域和管理入口，焦点边界不会互相覆盖。
+    private func tvEpisodeRow(_ item: LibraryItem, index: Int) -> some View {
+        HStack(spacing: 18) {
+            Button {
+                onPlay(ignoredIDs.contains(item.id) ? [item] : activeItems, item)
+            } label: {
+                HStack(spacing: 24) {
+                    Text(String(format: "%02d", index + 1))
+                        .font(.system(size: 30, weight: .light, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 48)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(item.episodeLabel ?? item.libraryTitle)
+                            .font(.system(size: 27, weight: .semibold))
+                        Text(item.displayName)
+                            .font(.system(size: 20)).foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: ignoredIDs.contains(item.id) ? "eye.slash" : "play.fill")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                .padding(22)
+                .frame(maxWidth: .infinity, minHeight: 110)
+            }
+            .kanataDirectoryRowStyle(cornerRadius: 18)
+            Menu {
+                Button("上移", systemImage: "arrow.up") { move(itemID: item.id, delta: -1) }
+                    .disabled(index == 0)
+                Button("下移", systemImage: "arrow.down") { move(itemID: item.id, delta: 1) }
+                    .disabled(index == orderedItems.count - 1)
+                Button(ignoredIDs.contains(item.id) ? "恢复连播" : "从连播忽略") { toggleIgnored(item) }
+                Button("从媒体库移除", systemImage: "trash", role: .destructive) { remove(item) }
+            } label: {
+                Image(systemName: "ellipsis").frame(width: 80, height: 110)
+            }
+            .kanataDirectoryRowStyle(cornerRadius: 18)
+            .accessibilityLabel("管理 \(item.episodeLabel ?? item.displayName)")
+        }
+    }
+    #endif
 
     /// 返回 tvOS 避免与详情正文重复的导航标题。
     private var collectionNavigationTitle: String {

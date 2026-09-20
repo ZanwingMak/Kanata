@@ -253,7 +253,7 @@ struct MediaImportPreview: View {
         position: Int,
         group: MediaImportGroup
     ) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 18) {
             Button {
                 toggleSelection(candidate.id)
             } label: {
@@ -294,11 +294,11 @@ struct MediaImportPreview: View {
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: importRowHeight, alignment: .leading)
-                .padding(.horizontal, 14)
-                .kanataGlassSurface(cornerRadius: 12)
+                .padding(.horizontal, 22)
+                .kanataGlassSurface(cornerRadius: 18)
                 .contentShape(Rectangle())
             }
-            .kanataTVFocus(cornerRadius: 12)
+            .kanataTVFocus(cornerRadius: 18)
             Menu {
                 Button("修改季集号", systemImage: "number") { editingCandidate = candidate }
                 Button("上移", systemImage: "arrow.up") {
@@ -317,16 +317,16 @@ struct MediaImportPreview: View {
                 }
             } label: {
                 #if os(tvOS)
-                Label("编辑", systemImage: "slider.horizontal.3")
+                Image(systemName: "ellipsis")
                     .font(.headline.weight(.semibold))
-                    .frame(minWidth: 140, minHeight: 64)
+                    .frame(width: 80, height: importRowHeight)
                 #else
                 Image(systemName: "ellipsis.circle")
                     .frame(width: 48, height: 48)
                 #endif
             }
-            .kanataGlassSurface(cornerRadius: 12)
-            .kanataTVFocus(cornerRadius: 12)
+            .kanataGlassSurface(cornerRadius: 18)
+            .kanataTVFocus(cornerRadius: 18)
             .accessibilityLabel("管理 \(candidate.item.displayName)")
         }
         .listRowBackground(Color.clear)
@@ -511,7 +511,7 @@ struct MediaImportPreview: View {
     /// 返回适合电视观看距离的导入条目高度。
     private var importRowHeight: CGFloat {
         #if os(tvOS)
-        76
+        100
         #else
         52
         #endif
