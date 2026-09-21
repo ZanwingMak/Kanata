@@ -1100,21 +1100,24 @@ struct PlayerScreen: View {
     var body: some View {
         @Bindable var settings = settings
 
+        GeometryReader { geometry in
+        let portrait = usesPortraitLayout(geometry.size)
+        let videoWidth = portrait ? geometry.size.width : geometry.size.width + geometry.safeAreaInsets.leading + geometry.safeAreaInsets.trailing
+        let videoHeight = portrait ? min(geometry.size.width * 9 / 16, geometry.size.height * 0.46) : geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom
         ZStack {
             Color.black.ignoresSafeArea()
+            ZStack {
             if viewModel.usesUniversalPlayer {
                 UniversalVideoSurface(
                     playerLayer: viewModel.universalPlayerLayer,
                     contentMode: scalingMode.contentMode
                 )
-                .ignoresSafeArea()
             } else {
                 VideoSurface(
                     player: viewModel.player,
                     videoGravity: scalingMode.gravity,
                     controller: surfaceController
                 )
-                .ignoresSafeArea()
             }
 
             GeometryReader { proxy in
@@ -1131,14 +1134,23 @@ struct PlayerScreen: View {
             .ignoresSafeArea(.container, edges: .horizontal)
             .allowsHitTesting(false)
 
-            externalSubtitleOverlay
+            externalSubtitleOverlay(bottomInset: portrait ? 12 : (isShowingControls ? 112 : 38))
 
             interactionLayer
                 .disabled(isShowingPlaybackPanel || isShowingDanmakuPanel || isShowingPlaylist)
 
             skipSegmentOverlay
+            }
+            .frame(width: videoWidth, height: videoHeight)
+            .clipped()
+            .position(
+                x: portrait ? geometry.size.width / 2 : (geometry.size.width + geometry.safeAreaInsets.trailing - geometry.safeAreaInsets.leading) / 2,
+                y: portrait ? 56 + videoHeight / 2 : (geometry.size.height + geometry.safeAreaInsets.bottom - geometry.safeAreaInsets.top) / 2
+            )
 
-            if shouldShowPlayerControls {
+            if portrait, !isInteractionLocked, !isPlaybackFailed {
+                portraitControls(videoHeight: videoHeight)
+            } else if shouldShowPlayerControls {
                 if isInteractionLocked {
                     lockedControlsLayer
                 } else {
@@ -1191,6 +1203,7 @@ struct PlayerScreen: View {
                     .foregroundStyle(.white)
                     .transition(.opacity)
             }
+        }
         }
         #if os(tvOS)
         .onPlayPauseCommand {
@@ -1252,7 +1265,7 @@ struct PlayerScreen: View {
                 onSelect: selectItem
             )
         }
-        .kanataModal(isPresented: $viewModel.isShowingCandidates) {
+        .kanataModal(isPresented: $viewModel.isShowingCandidates, onDismiss: restoreCandidateFocus) {
             CandidatePicker(viewModel: viewModel)
         }
         .kanataFileImporter(
@@ -1415,7 +1428,7 @@ struct PlayerScreen: View {
 
     /// 在画面底部显示当前外挂字幕，避免遮挡系统安全区和播放控制。
     @ViewBuilder
-    private var externalSubtitleOverlay: some View {
+    private func externalSubtitleOverlay(bottomInset: CGFloat) -> some View {
         if isExternalSubtitleEnabled,
            let cue = activeSubtitleCue(at: currentTime - externalSubtitleOffset) {
             VStack {
@@ -1429,7 +1442,7 @@ struct PlayerScreen: View {
                     .padding(.vertical, 7)
                     .background(.black.opacity(0.38), in: RoundedRectangle(cornerRadius: 7))
                     .padding(.horizontal, 24)
-                    .padding(.bottom, isShowingControls ? 112 : 38)
+                    .padding(.bottom, bottomInset)
             }
             .allowsHitTesting(false)
             .transition(.opacity)
@@ -2001,7 +2014,132 @@ struct PlayerScreen: View {
     }
     #endif
 
-    /// 触控设备播放控制层：顶部信息 + 底部进度与按钮。
+    /// 仅在触控设备竖屏使用独立的视频区与常驻操作区。
+    private func usesPortraitLayout(_ size: CGSize) -> Bool {
+        #if os(iOS)
+        size.height > size.width
+        #else
+        false
+        #endif
+    }
+
+    /// 匹配页完全关闭后恢复入口焦点，避免第一次方向键只用于找回焦点。
+    private func restoreCandidateFocus() {
+        #if os(tvOS)
+        setControlsVisible(true)
+        tvFocusedControl = .manualMatch
+        #endif
+    }
+
+    /// 竖屏按观看、信息、进度与操作分区，弹幕和字幕只显示在视频区域。
+    @ViewBuilder
+    private func portraitControls(videoHeight: CGFloat) -> some View {
+        #if os(iOS)
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: handleBack) {
+                    Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("返回媒体库")
+                Spacer()
+                Text("正在播放").font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.65))
+                Spacer()
+                Button { isShowingPlaybackPanel = true } label: {
+                    Image(systemName: "ellipsis").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("播放设置")
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 56)
+            Color.clear.frame(height: videoHeight).allowsHitTesting(false)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(playerDisplayTitle).font(.title2.bold()).lineLimit(3)
+                        Text([activeItem.sourceName, activeItem.episodeLabel].compactMap { $0 }.joined(separator: " · "))
+                            .font(.subheadline).foregroundStyle(.white.opacity(0.6))
+                    }
+                    VStack(spacing: 0) {
+                        Slider(value: $currentTime, in: 0...max(viewModel.duration, 1), onEditingChanged: editPortraitSeek)
+                            .tint(.white)
+                            .accessibilityLabel("播放进度")
+                        HStack {
+                            Text(timeLabel(currentTime))
+                            Spacer()
+                            Text(timeLabel(viewModel.duration))
+                        }
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.65))
+                    }
+                    HStack(spacing: 36) {
+                        Spacer(minLength: 0)
+                        Button { commitSeek(to: currentTime - 10) } label: {
+                            Image(systemName: "gobackward.10").font(.title2).frame(width: 48, height: 48)
+                        }
+                        .accessibilityLabel("后退 10 秒")
+                        Button(action: togglePlayback) {
+                            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 30, weight: .medium))
+                                .frame(width: 72, height: 72)
+                                .background(.white.opacity(0.12), in: Circle())
+                        }
+                        .accessibilityLabel(isPlaying ? "暂停" : "播放")
+                        Button { commitSeek(to: currentTime + 10) } label: {
+                            Image(systemName: "goforward.10").font(.title2).frame(width: 48, height: 48)
+                        }
+                        .accessibilityLabel("前进 10 秒")
+                        Spacer(minLength: 0)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 136), spacing: 12)], spacing: 12) {
+                        portraitAction("字幕与音轨", symbol: "captions.bubble") { isShowingPlaybackPanel = true }
+                        portraitAction("横屏全屏", symbol: "arrow.up.left.and.arrow.down.right", action: toggleLandscapeFullscreen)
+                        portraitAction(settings.danmakuConfig.enabled ? "弹幕已开启" : "弹幕已关闭", symbol: "text.bubble") {
+                            settings.danmakuConfig.enabled.toggle()
+                        }
+                        portraitAction("弹幕设置", symbol: "slider.horizontal.3") { isShowingDanmakuPanel = true }
+                        if settings.isFullFeatureAccessEnabled {
+                            portraitAction("匹配弹幕", symbol: "text.magnifyingglass") { viewModel.isShowingCandidates = true }
+                        }
+                        if items.count > 1 {
+                            portraitAction("分集列表", symbol: "list.number") { isShowingPlaylist = true }
+                        }
+                    }
+                }
+                .padding(24)
+            }
+            .background(Color(white: 0.045))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .environment(\.colorScheme, .dark)
+        #endif
+    }
+
+    #if os(iOS)
+    /// 竖屏快捷按钮保持可读文字和足够触控面积，不把多枚图标挤在一行。
+    private func portraitAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .padding(.horizontal, 8)
+                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
+    /// 拖动时只预览时间，松手后向解码器提交跳转。
+    private func editPortraitSeek(_ editing: Bool) {
+        if editing {
+            isSeeking = true
+            pendingSeekTarget = nil
+            controlsTask?.cancel()
+        } else {
+            commitSeek(to: currentTime)
+        }
+    }
+    #endif
+
+    /// 触控设备横屏控制层：顶部信息 + 底部进度与按钮。
     private var touchControlsLayer: some View {
         VStack {
             PlayerGlassEffectGroup(spacing: 12) {
@@ -3763,21 +3901,23 @@ struct CandidatePicker: View {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 14) {
                     Label("搜索作品", systemImage: "magnifyingglass")
-                        .font(.title2.bold())
+                        .font(.system(size: 30, weight: .bold))
                     HStack(spacing: 12) {
                         Image(systemName: "text.magnifyingglass")
                             .foregroundStyle(KanataTheme.accent)
                         TextField("剧名、集数或播放页链接", text: $keyword)
+                            .font(.system(size: 26))
+                            .textFieldStyle(.plain)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                            .frame(maxWidth: .infinity, minHeight: 64, alignment: .center)
+                            .frame(maxWidth: .infinity)
                             .focused($focusedControl, equals: .searchField)
                             .onSubmit { searchCandidates() }
                         if viewModel.isSearchingCandidates { ProgressView() }
                     }
                     .padding(.horizontal, 18)
-                    .frame(height: 70, alignment: .center)
-                    .kanataGlassSurface(cornerRadius: 14, isElevated: true)
+                    .padding(.vertical, 12)
+                    .frame(minHeight: 84, alignment: .center)
                     Button { searchCandidates() } label: {
                         Label(viewModel.isSearchingCandidates ? "正在搜索" : "搜索弹幕", systemImage: "magnifyingglass")
                     }
@@ -4839,7 +4979,7 @@ struct PlaybackOptionsPanel: View {
                 #if os(tvOS)
                 TVPlayerPanelHeader(title: "播放设置", onClose: closePanel)
                 #endif
-            Form {
+            KanataSettingsForm {
                 Section("播放") {
                     NavigationLink {
                         PlaybackRouteSelectionView(

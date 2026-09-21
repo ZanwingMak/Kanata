@@ -731,7 +731,10 @@ private struct MediaSourceConnectionView: View {
                         TextField("例如：客厅 NAS", text: $name)
                             .multilineTextAlignment(.trailing)
                     }
-                    Picker("协议", selection: $serverScheme) {
+                    Picker("协议", selection: Binding(
+                        get: { serverScheme },
+                        set: { changeServerScheme($0) }
+                    )) {
                         Text("HTTP").tag("http")
                         Text("HTTPS").tag("https")
                     }
@@ -975,12 +978,30 @@ private struct MediaSourceConnectionView: View {
 
     /// 返回当前媒体源的常用端口，作为明确的输入提示与初始值。
     private var defaultPort: String {
+        defaultPort(for: serverScheme)
+    }
+
+    /// 按协议返回服务默认端口；Plex 的 HTTP 与 HTTPS 使用同一服务端口。
+    private func defaultPort(for scheme: String) -> String {
+        let secure = scheme == "https"
         switch kind {
-        case .webDAV: "5005"
-        case .jellyfin, .emby: "8096"
-        case .plex: "32400"
-        case .synology: "5001"
+        case .webDAV: return secure ? "5006" : "5005"
+        case .jellyfin, .emby: return secure ? "8920" : "8096"
+        case .plex: return "32400"
+        case .synology: return secure ? "5001" : "5000"
         }
+    }
+
+    /// 仅在用户切换协议时替换默认端口，保留自定义端口与恢复的服务器地址。
+    private func changeServerScheme(_ scheme: String) {
+        let port = serverPort.trimmingCharacters(in: .whitespacesAndNewlines)
+        let previous = serverScheme
+        if port.isEmpty || port == defaultPort(for: previous) {
+            serverPort = defaultPort(for: scheme)
+        } else if port == (previous == "https" ? "443" : "80") {
+            serverPort = scheme == "https" ? "443" : "80"
+        }
+        serverScheme = scheme
     }
 
     /// 返回结构化服务器字段合成后的只读预览地址。

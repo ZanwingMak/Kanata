@@ -291,6 +291,47 @@ private struct KanataFloatingSurface: ViewModifier {
     }
 }
 
+/// 电视设置使用固定内边距的分组滚动布局，避免系统 Form 随焦点横移和放大。
+struct KanataSettingsForm<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        #if os(tvOS)
+        if #available(tvOS 18.0, *) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 28) {
+                    ForEach(sections: content) { section in
+                        VStack(alignment: .leading, spacing: 12) {
+                            section.header
+                                .font(.system(size: 23, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 16)
+                            ForEach(section.content) { row in
+                                row
+                                    .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+                            }
+                            section.footer
+                                .font(.system(size: 21))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 16)
+                        }
+                    }
+                }
+                .font(.system(size: 27))
+                .padding(24)
+            }
+        } else {
+            Form { content }.padding(.horizontal, 24)
+        }
+        #else
+        Form { content }
+        #endif
+    }
+}
+
 extension View {
     /// 为导航与弹出面板提供统一玻璃表面。
     func kanataFloatingSurface(cornerRadius: CGFloat = 24) -> some View {
@@ -480,6 +521,51 @@ private struct KanataTVFocusButtonStyle: ButtonStyle {
 }
 #endif
 
+#if os(tvOS)
+/// 表单行在焦点切换时保持原有尺寸，避免系统放大越过抽屉与侧栏边界。
+struct KanataTVFormButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) private var isFocused
+
+    /// 以内部描边和轻微提亮表示焦点，不改变行的位置或宽度。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .foregroundStyle(.primary)
+            .background(isFocused ? KanataTheme.accent.opacity(0.18) : .clear,
+                        in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(isFocused ? Color.primary.opacity(0.9) : .clear, lineWidth: 2)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+            .focusEffectDisabled()
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+/// 电视表单开关使用与按钮相同的焦点规则，并明确显示中文状态。
+struct KanataTVFormToggleStyle: ToggleStyle {
+    /// 用单个按钮承载开关，避免行和内嵌控件竞争遥控器焦点。
+    func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: {
+            HStack(spacing: 20) {
+                configuration.label
+                Spacer(minLength: 12)
+                Text(configuration.isOn ? "开启" : "关闭")
+                    .font(.system(size: 23, weight: .medium))
+                Image(systemName: configuration.isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 25))
+                    .foregroundStyle(configuration.isOn ? KanataTheme.accent : .secondary)
+            }
+        }
+        .buttonStyle(KanataTVFormButtonStyle())
+        .accessibilityValue(configuration.isOn ? "开启" : "关闭")
+    }
+}
+#endif
+
 /// 文件浏览器密集行专用样式；焦点边框贴合控件本身，不额外放大或挤占相邻操作。
 private struct KanataDirectoryRowButtonStyle: ButtonStyle {
     let cornerRadius: CGFloat
@@ -560,8 +646,8 @@ struct KanataRowLabel: View {
         HStack(spacing: 12) {
             Image(systemName: symbol)
                 #if os(tvOS)
-                .font(.title3.weight(.semibold))
-                .frame(width: 46, height: 46)
+                .font(.system(size: 26, weight: .medium))
+                .frame(width: 44, height: 44)
                 #else
                 .font(.body.weight(.semibold))
                 .frame(width: 30, height: 30)
@@ -575,7 +661,7 @@ struct KanataRowLabel: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     #if os(tvOS)
-                    .font(.title3.weight(.semibold))
+                    .font(.system(size: 27, weight: .semibold))
                     #else
                     .font(.body.weight(.medium))
                     #endif
@@ -583,7 +669,7 @@ struct KanataRowLabel: View {
                 if let detail, !detail.isEmpty {
                     Text(detail)
                         #if os(tvOS)
-                        .font(.body)
+                        .font(.system(size: 21))
                         #else
                         .font(.caption)
                         #endif
@@ -594,6 +680,8 @@ struct KanataRowLabel: View {
             Spacer(minLength: 0)
         }
         #if os(tvOS)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .frame(minHeight: 68)
         #endif
         .contentShape(Rectangle())
@@ -630,7 +718,7 @@ struct KanataThemePreview: View {
         .padding(14)
         .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16))
         #else
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(
                     LinearGradient(
@@ -639,20 +727,24 @@ struct KanataThemePreview: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: 48, height: 36)
+                .frame(width: 32, height: 28)
                 .overlay {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(.white.opacity(0.35), lineWidth: 1)
                 }
             Text(theme.title)
-                .font(.headline)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .foregroundStyle(.primary)
             if isSelected {
                 Image(systemName: "checkmark.circle.fill")
+                    .font(.caption)
                     .foregroundStyle(theme.accent)
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 58)
         .kanataGlassSurface(cornerRadius: 16, isElevated: isSelected)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -661,6 +753,18 @@ struct KanataThemePreview: View {
 }
 
 extension View {
+    /// 表单中的按钮与开关使用稳定尺寸的电视焦点，手机保持系统交互。
+    @ViewBuilder
+    func kanataTVFormControls() -> some View {
+        #if os(tvOS)
+        self
+            .buttonStyle(KanataTVFormButtonStyle())
+            .toggleStyle(KanataTVFormToggleStyle())
+        #else
+        self
+        #endif
+    }
+
     /// 在 Apple TV 使用全屏任务面板，在触屏设备保留系统 Sheet。
     /// - Parameters:
     ///   - isPresented: 是否显示面板。
@@ -669,12 +773,13 @@ extension View {
     @ViewBuilder
     func kanataModal<Content: View>(
         isPresented: Binding<Bool>,
+        onDismiss: (() -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         #if os(tvOS)
-        fullScreenCover(isPresented: isPresented, content: content)
+        fullScreenCover(isPresented: isPresented, onDismiss: onDismiss, content: content)
         #else
-        sheet(isPresented: isPresented, content: content)
+        sheet(isPresented: isPresented, onDismiss: onDismiss, content: content)
         #endif
     }
 
@@ -757,6 +862,8 @@ extension View {
     func kanataFormBackground() -> some View {
         #if os(tvOS)
         self
+            .contentMargins(.horizontal, 32, for: .scrollContent)
+            .kanataTVFormControls()
             .background(KanataAmbientBackground())
         #else
         self

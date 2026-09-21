@@ -112,7 +112,7 @@ struct SettingsView: View {
         @Bindable var settings = settings
         @Bindable var cloudSync = cloudSync
         return settingsLayout {
-            Form {
+            KanataSettingsForm {
                 if selectedCategory == .appearance {
                 Section("外观与个性化") {
                     VStack(alignment: .leading, spacing: 12) {
@@ -460,6 +460,7 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             #endif
             .contentMargins(.horizontal, settingsHorizontalMargin, for: .scrollContent)
+            .kanataTVFormControls()
         }
             .tint(settings.accentTheme.accent)
             .background { KanataAmbientBackground() }
@@ -514,7 +515,7 @@ struct SettingsView: View {
             }
     }
 
-    /// 电视使用两行主题预览，手机保留横向滑动，避免长色带挤压文字。
+    /// 两端使用自适应主题网格，让所有主题直接可见。
     @ViewBuilder
     private var themeChoices: some View {
         #if os(tvOS)
@@ -523,13 +524,9 @@ struct SettingsView: View {
         }
         .padding(8)
         #else
-        ScrollView(.horizontal) {
-            HStack(spacing: 12) {
-                ForEach(KanataAccentTheme.allCases) { theme in themeButton(theme) }
-            }
-            .padding(.vertical, 8)
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 136), spacing: 8)], spacing: 8) {
+            ForEach(KanataAccentTheme.allCases) { theme in themeButton(theme) }
         }
-        .scrollIndicators(.hidden)
         #endif
     }
 
@@ -549,7 +546,7 @@ struct SettingsView: View {
         #endif
     }
 
-    /// 使用电视侧栏和手机横向分类承载同一组配置，不复制设置逻辑。
+    /// 使用电视侧栏和手机分类网格承载同一组配置，不复制设置逻辑。
     @ViewBuilder
     private func settingsLayout<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         #if os(tvOS)
@@ -584,16 +581,13 @@ struct SettingsView: View {
         .padding(.bottom, 44)
         #else
         VStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(SettingsCategory.allCases) { category in
-                        categoryButton(category)
-                    }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
+                ForEach(SettingsCategory.allCases) { category in
+                    categoryButton(category)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
             }
-            .scrollIndicators(.hidden)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
             content()
         }
         #endif
@@ -617,7 +611,8 @@ struct SettingsView: View {
             #if os(tvOS)
             .font(.system(size: 25, weight: .medium))
             #else
-            .font(.headline)
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity, alignment: .leading)
             #endif
             .padding(.horizontal, 18)
             .frame(minHeight: 52)
@@ -667,7 +662,7 @@ struct SettingsView: View {
     /// 返回设置表单在当前平台使用的水平安全留白。
     private var settingsHorizontalMargin: CGFloat {
         #if os(tvOS)
-        0
+        32
         #else
         16
         #endif

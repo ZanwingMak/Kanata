@@ -285,7 +285,7 @@ struct DanmakuSettingsPanel: View {
                 #if os(tvOS)
                 TVPlayerPanelHeader(title: "弹幕设置", onClose: closePanel)
                 #endif
-            Form {
+            KanataSettingsForm {
                 Section("清晰样式") {
                     Button {
                         applyReadableDanmakuStyle()

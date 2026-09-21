@@ -658,20 +658,9 @@ struct LibraryView: View {
     /// - Parameter direction: Siri Remote 当前移动方向。
     private func moveFromTVHeader(_ direction: MoveCommandDirection) {
         switch direction {
-        case .left:
-            switch tvFocusedControl {
-            case .search: tvFocusedControl = .settings
-            case .organize: tvFocusedControl = .search
-            case .add: tvFocusedControl = .organize
-            default: break
-            }
-        case .right:
-            switch tvFocusedControl {
-            case .settings: tvFocusedControl = .search
-            case .search: tvFocusedControl = .organize
-            case .organize: tvFocusedControl = .add
-            default: break
-            }
+        case .left, .right:
+            // 水平方向由系统移动一次；这里再次修改焦点会跳过中间按钮。
+            break
         case .down:
             if featuredItem != nil, searchText.isEmpty {
                 tvFocusedControl = .featured
