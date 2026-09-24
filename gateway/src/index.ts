@@ -35,9 +35,6 @@ async function main(): Promise<void> {
   app.log.info(
     `Kanata Gateway ${VERSION} 已启动，接口地址 http://${config.host}:${config.port}/${config.token}`,
   );
-  if (config.token === '87654321') {
-    app.log.warn('正在使用默认 Token，公网部署前请务必修改 TOKEN 环境变量');
-  }
 }
 
 main().catch((err) => {

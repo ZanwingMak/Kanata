@@ -55,11 +55,13 @@ export async function resolveDanmaku(
   baseURL: string,
   token: string,
   query: ResolveRequest,
+  signal?: AbortSignal,
 ): Promise<ResolveResponse> {
   return request(baseURL, token, '/kanata/v1/resolve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(query),
+    signal,
   });
 }
 
@@ -68,10 +70,11 @@ export async function fetchDanmaku(
   baseURL: string,
   token: string,
   candidate: ProviderCandidate,
+  signal?: AbortSignal,
 ): Promise<DanmakuResponse> {
   const refs = `${candidate.source}:${candidate.platformEpisodeId}`;
   const query = new URLSearchParams({ refs, dedup: 'true' });
-  return request(baseURL, token, `/kanata/v1/danmaku?${query.toString()}`);
+  return request(baseURL, token, `/kanata/v1/danmaku?${query.toString()}`, { signal });
 }
 
 /** 探测网关是否可访问，并通过受保护接口验证 Token。 */

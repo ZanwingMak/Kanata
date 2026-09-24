@@ -123,10 +123,14 @@ function corsOrigins(): string[] {
 
 /** 从当前进程环境构建配置对象 */
 export function loadConfig(): AppConfig {
+  const token = process.env.TOKEN?.trim();
+  if (!token || token === '87654321') {
+    throw new Error('请设置专用 TOKEN；空值和旧版公开默认值不可使用');
+  }
   return {
     port: envInt('PORT', 9321),
-    host: envStr('HOST', '0.0.0.0'),
-    token: envStr('TOKEN', '87654321'),
+    host: envStr('HOST', '127.0.0.1'),
+    token,
     dandanplay: {
       appId: envStr('DANDANPLAY_APP_ID', ''),
       appSecret: envStr('DANDANPLAY_APP_SECRET', ''),

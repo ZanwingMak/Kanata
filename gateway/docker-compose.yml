@@ -7,8 +7,8 @@ services:
     ports:
       - "9321:9321"
     environment:
-      # 公网部署前必须修改
-      TOKEN: "87654321"
+      HOST: "0.0.0.0"
+      TOKEN: "${TOKEN:?请先设置专用 TOKEN}"
       # 弹弹play 开放平台密钥，未配置时该源不可用
       DANDANPLAY_APP_ID: ""
       DANDANPLAY_APP_SECRET: ""

@@ -3195,6 +3195,10 @@ struct PlayerScreen: View {
             }
             return
         }
+        viewModel.pause()
+        isPlaying = false
+        dismissPlayer()
+        return
         #endif
         resumesAfterExitCancellation = isPlaying
         viewModel.pause()

@@ -135,6 +135,10 @@ final class CloudSyncStore {
             await pushCurrentSnapshot()
             return
         }
+        if hasConcurrentChanges(cloudUpdatedAt: cloudPayload.updatedAt) {
+            statusMessage = "两台设备都有未同步修改，已暂停覆盖；请先在各设备保留当前资料"
+            return
+        }
         if localUpdatedAt > cloudPayload.updatedAt {
             await pushCurrentSnapshot()
         } else {
@@ -172,6 +176,10 @@ final class CloudSyncStore {
               let settings,
               let payload = decodedCloudPayload(),
               payload.updatedAt > localModificationDate else { return false }
+        if hasConcurrentChanges(cloudUpdatedAt: payload.updatedAt) {
+            statusMessage = "两台设备都有未同步修改，已暂停覆盖；请先在各设备保留当前资料"
+            return false
+        }
         isApplyingCloudValue = true
         let profileIDMap = MediaSourceProfileStore.importCloudData(payload.mediaSourceProfiles)
         LibraryStore.importCloudData(payload.mediaLibrary, profileIDMap: profileIDMap)
@@ -195,6 +203,11 @@ final class CloudSyncStore {
     /// 把本机最新非敏感资料写入 iCloud KVS。
     private func pushCurrentSnapshot() async {
         guard isEnabled else { return }
+        if let cloudPayload = decodedCloudPayload(),
+           hasConcurrentChanges(cloudUpdatedAt: cloudPayload.updatedAt) {
+            statusMessage = "两台设备都有未同步修改，已暂停覆盖；请先在各设备保留当前资料"
+            return
+        }
         let now = Date()
         let payload = CloudSyncPayload(
             version: 2,
@@ -235,6 +248,12 @@ final class CloudSyncStore {
     /// 返回本机最后一次内容修改时间。
     private var localModificationDate: Date {
         Date(timeIntervalSince1970: defaults.double(forKey: localUpdatedAtKey))
+    }
+
+    /// 两端都在上次同步后修改时暂停整份快照覆盖，保护各自尚未合并的资料。
+    private func hasConcurrentChanges(cloudUpdatedAt: Date) -> Bool {
+        let baseline = lastSyncAt ?? .distantPast
+        return localModificationDate > baseline && cloudUpdatedAt > baseline
     }
 
     /// 保存最近同步时间。

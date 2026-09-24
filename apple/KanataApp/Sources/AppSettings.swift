@@ -156,9 +156,10 @@ final class AppSettings {
             && !defaults.bool(forKey: Keys.freeAppNoticeShown)
         self.gatewayURLString = defaults.string(forKey: Keys.gatewayURL) ?? ""
         let legacyGatewayToken = defaults.string(forKey: Keys.gatewayToken)
-        self.gatewayToken = KeychainStore.string(account: KeychainAccounts.gatewayToken)
+        let storedGatewayToken = KeychainStore.string(account: KeychainAccounts.gatewayToken)
             ?? legacyGatewayToken
-            ?? "87654321"
+            ?? ""
+        self.gatewayToken = storedGatewayToken == "87654321" ? "" : storedGatewayToken
         let storedCredential = KeychainStore.data(account: KeychainAccounts.bilibiliCredential)
             .flatMap { try? JSONDecoder().decode(StoredBilibiliCredential.self, from: $0) }
         self.bilibiliSESSDATA = storedCredential?.SESSDATA ?? ""

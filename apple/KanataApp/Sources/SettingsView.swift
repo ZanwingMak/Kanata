@@ -438,6 +438,9 @@ struct SettingsView: View {
                 }
 
                 Section("关于 Kanata") {
+                    Text("Kanata 完全免费。如有问题，可通过下方开源地址反馈。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                     Button(action: registerVersionTap) {
                         LabeledContent("版本", value: appVersionLabel)
                     }
@@ -581,7 +584,7 @@ struct SettingsView: View {
         .padding(.bottom, 44)
         #else
         VStack(spacing: 0) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 106), spacing: 8)], spacing: 8) {
                 ForEach(SettingsCategory.allCases) { category in
                     categoryButton(category)
                 }
@@ -598,9 +601,20 @@ struct SettingsView: View {
         Button {
             selectedCategory = category
         } label: {
-            HStack(spacing: 14) {
-                Image(systemName: category.symbol).frame(width: 28)
+            #if os(tvOS)
+            let iconWidth: CGFloat = 28
+            let rowSpacing: CGFloat = 14
+            let rowPadding: CGFloat = 18
+            #else
+            let iconWidth: CGFloat = 20
+            let rowSpacing: CGFloat = 7
+            let rowPadding: CGFloat = 10
+            #endif
+            HStack(spacing: rowSpacing) {
+                Image(systemName: category.symbol).frame(width: iconWidth)
                 Text(category.rawValue)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 #if os(tvOS)
                 Spacer()
                 #endif
@@ -614,7 +628,7 @@ struct SettingsView: View {
             .font(.subheadline.weight(.semibold))
             .frame(maxWidth: .infinity, alignment: .leading)
             #endif
-            .padding(.horizontal, 18)
+            .padding(.horizontal, rowPadding)
             .frame(minHeight: 52)
             .background(selectedCategory == category ? KanataTheme.elevatedSurface : .clear,
                         in: RoundedRectangle(cornerRadius: 16))

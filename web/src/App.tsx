@@ -62,6 +62,17 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const danmakuInputRef = useRef<HTMLInputElement>(null);
+  const requestVersion = useRef(0);
+  const activeRequest = useRef<AbortController | null>(null);
+  const selectionVersion = useRef(0);
+
+  /** 取消旧请求并给本轮匹配生成序号，防止上一部视频的结果覆盖当前画面。 */
+  const beginRequest = useCallback(() => {
+    activeRequest.current?.abort();
+    activeRequest.current = new AbortController();
+    requestVersion.current += 1;
+    return requestVersion.current;
+  }, []);
 
   const mergedItems = useMemo(
     () => mergeDanmaku(localItems, onlineItems),
@@ -89,33 +100,40 @@ export function App() {
   const loadCandidate = useCallback(async (
     candidate: ProviderCandidate,
     explicitCacheKey?: string,
+    matchingVersion?: number,
   ) => {
+    const version = matchingVersion ?? beginRequest();
+    if (version !== requestVersion.current) return;
     setWorkState('loading');
     setStatus(`正在加载 ${sourceName(candidate)} 弹幕`);
     setError(null);
     try {
-      const response = await fetchDanmaku(gatewayURL, gatewayToken, candidate);
+      const response = await fetchDanmaku(gatewayURL, gatewayToken, candidate, activeRequest.current?.signal);
+      if (version !== requestVersion.current) return;
       setOnlineItems(response.items);
       setBinding(candidate);
       const cacheKey = explicitCacheKey ?? (video ? webDanmakuCacheKey(video) : undefined);
       if (cacheKey) {
         await saveWebDanmakuCache(cacheKey, candidate, response.items).catch(() => undefined);
       }
+      if (version !== requestVersion.current) return;
       setWorkState('ready');
       const fallback = response.degraded.length > 0 ? ' · 部分来源已降级' : '';
       setStatus(`${response.items.length} 条在线弹幕 · ${response.stats.elapsedMs}ms${fallback}`);
     } catch (caught) {
+      if (version !== requestVersion.current) return;
       setWorkState('error');
       setError(caught instanceof Error ? caught.message : '弹幕加载失败');
     }
-  }, [gatewayToken, gatewayURL, video]);
+  }, [beginRequest, gatewayToken, gatewayURL, video]);
 
   /** 使用文件指纹和标题自动匹配弹幕，低置信候选交给用户确认。 */
   const matchPreparedVideo = useCallback(async (prepared: PreparedVideo) => {
+    const version = beginRequest();
     /** 在线匹配不可用时恢复当前视频最近保存的弹幕。 */
     const restoreCache = async (): Promise<boolean> => {
       const archive = await loadWebDanmakuCache(webDanmakuCacheKey(prepared)).catch(() => undefined);
-      if (!archive) return false;
+      if (!archive || version !== requestVersion.current) return false;
       setOnlineItems(archive.items);
       setBinding(archive.candidate);
       setWorkState('ready');
@@ -126,6 +144,7 @@ export function App() {
 
     if (!gatewayURL.trim()) {
       if (!await restoreCache()) {
+        if (version !== requestVersion.current) return;
         setWorkState('ready');
         setStatus('未配置网关，当前可离线播放或导入本地弹幕');
       }
@@ -140,13 +159,15 @@ export function App() {
         episode: prepared.episode,
         duration: prepared.duration,
         fingerprint: prepared.fingerprint,
-      });
+      }, activeRequest.current?.signal);
+      if (version !== requestVersion.current) return;
       setCandidates(response.candidates);
       const best = response.candidates[0];
       if (best && best.confidence >= 0.9) {
-        await loadCandidate(best, webDanmakuCacheKey(prepared));
+        await loadCandidate(best, webDanmakuCacheKey(prepared), version);
       } else {
         if (!await restoreCache()) {
+          if (version !== requestVersion.current) return;
           setWorkState('ready');
           setStatus(best
             ? `找到 ${response.candidates.length} 个候选，请确认来源`
@@ -154,19 +175,23 @@ export function App() {
         }
       }
     } catch (caught) {
+      if (version !== requestVersion.current) return;
       if (!await restoreCache()) {
+        if (version !== requestVersion.current) return;
         setWorkState('error');
         setError(caught instanceof Error ? caught.message : '匹配失败');
         setStatus('视频仍可离线播放，也可以导入本地弹幕');
       }
     }
-  }, [gatewayToken, gatewayURL, loadCandidate]);
+  }, [beginRequest, gatewayToken, gatewayURL, loadCandidate]);
 
   /** 处理本地视频选择，文件只生成浏览器 Blob URL，不上传服务器。 */
   async function handleVideoSelection(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
+    const selection = ++selectionVersion.current;
+    beginRequest();
     setWorkState('preparing');
     setStatus('正在读取视频元数据与前 16MB 指纹');
     setError(null);
@@ -176,10 +201,15 @@ export function App() {
     setBinding(null);
     try {
       const prepared = await prepareVideo(file);
+      if (selection !== selectionVersion.current) {
+        URL.revokeObjectURL(prepared.url);
+        return;
+      }
       setVideo(prepared);
       setKeyword(prepared.title);
       await matchPreparedVideo(prepared);
     } catch (caught) {
+      if (selection !== selectionVersion.current) return;
       setWorkState('error');
       setError(caught instanceof Error ? caught.message : '无法打开视频');
     }
@@ -205,6 +235,7 @@ export function App() {
   async function handleSearch(event: FormEvent) {
     event.preventDefault();
     if (!keyword.trim()) return;
+    const version = beginRequest();
     setWorkState('matching');
     setError(null);
     try {
@@ -212,11 +243,13 @@ export function App() {
         title: keyword.trim(),
         episode: video?.episode,
         duration: video?.duration,
-      });
+      }, activeRequest.current?.signal);
+      if (version !== requestVersion.current) return;
       setCandidates(response.candidates);
       setWorkState('ready');
       setStatus(`找到 ${response.candidates.length} 个候选`);
     } catch (caught) {
+      if (version !== requestVersion.current) return;
       setWorkState('error');
       setError(caught instanceof Error ? caught.message : '搜索失败');
     }

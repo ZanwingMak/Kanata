@@ -192,6 +192,16 @@ struct LibraryView: View {
             .map { $0 }
     }
 
+    /// 少量视频已全部出现在最近添加时，不重复渲染同一组单视频卡片。
+    private var showsSeparateVideoGrid: Bool {
+        if !searchText.isEmpty || filterMode != .all || sortMode != .added { return true }
+        let recentIDs = Set(recentlyAddedEntries.compactMap { entry -> String? in
+            if case let .item(item) = entry { return item.id }
+            return nil
+        })
+        return filteredItems.contains { !recentIDs.contains($0.id) }
+    }
+
     /// 把媒体库中带合集标识的条目聚合为剧集卡片。
     private var mediaCollections: [MediaCollection] {
         _ = progressRevision
@@ -281,20 +291,20 @@ struct LibraryView: View {
                                 if !mediaCollections.isEmpty && searchText.isEmpty {
                                     collectionSection
                                 }
-                                if !filteredItems.isEmpty {
-                                HStack(alignment: .firstTextBaseline) {
-                                    Text(searchText.isEmpty && filterMode != .collection ? "单个视频" : "视频项目")
-                                        .font(.title2.bold())
-                                    Spacer()
-                                    Text("\(filteredItems.count) 个项目")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
-                                    ForEach(filteredItems) { item in
-                                        mediaCard(item)
+                                if !filteredItems.isEmpty && showsSeparateVideoGrid {
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text(searchText.isEmpty && filterMode != .collection ? "单个视频" : "视频项目")
+                                            .font(.title2.bold())
+                                        Spacer()
+                                        Text("\(filteredItems.count) 个项目")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                     }
-                                }
+                                    LazyVGrid(columns: columns, alignment: .leading, spacing: 20) {
+                                        ForEach(filteredItems) { item in
+                                            mediaCard(item)
+                                        }
+                                    }
                                 }
                             }
                             .frame(maxWidth: libraryContentMaxWidth, alignment: .leading)
@@ -334,22 +344,24 @@ struct LibraryView: View {
                         Image(systemName: "gearshape")
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("筛选", selection: $filterMode) {
-                            ForEach(LibraryFilterMode.allCases) { mode in
-                                Text(mode.title).tag(mode)
+                if !items.isEmpty || !mediaSources.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Picker("筛选", selection: $filterMode) {
+                                ForEach(LibraryFilterMode.allCases) { mode in
+                                    Text(mode.title).tag(mode)
+                                }
                             }
-                        }
-                        Picker("排序", selection: $sortMode) {
-                            ForEach(LibrarySortMode.allCases) { mode in
-                                Text(mode.title).tag(mode)
+                            Picker("排序", selection: $sortMode) {
+                                ForEach(LibrarySortMode.allCases) { mode in
+                                    Text(mode.title).tag(mode)
+                                }
                             }
+                        } label: {
+                            Image(systemName: filterMode == .all ? "arrow.up.arrow.down" : "line.3.horizontal.decrease.circle.fill")
                         }
-                    } label: {
-                        Image(systemName: filterMode == .all ? "arrow.up.arrow.down" : "line.3.horizontal.decrease.circle.fill")
+                        .accessibilityLabel("筛选和排序")
                     }
-                    .accessibilityLabel("筛选和排序")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if isProcessingImport {
@@ -394,16 +406,24 @@ struct LibraryView: View {
             } message: {
                 Text(importError ?? "")
             }
-            .alert(
-                "媒体库已更新",
-                isPresented: Binding(
-                    get: { libraryNotice != nil },
-                    set: { if !$0 { libraryNotice = nil } }
-                )
-            ) {
-                Button("好", role: .cancel) { libraryNotice = nil }
-            } message: {
-                Text(libraryNotice ?? "")
+            .overlay(alignment: .top) {
+                if let libraryNotice {
+                    Text(libraryNotice)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .background(.black.opacity(0.82), in: Capsule())
+                        .padding(.top, 20)
+                        .allowsHitTesting(false)
+                }
+            }
+            .onChange(of: libraryNotice) { _, value in
+                guard let value else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(3))
+                    if libraryNotice == value { libraryNotice = nil }
+                }
             }
             .alert(
                 "已加入媒体库",
@@ -572,6 +592,7 @@ struct LibraryView: View {
             .buttonStyle(KanataTVActionButtonStyle())
             .focused($tvFocusedControl, equals: .search)
             .onMoveCommand(perform: moveFromTVHeader)
+            .disabled(items.isEmpty && mediaSources.isEmpty)
             Menu {
                 Picker("筛选", selection: $filterMode) {
                     ForEach(LibraryFilterMode.allCases) { mode in
@@ -589,6 +610,7 @@ struct LibraryView: View {
             .buttonStyle(KanataTVActionButtonStyle())
             .focused($tvFocusedControl, equals: .organize)
             .onMoveCommand(perform: moveFromTVHeader)
+            .disabled(items.isEmpty && mediaSources.isEmpty)
             Menu {
                 Button {
                     isAddingMediaSource = true
@@ -1575,7 +1597,7 @@ private struct MediaArtworkView: View {
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [Color(red: 0.08, green: 0.16, blue: 0.32), Color(red: 0.22, green: 0.08, blue: 0.34)],
+                colors: placeholderColors,
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -1584,13 +1606,31 @@ private struct MediaArtworkView: View {
                     .resizable()
                     .scaledToFill()
             } else {
-                Image(systemName: item.remoteURLString == nil ? "play.rectangle.fill" : "network")
-                    .font(.system(size: 42, weight: .light))
-                    .foregroundStyle(.white.opacity(0.82))
+                VStack(spacing: 10) {
+                    Image(systemName: item.remoteURLString == nil ? "play.rectangle.fill" : "play.square.stack")
+                        .font(.system(size: 36, weight: .light))
+                    Text(item.libraryTitle)
+                        .font(.headline.weight(.semibold))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 14)
+                }
+                .foregroundStyle(.white.opacity(0.88))
             }
         }
         .clipped()
         .task(id: item.id) { await loadThumbnail() }
+    }
+
+    /// 按片名稳定选择占位封面的色相，使不同网络视频容易区分。
+    private var placeholderColors: [Color] {
+        let palette: [[Color]] = [
+            [Color(red: 0.09, green: 0.34, blue: 0.44), Color(red: 0.13, green: 0.16, blue: 0.34)],
+            [Color(red: 0.35, green: 0.19, blue: 0.31), Color(red: 0.10, green: 0.15, blue: 0.29)],
+            [Color(red: 0.22, green: 0.27, blue: 0.45), Color(red: 0.12, green: 0.29, blue: 0.27)]
+        ]
+        let index = item.libraryTitle.unicodeScalars.reduce(0) { ($0 + Int($1.value)) % palette.count }
+        return palette[index]
     }
 
     /// 下载带认证头的服务器海报，或从本地视频第一秒生成缩略图。
@@ -1660,7 +1700,10 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     var episode: Int?
 
     /// 播放进度存储使用的稳定媒体标识。
-    var mediaKey: String? { resolveURL()?.absoluteString }
+    var mediaKey: String? {
+        if let remoteURLString { return PlaybackProgressStore.normalizedMediaKey(remoteURLString) }
+        return resolveURL()?.absoluteString
+    }
 
     /// 从文件选择器返回的地址创建条目，创建书签失败时返回 nil
     init?(

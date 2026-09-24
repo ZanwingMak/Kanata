@@ -78,6 +78,7 @@ struct PlaybackMediaInfo: Equatable {
 /// 本机断点续播存储；只保存轻量时间信息，不复制视频数据。
 enum PlaybackProgressStore {
     private static let storageKey = "playback.progress.v1"
+    private static let secretQueryNames: Set<String> = ["_sid", "x-plex-token", "api_key", "apikey", "access_token", "token"]
 
     private struct Entry: Codable {
         let position: Double
@@ -182,7 +183,30 @@ enum PlaybackProgressStore {
     static func importData(_ data: Data?) {
         guard let data,
               let entries = try? JSONDecoder().decode([String: Entry].self, from: data) else { return }
-        persist(entries, schedulesCloudPush: false)
+        persist(normalizedEntries(entries), schedulesCloudPush: false)
+    }
+
+    /// 为播放进度生成不含认证查询参数的稳定地址。
+    static func normalizedMediaKey(_ value: String) -> String {
+        guard var components = URLComponents(string: value), components.scheme != nil else { return value }
+        components.user = nil
+        components.password = nil
+        components.fragment = nil
+        components.queryItems = components.queryItems?.filter {
+            !secretQueryNames.contains($0.name.lowercased())
+        }
+        return components.url?.absoluteString ?? value
+    }
+
+    /// 迁移旧版带临时会话参数的断点，同一媒体保留最近一次记录。
+    private static func normalizedEntries(_ entries: [String: Entry]) -> [String: Entry] {
+        var result: [String: Entry] = [:]
+        for (key, entry) in entries {
+            let stableKey = normalizedMediaKey(key)
+            if let previous = result[stableKey], previous.updatedAt > entry.updatedAt { continue }
+            result[stableKey] = entry
+        }
+        return result
     }
 
     /// 从 UserDefaults 解码全部进度记录。
@@ -192,7 +216,11 @@ enum PlaybackProgressStore {
               let entries = try? JSONDecoder().decode([String: Entry].self, from: data) else {
             return [:]
         }
-        return entries
+        let migrated = normalizedEntries(entries)
+        if migrated.count != entries.count || entries.keys.contains(where: { normalizedMediaKey($0) != $0 }) {
+            persist(migrated, schedulesCloudPush: false)
+        }
+        return migrated
     }
 
     /// 编码并写入全部进度记录。

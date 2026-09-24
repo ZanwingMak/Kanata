@@ -761,7 +761,7 @@ private struct MediaSourceConnectionView: View {
                         Text("基础路径（可选）")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        TextField("例如 /jellyfin", text: $serverPath)
+                        TextField(kind == .webDAV ? "例如 /dav" : "例如 /\(kind.rawValue)", text: $serverPath)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     }
@@ -822,6 +822,11 @@ private struct MediaSourceConnectionView: View {
                     }
                     .buttonStyle(KanataPrimaryButtonStyle())
                     .disabled(serverHost.isEmpty || isLoading || (kind == .plex && !hasUsablePlexToken))
+                    if serverHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("请先填写域名或 IP 地址")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             if let errorMessage {

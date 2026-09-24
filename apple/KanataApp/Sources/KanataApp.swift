@@ -19,17 +19,9 @@ struct KanataApp: App {
                 .environment(sponsorshipStore)
                 .preferredColorScheme(settings.appearance.colorScheme)
                 .tint(settings.accentTheme.accent)
-                .task { cloudSync.configure(settings: settings) }
-                .alert(
-                    "使用提示",
-                    isPresented: Binding(
-                        get: { settings.shouldShowFreeAppNotice },
-                        set: { if !$0 { settings.markFreeAppNoticeShown() } }
-                    )
-                ) {
-                    Button("知道了") { settings.markFreeAppNoticeShown() }
-                } message: {
-                    Text("当前应用完全免费，如有问题请在设置中前往本项目开源地址")
+                .task {
+                    cloudSync.configure(settings: settings)
+                    if settings.shouldShowFreeAppNotice { settings.markFreeAppNoticeShown() }
                 }
         }
     }

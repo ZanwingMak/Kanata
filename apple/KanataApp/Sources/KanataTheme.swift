@@ -341,6 +341,7 @@ extension View {
 
 /// 适合表单主操作的高对比度按钮样式。
 struct KanataPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
     #if os(tvOS)
     @Environment(\.isFocused) private var isFocused
     #endif
@@ -351,14 +352,16 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline)
-            .foregroundStyle(.white)
+            .foregroundStyle(isEnabled ? Color.white : Color.secondary)
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 16)
             .frame(minHeight: 50, alignment: .center)
             .background(
                 LinearGradient(
-                    colors: [KanataTheme.actionFill, KanataTheme.actionFillStrong],
+                    colors: isEnabled
+                        ? [KanataTheme.actionFill, KanataTheme.actionFillStrong]
+                        : [KanataTheme.surface, KanataTheme.surface],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
