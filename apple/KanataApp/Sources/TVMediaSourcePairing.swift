@@ -26,13 +26,24 @@ private struct TVMediaSourcePairingPayload: Sendable {
         var components = URLComponents()
         components.scheme = scheme
         components.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        components.port = port
+        components.port = port ?? defaultServerPort
         let path = basePath.trimmingCharacters(in: .whitespacesAndNewlines)
         components.path = path.isEmpty ? "" : (path.hasPrefix("/") ? path : "/\(path)")
         guard let url = components.url,
               components.host?.isEmpty == false,
               ["http", "https"].contains(url.scheme?.lowercased()) else { return nil }
         return url
+    }
+
+    /// 手机未指定端口时按媒体源和协议选择连接端口。
+    private var defaultServerPort: Int {
+        let secure = scheme == "https"
+        switch kind {
+        case .webDAV: return secure ? 5006 : 5005
+        case .jellyfin, .emby: return secure ? 8920 : 8096
+        case .plex: return 32400
+        case .synology: return secure ? 5001 : 5000
+        }
     }
 }
 
@@ -211,10 +222,10 @@ private final class TVPairingHTTPServer: @unchecked Sendable {
         <form class="card" method="post" action="/save?token=\(token)">
         <label>媒体源类型</label><select name="kind"><option value="webDAV">WebDAV</option><option value="jellyfin">Jellyfin</option><option value="emby">Emby</option><option value="synology">群晖 DSM</option></select>
         <label>显示名称（可选）</label><input name="name" placeholder="例如：客厅 NAS">
-        <div class="row"><div><label>协议</label><select name="scheme"><option value="http">HTTP</option><option value="https">HTTPS</option></select></div><div><label>端口</label><input name="port" inputmode="numeric" placeholder="例如 8096"></div></div>
-        <label>域名或 IP 地址</label><input name="host" required autocapitalize="none" placeholder="nas.local 或 192.168.1.20">
-        <label>基础路径（可选）</label><input name="basePath" autocapitalize="none" placeholder="例如 /jellyfin">
-        <label>WebDAV 起始目录（可选）</label><input name="rootPath" value="/" autocapitalize="none">
+        <div class="row"><div><label>协议</label><select name="scheme"><option value="http">HTTP</option><option value="https">HTTPS</option></select></div><div><label>端口</label><input name="port" inputmode="numeric" placeholder="留空自动选择"></div></div>
+        <label>域名或 IP 地址</label><input name="host" required autocapitalize="none" placeholder="输入服务器地址">
+        <label>基础路径（可选）</label><input name="basePath" autocapitalize="none" placeholder="例如 /dav"><p class="hint">仅当服务部署在子路径下才填写，例如反向代理入口 /dav；通常留空。</p>
+        <label>WebDAV 媒体起始目录（可选）</label><input name="rootPath" value="/" autocapitalize="none"><p class="hint">连接后从这个目录开始浏览；/ 表示根目录。非 WebDAV 来源可保持默认。</p>
         <label>用户名</label><input name="username" autocomplete="username">
         <label>密码</label><input name="password" type="password" autocomplete="current-password">
         <label>群晖两步验证码（可选）</label><input name="otp" inputmode="numeric" autocomplete="one-time-code">
@@ -306,9 +317,7 @@ private final class TVMediaSourcePairingServer {
             switch payload.kind {
             case .webDAV:
                 let root = payload.rootPath.isEmpty ? "/" : payload.rootPath
-                guard let start = URL(string: root, relativeTo: url.appendingPathComponent(""))?.absoluteURL else {
-                    throw MediaSourceError.invalidResponse
-                }
+                let start = webDAVDirectoryURL(server: url, rootPath: root)
                 _ = try await WebDAVClient(username: payload.username, password: payload.password).list(directory: start)
                 secret = MediaSourceSecret(password: payload.password, token: nil, userID: nil)
             case .jellyfin, .emby:

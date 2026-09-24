@@ -321,7 +321,9 @@ struct KanataSettingsForm<Content: View>: View {
                     }
                 }
                 .font(.system(size: 27))
-                .padding(24)
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 100)
             }
         } else {
             Form { content }.padding(.horizontal, 24)

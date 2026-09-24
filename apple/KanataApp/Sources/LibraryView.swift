@@ -976,11 +976,8 @@ struct LibraryView: View {
         do {
             switch profile.kind {
             case .webDAV:
-                guard let server = profile.serverURL,
-                      let url = URL(
-                          string: profile.rootPath ?? "/",
-                          relativeTo: server.appendingPathComponent("")
-                      )?.absoluteURL else { throw MediaSourceError.invalidResponse }
+                guard let server = profile.serverURL else { throw MediaSourceError.invalidResponse }
+                let url = webDAVDirectoryURL(server: server, rootPath: profile.rootPath ?? "/")
                 _ = try await WebDAVClient(profile: profile).list(directory: url)
             case .jellyfin, .emby:
                 _ = try await MediaBrowserClient().items(profile: profile, parentID: nil)
@@ -1454,71 +1451,59 @@ private struct TVLibrarySearchSheet: View {
     var body: some View {
         ZStack {
             KanataAmbientBackground()
-
-            VStack(spacing: 48) {
+            VStack(alignment: .leading, spacing: 30) {
                 HStack(alignment: .top, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 38, weight: .medium))
+                        .foregroundStyle(KanataTheme.accent)
+                        .frame(width: 72, height: 72)
+                        .background(KanataTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 20))
+                    VStack(alignment: .leading, spacing: 6) {
                         Text("搜索媒体库")
-                            .font(.largeTitle.bold())
-                        Text("按标题、文件名或集数筛选已添加的内容")
+                            .font(.system(size: 38, weight: .bold))
+                        Text("按标题、文件名或集数查找")
                             .font(.title3)
                             .foregroundStyle(.secondary)
                     }
-                    Spacer()
+                    Spacer(minLength: 20)
                     Button { dismiss() } label: {
                         Label("关闭", systemImage: "xmark")
                     }
                     .buttonStyle(KanataTVActionButtonStyle())
                     .focused($focusedControl, equals: .close)
                 }
-                .focusSection()
 
-                VStack(alignment: .leading, spacing: 20) {
-                    Label("搜索关键词", systemImage: "magnifyingglass")
-                        .font(.title2.bold())
-                    HStack(spacing: 18) {
-                        Image(systemName: "text.magnifyingglass")
-                            .font(.title2)
-                            .foregroundStyle(KanataTheme.accent)
-                        TextField("例如：未来日记、S01E03、第 12 集", text: $searchText)
-                            .font(.title2)
-                            .focused($focusedControl, equals: .field)
-                            .onSubmit { finishSearch() }
-                    }
+                TextField("输入标题、文件名或集数", text: $searchText)
+                    .font(.title2)
+                    .focused($focusedControl, equals: .field)
+                    .onSubmit { finishSearch() }
                     .padding(.horizontal, 26)
-                    .frame(minHeight: 82)
-                    .kanataGlassSurface(cornerRadius: 18, isElevated: true)
-                    Text(searchText.isEmpty
-                        ? "输入关键词后，媒体库会立即筛选匹配内容。"
-                        : "当前关键词：\(searchText)")
-                        .font(.headline)
+                    .frame(height: 82)
+                    .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 20))
+
+                HStack(spacing: 18) {
+                    Text("输入后选择“查看结果”，媒体库会显示匹配内容。")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-
-                    HStack(spacing: 18) {
-                        Button { clearSearch() } label: {
-                            Label("清除关键词", systemImage: "xmark.circle")
-                        }
-                        .buttonStyle(KanataSecondaryButtonStyle())
-                        .focused($focusedControl, equals: .clear)
-                        .disabled(searchText.isEmpty)
-
-                        Button { finishSearch() } label: {
-                            Label("查看搜索结果", systemImage: "checkmark")
-                        }
-                        .buttonStyle(KanataPrimaryButtonStyle())
-                        .focused($focusedControl, equals: .done)
+                    Spacer(minLength: 16)
+                    Button { clearSearch() } label: {
+                        Label("清除", systemImage: "xmark.circle")
                     }
-                    .focusSection()
+                    .buttonStyle(KanataSecondaryButtonStyle())
+                    .focused($focusedControl, equals: .clear)
+                    .disabled(searchText.isEmpty)
+                    Button { finishSearch() } label: {
+                        Label("查看结果", systemImage: "arrow.right")
+                    }
+                    .buttonStyle(KanataPrimaryButtonStyle())
+                    .focused($focusedControl, equals: .done)
                 }
-                .padding(40)
-                .frame(maxWidth: 1120)
-                .kanataGlassSurface(cornerRadius: 28, isElevated: true)
-
-                Spacer(minLength: 0)
+                .focusSection()
             }
-            .frame(maxWidth: 1560, maxHeight: 880)
-            .padding(.horizontal, 72)
-            .padding(.vertical, 56)
+            .padding(42)
+            .frame(maxWidth: 1080)
+            .kanataGlassSurface(cornerRadius: 32, isElevated: true)
+            .padding(.horizontal, 80)
         }
         .onAppear { focusSearchField() }
         .onExitCommand { dismiss() }

@@ -854,11 +854,11 @@ private struct TVPlayerEpisodeShelf: View {
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 22) {
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("连续播放")
-                            .font(.largeTitle.bold())
+                        Text("选集")
+                            .font(.system(size: 34, weight: .bold))
                         Text("\(items.first?.collectionTitle ?? "当前列表") · 共 \(items.count) 集")
                             .font(.headline)
                             .foregroundStyle(.white.opacity(0.66))
@@ -871,7 +871,7 @@ private struct TVPlayerEpisodeShelf: View {
                 }
 
                 ScrollView(.horizontal) {
-                    LazyHStack(spacing: 22) {
+                    LazyHStack(spacing: 16) {
                         ForEach(Array(items.enumerated()), id: \.element.id) { offset, item in
                             Button {
                                 onSelect(item)
@@ -879,7 +879,7 @@ private struct TVPlayerEpisodeShelf: View {
                                 episodeCard(item: item, offset: offset)
                             }
                             .buttonStyle(.plain)
-                            .kanataTVFocus(cornerRadius: 24)
+                            .kanataTVFocus(cornerRadius: 20)
                             .focused($focusedItemID, equals: item.id)
                         }
                     }
@@ -889,10 +889,10 @@ private struct TVPlayerEpisodeShelf: View {
                 .scrollIndicators(.hidden)
                 .scrollClipDisabled()
             }
-            .padding(.horizontal, 74)
-            .padding(.top, 34)
-            .padding(.bottom, 48)
-            .playerGlassSurface(cornerRadius: 36, tint: Color.black.opacity(0.26))
+            .padding(.horizontal, 54)
+            .padding(.top, 28)
+            .padding(.bottom, 32)
+            .playerGlassSurface(cornerRadius: 30, tint: Color.black.opacity(0.30))
             .shadow(color: .black.opacity(0.30), radius: 28, y: 14)
             .padding(.horizontal, 38)
             .padding(.bottom, 26)
@@ -914,38 +914,37 @@ private struct TVPlayerEpisodeShelf: View {
     ///   - offset: 条目在列表中的位置。
     /// - Returns: 固定电视阅读距离的分集卡片。
     private func episodeCard(item: LibraryItem, offset: Int) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .bottomLeading) {
+        HStack(spacing: 16) {
+            ZStack {
                 episodeArtwork(item)
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.72)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+                Text("\(item.episode ?? item.collectionIndex ?? offset + 1)")
+                    .font(.title3.bold().monospacedDigit())
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.60), in: Circle())
+            }
+            .frame(width: 116, height: 78)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 6) {
                 Text(item.episodeLabel ?? "第 \(offset + 1) 集")
                     .font(.headline.weight(.semibold))
-                    .padding(14)
-            }
-            .frame(width: 330, height: 166)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-
-            Text(item.libraryTitle)
-                .font(.headline)
-                .lineLimit(1)
-            HStack(spacing: 6) {
-                if item.id == currentItemID {
-                    Image(systemName: "speaker.wave.2.fill")
-                    Text("正在播放")
-                } else {
-                    Image(systemName: "play.fill")
-                    Text(item.sourceName ?? "媒体库")
+                    .lineLimit(1)
+                Text(item.libraryTitle)
+                    .font(.callout)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Image(systemName: item.id == currentItemID ? "speaker.wave.2.fill" : "play.fill")
+                    Text(item.id == currentItemID ? "正在播放" : "播放此集")
                 }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(item.id == currentItemID ? KanataTheme.accent : .white.opacity(0.58))
             }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(item.id == currentItemID ? KanataTheme.accent : .white.opacity(0.58))
         }
         .foregroundStyle(.white)
-        .frame(width: 330, alignment: .leading)
+        .frame(width: 344, alignment: .leading)
+        .padding(12)
+        .background(.white.opacity(item.id == currentItemID ? 0.14 : 0.07), in: RoundedRectangle(cornerRadius: 20))
     }
 
     /// 返回分集海报；没有海报时使用主题渐变占位图。
@@ -1947,6 +1946,7 @@ struct PlayerScreen: View {
     /// Apple TV 右侧浮动播放选项，保持视频和时间轴可见。
     private var tvQuickSettingsOverlay: some View {
         VStack {
+            Spacer(minLength: 0)
             HStack {
                 Spacer()
                 TVPlayerQuickSettingsPanel(
@@ -1960,9 +1960,8 @@ struct PlayerScreen: View {
                     onOpenSettings: openPlaybackOptionsFromTVQuickSettings
                 )
             }
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(.top, 112)
         .padding(.trailing, 74)
         .background(Color.black.opacity(0.08))
     }
@@ -4336,10 +4335,7 @@ private struct SubtitleDirectoryBrowserView: View {
         switch profile.kind {
         case .webDAV:
             guard let server = profile.serverURL else { return nil }
-            return URL(
-                string: profile.rootPath ?? "/",
-                relativeTo: server.appendingPathComponent("")
-            )?.absoluteURL.absoluteString
+            return webDAVDirectoryURL(server: server, rootPath: profile.rootPath ?? "/").absoluteString
         case .synology:
             return ""
         case .jellyfin, .emby, .plex:

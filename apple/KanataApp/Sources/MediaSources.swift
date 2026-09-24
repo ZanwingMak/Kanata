@@ -3,6 +3,17 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+/// 将 WebDAV 媒体目录接在服务基础路径之后，避免以斜杠开头的目录覆盖反向代理路径。
+/// - Parameters:
+///   - server: 包含可选基础路径的服务地址。
+///   - rootPath: 服务内的媒体起始目录。
+/// - Returns: 可用于浏览或测试的完整目录地址。
+func webDAVDirectoryURL(server: URL, rootPath: String) -> URL {
+    let directory = rootPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    return server.appendingPathComponent(directory, isDirectory: true)
+}
+
 /// 媒体源表单的非敏感草稿；避免 Apple TV 误触返回后重复输入。
 private struct MediaSourceConnectionDraft: Codable {
     var name = ""
@@ -271,22 +282,11 @@ struct MediaSourceSheet: View {
     private var tvSourcePicker: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 36) {
-                HStack(alignment: .center, spacing: 44) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("连接你的世界")
-                            .font(.system(size: 44, weight: .bold))
-                        Text("你的文件、服务器与私人媒体库，都在这里。")
-                            .font(.body).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    NavigationLink {
-                        TVMediaSourcePairingView(onSaved: reloadProfiles)
-                    } label: {
-                        Label("用手机配置", systemImage: "qrcode")
-                            .padding(20)
-                            .kanataFloatingSurface(cornerRadius: 24)
-                    }
-                    .kanataTVFocus(cornerRadius: 24)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("连接你的世界")
+                        .font(.system(size: 44, weight: .bold))
+                    Text("你的文件、服务器与私人媒体库，都在这里。")
+                        .font(.body).foregroundStyle(.secondary)
                 }
                 if !profiles.isEmpty {
                     Text("已有连接").font(.title3.bold())
@@ -312,6 +312,12 @@ struct MediaSourceSheet: View {
                 Text("添加新连接").font(.title3.bold())
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 18) {
                     NavigationLink {
+                        TVMediaSourcePairingView(onSaved: reloadProfiles)
+                    } label: {
+                        tvSourceTile("用手机配置", detail: "扫描二维码，在手机上填写连接信息", symbol: "qrcode")
+                    }
+                    .kanataTVFocus(cornerRadius: 24)
+                    NavigationLink {
                         DirectMediaSourceView { finish([$0]) }
                     } label: {
                         tvSourceTile("网络直链 / HLS", detail: "HTTP、HTTPS、m3u8", symbol: "link")
@@ -329,6 +335,7 @@ struct MediaSourceSheet: View {
                         .kanataTVFocus(cornerRadius: 24)
                     }
                 }
+                .focusSection()
                 Text("密码与访问令牌仅保存在当前设备的钥匙串。")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -743,7 +750,7 @@ private struct MediaSourceConnectionView: View {
                         Text("域名或 IP 地址")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        TextField("例如 nas.local 或 192.168.1.20", text: $serverHost)
+                        TextField("输入服务器域名或 IP 地址", text: $serverHost)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .keyboardType(.URL)
@@ -764,15 +771,21 @@ private struct MediaSourceConnectionView: View {
                         TextField(kind == .webDAV ? "例如 /dav" : "例如 /\(kind.rawValue)", text: $serverPath)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        Text("仅当服务部署在子路径下才填写，例如反向代理入口 /dav；通常留空。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     if kind == .webDAV {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("媒体起始目录")
+                            Text("媒体起始目录（可选）")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             TextField("例如 /Movies", text: $rootPath)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            Text("连接后从这个目录开始浏览；/ 表示从 WebDAV 根目录开始。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     Text("将连接到：\(serverPreview)")
@@ -852,7 +865,7 @@ private struct MediaSourceConnectionView: View {
             switch kind {
             case .webDAV:
                 let effectivePassword = password.isEmpty ? (savedSecret?.password ?? "") : password
-                let start = try webDAVStartURL(server: serverURL)
+                let start = webDAVStartURL(server: serverURL)
                 let client = WebDAVClient(username: username, password: effectivePassword)
                 _ = try await client.list(directory: start)
                 secret = MediaSourceSecret(password: effectivePassword, token: nil, userID: nil)
@@ -1021,11 +1034,8 @@ private struct MediaSourceConnectionView: View {
     /// 把 WebDAV 起始路径拼接到服务器根地址。
     /// - Parameter server: WebDAV 根地址。
     /// - Returns: 可用于 PROPFIND 的目录地址。
-    private func webDAVStartURL(server: URL) throws -> URL {
-        guard let url = URL(string: normalizedRootPath, relativeTo: server.appendingPathComponent(""))?.absoluteURL else {
-            throw MediaSourceError.invalidResponse
-        }
-        return url
+    private func webDAVStartURL(server: URL) -> URL {
+        webDAVDirectoryURL(server: server, rootPath: normalizedRootPath)
     }
 
     /// 返回带前导斜杠的 WebDAV 起始路径。
@@ -1835,11 +1845,8 @@ private struct WebDAVChannelView: View {
     /// 读取配置中的 WebDAV 起始目录。
     private func loadInitialDirectory() async {
         guard directoryStack.isEmpty,
-              let server = profile.serverURL,
-              let url = URL(
-                  string: profile.rootPath ?? "/",
-                  relativeTo: server.appendingPathComponent("")
-              )?.absoluteURL else { return }
+              let server = profile.serverURL else { return }
+        let url = webDAVDirectoryURL(server: server, rootPath: profile.rootPath ?? "/")
         directoryStack = [(url, profile.name)]
         await load(url)
     }

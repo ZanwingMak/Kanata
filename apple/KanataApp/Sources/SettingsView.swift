@@ -551,37 +551,42 @@ struct SettingsView: View {
 
     /// 使用电视侧栏和手机分类网格承载同一组配置，不复制设置逻辑。
     @ViewBuilder
-    private func settingsLayout<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    private func settingsLayout<Content: View>(@ViewBuilder content: @escaping () -> Content) -> some View {
         #if os(tvOS)
-        HStack(alignment: .top, spacing: 56) {
-            VStack(alignment: .leading, spacing: 30) {
-                Text("你的 Kanata")
-                    .font(.system(size: 42, weight: .bold))
-                VStack(spacing: 12) {
-                    ForEach(SettingsCategory.allCases) { category in
-                        categoryButton(category)
+        GeometryReader { geometry in
+            let viewportHeight = max(0, geometry.size.height - 80)
+            HStack(alignment: .top, spacing: 56) {
+                VStack(alignment: .leading, spacing: 30) {
+                    Text("你的 Kanata")
+                        .font(.system(size: 42, weight: .bold))
+                    VStack(spacing: 12) {
+                        ForEach(SettingsCategory.allCases) { category in
+                            categoryButton(category)
+                        }
                     }
+                    Spacer()
+                    Text("KANATA / SETTINGS")
+                        .font(.caption2.weight(.medium))
+                        .tracking(3)
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer()
-                Text("KANATA / SETTINGS")
-                    .font(.caption2.weight(.medium))
-                    .tracking(3)
-                    .foregroundStyle(.tertiary)
+                .frame(width: 330, height: viewportHeight, alignment: .topLeading)
+                .focusSection()
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(selectedCategory.rawValue).font(.title2.bold())
+                    Text(selectedCategory.detail).font(.callout).foregroundStyle(.secondary)
+                    content()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .focusSection()
+                }
+                .padding(.top, 8)
+                .frame(height: viewportHeight, alignment: .top)
             }
-            .frame(width: 330)
-            .focusSection()
-            VStack(alignment: .leading, spacing: 14) {
-                Text(selectedCategory.rawValue).font(.title2.bold())
-                Text(selectedCategory.detail).font(.callout).foregroundStyle(.secondary)
-                content()
-                    .frame(maxWidth: .infinity)
-                    .focusSection()
-            }
-            .padding(.top, 8)
+            .padding(.horizontal, 80)
+            .padding(.top, 36)
+            .padding(.bottom, 44)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
-        .padding(.horizontal, 80)
-        .padding(.top, 36)
-        .padding(.bottom, 44)
         #else
         VStack(spacing: 0) {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 106), spacing: 8)], spacing: 8) {
