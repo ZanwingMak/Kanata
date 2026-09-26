@@ -293,37 +293,47 @@ private struct KanataFloatingSurface: ViewModifier {
 
 /// 电视设置使用固定内边距的分组滚动布局，避免系统 Form 随焦点横移和放大。
 struct KanataSettingsForm<Content: View>: View {
+    var initialScrollTarget: String? = nil
     @ViewBuilder let content: Content
 
     var body: some View {
         #if os(tvOS)
         if #available(tvOS 18.0, *) {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 28) {
-                    ForEach(sections: content) { section in
-                        VStack(alignment: .leading, spacing: 12) {
-                            section.header
-                                .font(.system(size: 23, weight: .medium))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 16)
-                            ForEach(section.content) { row in
-                                row
-                                    .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 28) {
+                        ForEach(sections: content) { section in
+                            VStack(alignment: .leading, spacing: 12) {
+                                section.header
+                                    .font(.system(size: 23, weight: .medium))
                                     .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                    .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+                                    .foregroundStyle(.secondary)
+                                ForEach(section.content) { row in
+                                    row
+                                        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 8)
+                                        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+                                }
+                                section.footer
+                                    .font(.system(size: 21))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 16)
                             }
-                            section.footer
-                                .font(.system(size: 21))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 16)
                         }
                     }
+                    .font(.system(size: 27))
+                    .padding(.horizontal, 24)
+                    .padding(.top, 24)
+                    .padding(.bottom, 100)
                 }
-                .font(.system(size: 27))
-                .padding(.horizontal, 24)
-                .padding(.top, 24)
-                .padding(.bottom, 100)
+                .onAppear {
+                    guard let initialScrollTarget else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        proxy.scrollTo(initialScrollTarget, anchor: .top)
+                    }
+                }
             }
         } else {
             Form { content }.padding(.horizontal, 24)

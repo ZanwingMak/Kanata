@@ -144,7 +144,8 @@ struct LibraryView: View {
                 || item.displayName.localizedCaseInsensitiveContains(query)
                 || item.subtitle.localizedCaseInsensitiveContains(query)
             let hidesEpisodeFromDefaultGrid = query.isEmpty
-                && filterMode != .collection
+                && filterMode == .all
+                && sortMode == .added
                 && item.collectionID != nil
             return matchesFilter && matchesQuery && !hidesEpisodeFromDefaultGrid
         }
@@ -202,6 +203,51 @@ struct LibraryView: View {
         return filteredItems.contains { !recentIDs.contains($0.id) }
     }
 
+    /// 搜索、筛选或排序生效时显示明确的结果状态与恢复入口。
+    private var isLibraryRefined: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || filterMode != .all
+            || sortMode != .added
+    }
+
+    /// 清除首页搜索和整理条件，恢复默认媒体库视图。
+    private func clearLibraryRefinement() {
+        searchText = ""
+        filterMode = .all
+        sortMode = .added
+    }
+
+    /// 汇总正在生效的查询条件，避免用户不清楚结果为何变少。
+    private var libraryRefinementSummary: String {
+        var parts: [String] = []
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty { parts.append("搜索“\(query)”") }
+        if filterMode != .all { parts.append(filterMode.title) }
+        if sortMode != .added { parts.append("按\(sortMode.title)") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// 在结果列表上方展示条件和始终可见的恢复默认入口。
+    private var libraryRefinementBar: some View {
+        HStack(spacing: 16) {
+            Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                .foregroundStyle(KanataTheme.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("已筛选 · \(filteredItems.count) 个结果")
+                    .font(.headline)
+                Text(libraryRefinementSummary)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 12)
+            Button("恢复全部", action: clearLibraryRefinement)
+                .buttonStyle(KanataSecondaryButtonStyle())
+        }
+        .padding(20)
+        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22))
+    }
+
     /// 把媒体库中带合集标识的条目聚合为剧集卡片。
     private var mediaCollections: [MediaCollection] {
         _ = progressRevision
@@ -225,7 +271,7 @@ struct LibraryView: View {
             .max { $0.1 < $1.1 }
             return MediaCollection(
                 id: id,
-                title: first.collectionTitle ?? first.title,
+                title: first.libraryTitle,
                 items: allSorted,
                 nextItem: resumable?.0 ?? active.first ?? first,
                 hasResumeProgress: resumable != nil
@@ -270,25 +316,28 @@ struct LibraryView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: librarySectionSpacing) {
+                                if isLibraryRefined {
+                                    libraryRefinementBar
+                                }
                                 #if os(tvOS)
-                                if searchText.isEmpty, let item = featuredItem {
+                                if !isLibraryRefined, let item = featuredItem {
                                     tvFeaturedCard(item)
                                 }
                                 #endif
-                                if !mediaSources.isEmpty {
+                                if !isLibraryRefined && !mediaSources.isEmpty {
                                     sourceChannels
                                 }
-                                if !continueWatchingItems.isEmpty {
+                                if !isLibraryRefined && !continueWatchingItems.isEmpty {
                                     continueWatchingSection
                                 }
-                                if !recentlyAddedEntries.isEmpty && searchText.isEmpty {
+                                if !isLibraryRefined && !recentlyAddedEntries.isEmpty {
                                     recentlyAddedSection
                                         .id("recently-added")
                                 }
-                                if !favoriteItems.isEmpty && searchText.isEmpty {
+                                if !isLibraryRefined && !favoriteItems.isEmpty {
                                     favoritesSection
                                 }
-                                if !mediaCollections.isEmpty && searchText.isEmpty {
+                                if !isLibraryRefined && !mediaCollections.isEmpty {
                                     collectionSection
                                 }
                                 if !filteredItems.isEmpty && showsSeparateVideoGrid {
@@ -305,6 +354,12 @@ struct LibraryView: View {
                                             mediaCard(item)
                                         }
                                     }
+                                } else if isLibraryRefined && filteredItems.isEmpty {
+                                    ContentUnavailableView(
+                                        "没有符合条件的视频",
+                                        systemImage: "line.3.horizontal.decrease.circle",
+                                        description: Text("调整条件，或选择“恢复全部”查看完整媒体库。")
+                                    )
                                 }
                             }
                             .frame(maxWidth: libraryContentMaxWidth, alignment: .leading)
@@ -587,22 +642,41 @@ struct LibraryView: View {
             .focused($tvFocusedControl, equals: .settings)
             .onMoveCommand(perform: moveFromTVHeader)
             Button { isSearching = true } label: {
-                Label("搜索", systemImage: "magnifyingglass")
+                HStack(spacing: 14) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 24, weight: .semibold))
+                    Text(searchText.isEmpty ? "搜索影片、剧集" : searchText)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if !searchText.isEmpty {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                }
+                .frame(width: 330, alignment: .leading)
             }
-            .buttonStyle(KanataTVActionButtonStyle())
+            .buttonStyle(TVLibrarySearchButtonStyle())
             .focused($tvFocusedControl, equals: .search)
             .onMoveCommand(perform: moveFromTVHeader)
             .disabled(items.isEmpty && mediaSources.isEmpty)
             Menu {
-                Picker("筛选", selection: $filterMode) {
+                Section("筛选") {
                     ForEach(LibraryFilterMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        Button { filterMode = mode } label: {
+                            if filterMode == mode { Label(mode.title, systemImage: "checkmark") }
+                            else { Text(mode.title) }
+                        }
                     }
                 }
-                Picker("排序", selection: $sortMode) {
+                Section("排序") {
                     ForEach(LibrarySortMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        Button { sortMode = mode } label: {
+                            if sortMode == mode { Label(mode.title, systemImage: "checkmark") }
+                            else { Text(mode.title) }
+                        }
                     }
+                }
+                if isLibraryRefined {
+                    Button("恢复全部", action: clearLibraryRefinement)
                 }
             } label: {
                 Label("整理", systemImage: "arrow.up.arrow.down")
@@ -1434,6 +1508,29 @@ private extension View {
 }
 
 #if os(tvOS)
+/// Apple TV 首页搜索框区分输入入口与其它工具按钮，聚焦时保持高对比度。
+private struct TVLibrarySearchButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) private var isFocused
+
+    /// 绘制尺寸稳定的搜索入口，避免焦点材质覆盖文字。
+    /// - Parameter configuration: 按钮当前状态。
+    /// - Returns: 横向搜索框样式。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 24, weight: .medium))
+            .foregroundStyle(isFocused ? Color.black : Color.white.opacity(0.84))
+            .padding(.horizontal, 22)
+            .frame(height: 60)
+            .background(isFocused ? Color.white : KanataTheme.surface, in: RoundedRectangle(cornerRadius: 18))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18)
+                    .strokeBorder(isFocused ? KanataTheme.accent : .white.opacity(0.12), lineWidth: isFocused ? 3 : 1)
+            }
+            .focusEffectDisabled()
+            .opacity(configuration.isPressed ? 0.75 : 1)
+    }
+}
+
 /// Apple TV 媒体库搜索面板，仅在用户主动点击搜索后显示键盘。
 private struct TVLibrarySearchSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -1451,17 +1548,12 @@ private struct TVLibrarySearchSheet: View {
     var body: some View {
         ZStack {
             KanataAmbientBackground()
-            VStack(alignment: .leading, spacing: 30) {
+            VStack(alignment: .leading, spacing: 28) {
                 HStack(alignment: .top, spacing: 24) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 38, weight: .medium))
-                        .foregroundStyle(KanataTheme.accent)
-                        .frame(width: 72, height: 72)
-                        .background(KanataTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 20))
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("搜索媒体库")
-                            .font(.system(size: 38, weight: .bold))
-                        Text("按标题、文件名或集数查找")
+                        Text("查找你的影片")
+                            .font(.system(size: 36, weight: .bold))
+                        Text("搜索标题、文件名或集数")
                             .font(.title3)
                             .foregroundStyle(.secondary)
                     }
@@ -1500,9 +1592,10 @@ private struct TVLibrarySearchSheet: View {
                 }
                 .focusSection()
             }
-            .padding(42)
-            .frame(maxWidth: 1080)
-            .kanataGlassSurface(cornerRadius: 32, isElevated: true)
+            .padding(38)
+            .frame(maxWidth: 860)
+            .background(Color(red: 0.055, green: 0.065, blue: 0.085).opacity(0.96), in: RoundedRectangle(cornerRadius: 28))
+            .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(.white.opacity(0.16), lineWidth: 1) }
             .padding(.horizontal, 80)
         }
         .onAppear { focusSearchField() }
@@ -1799,8 +1892,16 @@ struct LibraryItem: Identifiable, Codable, Hashable {
     /// 首页和历史记录使用的作品标题；合集条目不再直接展示冗长文件名。
     var libraryTitle: String {
         let collection = collectionTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !collection.isEmpty { return collection }
         let parsedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let seasonOnly = collection.range(
+            of: #"(?i)^(?:season|series|s)\s*0*\d{1,3}$|^第?\s*0*\d{1,3}\s*[季期部]$|^(?:specials?|ova|oad|sp|特别篇|特別篇)$"#,
+            options: .regularExpression
+        ) != nil
+        if seasonOnly, !parsedTitle.isEmpty,
+           parsedTitle.caseInsensitiveCompare(collection) != .orderedSame {
+            return "\(parsedTitle) · \(collection)"
+        }
+        if !collection.isEmpty { return collection }
         return parsedTitle.isEmpty ? displayName : parsedTitle
     }
 

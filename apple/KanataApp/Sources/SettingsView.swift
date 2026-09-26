@@ -751,12 +751,30 @@ struct SettingsView: View {
     private var storageSection: some View {
         @Bindable var settings = settings
         return Section("弹幕存储") {
+            #if os(tvOS)
+            Menu {
+                ForEach([100, 250, 500, 1_024], id: \.self) { limit in
+                    Button {
+                        settings.onlineDanmakuCacheLimitMB = limit
+                    } label: {
+                        if settings.onlineDanmakuCacheLimitMB == limit {
+                            Label(cacheLimitLabel(limit), systemImage: "checkmark")
+                        } else {
+                            Text(cacheLimitLabel(limit))
+                        }
+                    }
+                }
+            } label: {
+                LabeledContent("在线缓存上限", value: cacheLimitLabel(settings.onlineDanmakuCacheLimitMB))
+            }
+            #else
             Picker("在线缓存上限", selection: $settings.onlineDanmakuCacheLimitMB) {
                 Text("100 MB").tag(100)
                 Text("250 MB").tag(250)
                 Text("500 MB").tag(500)
                 Text("1 GB").tag(1_024)
             }
+            #endif
             LabeledContent("在线缓存") {
                 Text(storageLabel(onlineCacheUsage))
                     .foregroundStyle(.secondary)
@@ -777,6 +795,13 @@ struct SettingsView: View {
                 Text(storageResult).font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// 把缓存容量选项显示为不截断的短标签。
+    /// - Parameter limit: 缓存上限，单位为 MB。
+    /// - Returns: 面板中的容量文案。
+    private func cacheLimitLabel(_ limit: Int) -> String {
+        limit == 1_024 ? "1 GB" : "\(limit) MB"
     }
 
     /// 把存储统计拼成稳定的简短文案。

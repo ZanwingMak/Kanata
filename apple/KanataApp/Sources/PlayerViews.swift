@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 struct TVPlayerPanelHeader: View {
     let title: String
     let onClose: () -> Void
+    var autofocus = true
     @FocusState private var isCloseFocused: Bool
 
     var body: some View {
@@ -35,6 +36,7 @@ struct TVPlayerPanelHeader: View {
 
     /// 抽屉展开后接管焦点，向下即可进入设置列表。
     private func focusCloseButton() {
+        guard autofocus else { return }
         Task { @MainActor in
             await Task.yield()
             isCloseFocused = true

@@ -74,7 +74,7 @@ struct MediaImportPreview: View {
             let id = groupID(for: candidate)
             if values[id] == nil { order.append(id) }
             values[id, default: []].append(candidate)
-            titles[id] = resolvedGroupTitle(candidate.item.collectionTitle ?? "单个视频")
+            titles[id] = resolvedGroupTitle(candidate.item.collectionTitle ?? "单个视频", item: candidate.item)
         }
         return order.map { id in
             MediaImportGroup(id: id, title: titles[id] ?? "单个视频", items: values[id] ?? [])
@@ -437,10 +437,13 @@ struct MediaImportPreview: View {
     }
 
     /// 生成不会在媒体库丢失作品上下文的分组展示标题。
-    /// - Parameter rawTitle: 原始目录或媒体服务器分组名称。
+    /// - Parameters:
+    ///   - rawTitle: 原始目录或媒体服务器分组名称。
+    ///   - item: 可提供剧名线索的分组条目。
     /// - Returns: 季度目录继承作品名后的标题；其他目录保持原名。
-    private func resolvedGroupTitle(_ rawTitle: String) -> String {
-        let rootTitle = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func resolvedGroupTitle(_ rawTitle: String, item: LibraryItem? = nil) -> String {
+        let itemTitle = item?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rootTitle = itemTitle.isEmpty ? draft.title.trimmingCharacters(in: .whitespacesAndNewlines) : itemTitle
         let groupTitle = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !rootTitle.isEmpty,
               rootTitle.caseInsensitiveCompare(groupTitle) != .orderedSame,
@@ -551,7 +554,7 @@ struct MediaImportPreview: View {
                 return values.enumerated().map { offset, item in
                     item.assigningCollection(
                         id: item.collectionID,
-                        title: resolvedGroupTitle(item.collectionTitle ?? draft.title),
+                        title: resolvedGroupTitle(item.collectionTitle ?? draft.title, item: item),
                         index: offset + 1
                     )
                 }

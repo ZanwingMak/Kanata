@@ -878,21 +878,23 @@ private struct TVPlayerEpisodeShelf: View {
                             } label: {
                                 episodeCard(item: item, offset: offset)
                             }
-                            .buttonStyle(.plain)
-                            .kanataTVFocus(cornerRadius: 20)
+                            .buttonStyle(TVPlayerActionButtonStyle())
                             .focused($focusedItemID, equals: item.id)
                         }
                     }
                     .padding(.horizontal, 8)
                     .padding(.vertical, 10)
                 }
+                .frame(height: 138)
                 .scrollIndicators(.hidden)
-                .scrollClipDisabled()
             }
             .padding(.horizontal, 54)
             .padding(.top, 28)
             .padding(.bottom, 32)
-            .playerGlassSurface(cornerRadius: 30, tint: Color.black.opacity(0.30))
+            .background(Color(red: 0.055, green: 0.065, blue: 0.085).opacity(0.94), in: RoundedRectangle(cornerRadius: 30))
+            .overlay {
+                RoundedRectangle(cornerRadius: 30).strokeBorder(.white.opacity(0.16), lineWidth: 1)
+            }
             .shadow(color: .black.opacity(0.30), radius: 28, y: 14)
             .padding(.horizontal, 38)
             .padding(.bottom, 26)
@@ -914,7 +916,8 @@ private struct TVPlayerEpisodeShelf: View {
     ///   - offset: 条目在列表中的位置。
     /// - Returns: 固定电视阅读距离的分集卡片。
     private func episodeCard(item: LibraryItem, offset: Int) -> some View {
-        HStack(spacing: 16) {
+        let isFocused = focusedItemID == item.id
+        return HStack(spacing: 16) {
             ZStack {
                 episodeArtwork(item)
                 Text("\(item.episode ?? item.collectionIndex ?? offset + 1)")
@@ -931,20 +934,24 @@ private struct TVPlayerEpisodeShelf: View {
                     .lineLimit(1)
                 Text(item.libraryTitle)
                     .font(.callout)
-                    .foregroundStyle(.white.opacity(0.72))
+                    .foregroundStyle(isFocused ? Color.black.opacity(0.68) : Color.white.opacity(0.72))
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     Image(systemName: item.id == currentItemID ? "speaker.wave.2.fill" : "play.fill")
                     Text(item.id == currentItemID ? "正在播放" : "播放此集")
                 }
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(item.id == currentItemID ? KanataTheme.accent : .white.opacity(0.58))
+                .foregroundStyle(isFocused ? Color.black.opacity(0.72) : item.id == currentItemID ? KanataTheme.accent : .white.opacity(0.58))
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(isFocused ? Color.black : Color.white)
         .frame(width: 344, alignment: .leading)
         .padding(12)
-        .background(.white.opacity(item.id == currentItemID ? 0.14 : 0.07), in: RoundedRectangle(cornerRadius: 20))
+        .background(isFocused ? Color.white : Color.white.opacity(item.id == currentItemID ? 0.18 : 0.08), in: RoundedRectangle(cornerRadius: 20))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20)
+                .strokeBorder(isFocused ? KanataTheme.accent : .white.opacity(item.id == currentItemID ? 0.34 : 0.10), lineWidth: isFocused ? 3 : 1)
+        }
     }
 
     /// 返回分集海报；没有海报时使用主题渐变占位图。
@@ -1031,6 +1038,7 @@ struct PlayerScreen: View {
     @State private var isShowingControls = true
     @State private var isShowingDanmakuPanel = false
     @State private var isShowingPlaybackPanel = false
+    @State private var playbackPanelStartsAtSubtitles = false
     @State private var isShowingPlaylist = false
     @State private var isPlaying = false
     @State private var currentTime: Double = 0
@@ -1353,6 +1361,7 @@ struct PlayerScreen: View {
     private func playbackOptionsPanel(onDismissPanel: (() -> Void)?) -> some View {
         PlaybackOptionsPanel(
             viewModel: viewModel,
+            startsAtSubtitles: playbackPanelStartsAtSubtitles,
             scalingMode: $scalingMode,
             queueMode: $queueMode,
             sleepMode: $sleepMode,
@@ -1830,7 +1839,7 @@ struct PlayerScreen: View {
                 .accessibilityLabel("选择分集")
             }
 
-            Button(action: presentPlaybackOptions) {
+            Button(action: presentSubtitleOptions) {
                 TVPlayerActionLabel(
                     symbol: "captions.bubble.fill",
                     title: "字幕",
@@ -1956,7 +1965,7 @@ struct PlayerScreen: View {
                     onCycleRate: cycleTVPlaybackRate,
                     onCycleScaling: cycleTVScalingMode,
                     onRestart: restartFromTVQuickSettings,
-                    onOpenSubtitles: openPlaybackOptionsFromTVQuickSettings,
+                    onOpenSubtitles: openSubtitleOptionsFromTVQuickSettings,
                     onOpenSettings: openPlaybackOptionsFromTVQuickSettings
                 )
             }
@@ -2593,6 +2602,16 @@ struct PlayerScreen: View {
     private func presentPlaybackOptions() {
         controlsTask?.cancel()
         isShowingTVQuickSettings = false
+        playbackPanelStartsAtSubtitles = false
+        isShowingPlaybackPanel = true
+        tvFocusedControl = nil
+    }
+
+    /// 直接聚焦播放设置中的字幕中心，避免字幕按钮落在播放分区。
+    private func presentSubtitleOptions() {
+        controlsTask?.cancel()
+        isShowingTVQuickSettings = false
+        playbackPanelStartsAtSubtitles = true
         isShowingPlaybackPanel = true
         tvFocusedControl = nil
     }
@@ -2656,6 +2675,11 @@ struct PlayerScreen: View {
     /// 从头播放并收起轻量设置浮层。
     private func restartFromTVQuickSettings() {
         commitSeek(to: 0)
+        if !isPlaying {
+            viewModel.play()
+            isPlaying = true
+            canvasBridge.sync(time: 0, rate: viewModel.playbackRate)
+        }
         showOSD("已从头播放")
         dismissTVQuickSettings()
     }
@@ -2664,6 +2688,12 @@ struct PlayerScreen: View {
     private func openPlaybackOptionsFromTVQuickSettings() {
         isShowingTVQuickSettings = false
         presentPlaybackOptions()
+    }
+
+    /// 从快捷菜单直达字幕设置区域。
+    private func openSubtitleOptionsFromTVQuickSettings() {
+        isShowingTVQuickSettings = false
+        presentSubtitleOptions()
     }
 
     /// 控件隐藏时响应遥控器中间确认键，切换播放状态并显示控制层。
@@ -4935,6 +4965,7 @@ private struct SubtitleCenterView: View {
 /// 播放器二级控制面板，集中放置低频但重要的画面、音轨、字幕与媒体信息。
 struct PlaybackOptionsPanel: View {
     let viewModel: PlayerViewModel
+    let startsAtSubtitles: Bool
     @Environment(AppSettings.self) private var settings
     @Binding var scalingMode: PlayerScalingMode
     @Binding var queueMode: PlaybackQueueMode
@@ -4972,21 +5003,30 @@ struct PlaybackOptionsPanel: View {
     let onPictureInPicture: () -> Void
     let onDismissPanel: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
+    @FocusState private var routeEntryFocused: Bool
+    @FocusState private var subtitleEntryFocused: Bool
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 #if os(tvOS)
-                TVPlayerPanelHeader(title: "播放设置", onClose: closePanel)
+                TVPlayerPanelHeader(title: "播放设置", onClose: closePanel, autofocus: false)
                 #endif
-            KanataSettingsForm {
+            KanataSettingsForm(initialScrollTarget: startsAtSubtitles ? "subtitle-center" : nil) {
                 Section("播放") {
-                    NavigationLink {
-                        PlaybackRouteSelectionView(
-                            selection: playbackRouteMode,
-                            isCompatibilityAvailable: isCompatibilityAvailable,
-                            onSelect: onSelectPlaybackRoute
-                        )
+                    Menu {
+                        ForEach(PlaybackRouteMode.allCases) { mode in
+                            Button {
+                                onSelectPlaybackRoute(mode)
+                            } label: {
+                                if playbackRouteMode == mode {
+                                    Label(mode.title, systemImage: "checkmark")
+                                } else {
+                                    Text(mode.title)
+                                }
+                            }
+                            .disabled(mode == .compatible && !isCompatibilityAvailable)
+                        }
                     } label: {
                         LabeledContent("播放路径", value: playbackPathLabel)
                             .frame(maxWidth: .infinity, minHeight: 58)
@@ -4994,8 +5034,19 @@ struct PlaybackOptionsPanel: View {
                     }
                     .kanataDirectoryRowStyle(cornerRadius: 12)
                     .listRowBackground(Color.clear)
-                    NavigationLink {
-                        PlaybackRateSelectionView(viewModel: viewModel)
+                    .focused($routeEntryFocused)
+                    Menu {
+                        ForEach([0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4], id: \.self) { rate in
+                            Button {
+                                viewModel.setPlaybackRate(rate)
+                            } label: {
+                                if abs(viewModel.playbackRate - rate) < 0.001 {
+                                    Label(playbackRateLabel(rate), systemImage: "checkmark")
+                                } else {
+                                    Text(playbackRateLabel(rate))
+                                }
+                            }
+                        }
                     } label: {
                         LabeledContent("播放速度", value: playbackRateLabel(viewModel.playbackRate))
                             .frame(maxWidth: .infinity, minHeight: 58)
@@ -5003,6 +5054,38 @@ struct PlaybackOptionsPanel: View {
                     }
                     .kanataDirectoryRowStyle(cornerRadius: 12)
                     .listRowBackground(Color.clear)
+                    #if os(tvOS)
+                    Menu {
+                        ForEach(PlaybackQueueMode.allCases) { mode in
+                            Button { queueMode = mode } label: {
+                                if queueMode == mode { Label(mode.title, systemImage: "checkmark") }
+                                else { Text(mode.title) }
+                            }
+                        }
+                    } label: {
+                        LabeledContent("连播方式", value: queueMode.title)
+                    }
+                    Menu {
+                        ForEach(SleepTimerMode.allCases) { mode in
+                            Button { sleepMode = mode } label: {
+                                if sleepMode == mode { Label(mode.title, systemImage: "checkmark") }
+                                else { Text(mode.title) }
+                            }
+                        }
+                    } label: {
+                        LabeledContent("睡眠定时器", value: sleepMode.title)
+                    }
+                    Menu {
+                        ForEach(PlayerScalingMode.allCases) { mode in
+                            Button { scalingMode = mode } label: {
+                                if scalingMode == mode { Label(mode.title, systemImage: "checkmark") }
+                                else { Text(mode.title) }
+                            }
+                        }
+                    } label: {
+                        LabeledContent("画面比例", value: scalingMode.title)
+                    }
+                    #else
                     Picker("连播方式", selection: $queueMode) {
                         ForEach(PlaybackQueueMode.allCases) { mode in
                             Text(mode.title).tag(mode)
@@ -5019,6 +5102,7 @@ struct PlaybackOptionsPanel: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    #endif
                 }
 
                 Section("片头与片尾") {
@@ -5041,6 +5125,24 @@ struct PlaybackOptionsPanel: View {
 
                 if !viewModel.audioTracks.isEmpty {
                     Section("音轨") {
+                        #if os(tvOS)
+                        Menu {
+                            ForEach(viewModel.audioTracks) { track in
+                                Button { viewModel.selectAudioTrack(id: track.id) } label: {
+                                    if viewModel.selectedAudioTrackID == track.id {
+                                        Label(track.title, systemImage: "checkmark")
+                                    } else {
+                                        Text(track.title)
+                                    }
+                                }
+                            }
+                        } label: {
+                            LabeledContent(
+                                "当前音轨",
+                                value: viewModel.audioTracks.first(where: { $0.id == viewModel.selectedAudioTrackID })?.title ?? "自动"
+                            )
+                        }
+                        #else
                         Picker(
                             "当前音轨",
                             selection: Binding(
@@ -5052,10 +5154,29 @@ struct PlaybackOptionsPanel: View {
                                 Text(track.title).tag(Optional(track.id))
                             }
                         }
+                        #endif
                     }
                 }
 
                 Section("字幕") {
+                    #if os(tvOS)
+                    Menu {
+                        ForEach(viewModel.subtitleTracks) { track in
+                            Button { viewModel.selectSubtitleTrack(id: track.id) } label: {
+                                if viewModel.selectedSubtitleTrackID == track.id {
+                                    Label(track.title, systemImage: "checkmark")
+                                } else {
+                                    Text(track.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        LabeledContent(
+                            "内封字幕",
+                            value: viewModel.subtitleTracks.first(where: { $0.id == viewModel.selectedSubtitleTrackID })?.title ?? "关闭"
+                        )
+                    }
+                    #else
                     Picker(
                         "内封字幕",
                         selection: Binding(
@@ -5067,6 +5188,7 @@ struct PlaybackOptionsPanel: View {
                             Text(track.title).tag(track.id)
                         }
                     }
+                    #endif
                     NavigationLink {
                         SubtitleCenterView(
                             searchTitle: subtitleSearchTitle,
@@ -5094,6 +5216,8 @@ struct PlaybackOptionsPanel: View {
                     }
                     .kanataDirectoryRowStyle(cornerRadius: 12)
                     .listRowBackground(Color.clear)
+                    .focused($subtitleEntryFocused)
+                    .id("subtitle-center")
                     #if !os(tvOS)
                     Button(action: onImportSubtitle) {
                         Label("导入 SRT / VTT / ASS / SSA", systemImage: "captions.bubble")
@@ -5115,10 +5239,15 @@ struct PlaybackOptionsPanel: View {
                             ))
                         }
                         #else
-                        LabeledContent(
-                            "字幕延迟",
-                            value: String(format: "%@%.1f 秒", externalSubtitleOffset >= 0 ? "+" : "", externalSubtitleOffset)
-                        )
+                        HStack {
+                            Text("字幕延迟")
+                            Spacer()
+                            Button("−0.1 秒") { externalSubtitleOffset = max(-30, externalSubtitleOffset - 0.1) }
+                            Button("归零") { externalSubtitleOffset = 0 }
+                            Button("+0.1 秒") { externalSubtitleOffset = min(30, externalSubtitleOffset + 0.1) }
+                            Text(String(format: "%@%.1f 秒", externalSubtitleOffset >= 0 ? "+" : "", externalSubtitleOffset))
+                                .monospacedDigit()
+                        }
                         #endif
                     }
                 }
@@ -5181,7 +5310,22 @@ struct PlaybackOptionsPanel: View {
             #endif
             }
             .background(KanataTheme.background.opacity(0.96))
+            #if os(tvOS)
+            .onAppear(perform: focusInitialSubtitleEntry)
+            #endif
     }
+    }
+
+    /// 字幕按钮打开设置时把电视焦点送到字幕中心，系统随焦点滚动至对应分区。
+    private func focusInitialSubtitleEntry() {
+        Task { @MainActor in
+            await Task.yield()
+            if startsAtSubtitles {
+                subtitleEntryFocused = true
+            } else {
+                routeEntryFocused = true
+            }
+        }
     }
 
     /// 根据当前承载方式关闭系统 Sheet 或 tvOS 右侧抽屉。
@@ -5218,94 +5362,6 @@ struct PlaybackOptionsPanel: View {
     /// - Parameter rate: 当前播放倍率。
     /// - Returns: 1 倍显示“正常”，其他倍率显示数字与乘号。
     private func playbackRateLabel(_ rate: Double) -> String {
-        abs(rate - 1) < 0.001 ? "正常" : "\(rate.formatted())×"
-    }
-}
-
-/// 使用独立页面选择播放路径，并说明直放与服务器兼容流的区别。
-private struct PlaybackRouteSelectionView: View {
-    let selection: PlaybackRouteMode
-    let isCompatibilityAvailable: Bool
-    let onSelect: (PlaybackRouteMode) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        List(PlaybackRouteMode.allCases) { mode in
-            Button {
-                onSelect(mode)
-                dismiss()
-            } label: {
-                HStack(spacing: 14) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(mode.title)
-                            .foregroundStyle(.primary)
-                        Text(routeDetail(for: mode))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if selection == mode {
-                        Image(systemName: "checkmark")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.tint)
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .contentShape(Rectangle())
-            }
-            .disabled(mode == .compatible && !isCompatibilityAvailable)
-            .kanataTVFocus(cornerRadius: 12)
-        }
-        .navigationTitle("播放路径")
-        .kanataInlineNavigationTitle()
-    }
-
-    /// 为不可用的兼容流补充明确原因。
-    /// - Parameter mode: 当前播放路径选项。
-    /// - Returns: 可直接显示在选项下方的说明。
-    private func routeDetail(for mode: PlaybackRouteMode) -> String {
-        if mode == .compatible, !isCompatibilityAvailable {
-            return "当前来源不支持；仅媒体服务器条目可用"
-        }
-        return mode.detail
-    }
-}
-
-/// 使用独立页面选择播放倍速，避免弹窗内菜单偶发失焦。
-private struct PlaybackRateSelectionView: View {
-    let viewModel: PlayerViewModel
-    @Environment(\.dismiss) private var dismiss
-    private let rates: [Double] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
-
-    var body: some View {
-        List(rates, id: \.self) { rate in
-            Button {
-                viewModel.setPlaybackRate(rate)
-                dismiss()
-            } label: {
-                HStack {
-                    Text(rateLabel(rate))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    if abs(viewModel.playbackRate - rate) < 0.001 {
-                        Image(systemName: "checkmark")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.tint)
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(Rectangle())
-            }
-            .kanataTVFocus(cornerRadius: 12)
-        }
-        .navigationTitle("播放速度")
-        .kanataInlineNavigationTitle()
-    }
-
-    /// 把候选倍率转换为用户可读的单选项文案。
-    /// - Parameter rate: 候选播放倍率。
-    /// - Returns: 1 倍显示“正常”，其他倍率显示数字与乘号。
-    private func rateLabel(_ rate: Double) -> String {
         abs(rate - 1) < 0.001 ? "正常" : "\(rate.formatted())×"
     }
 }
