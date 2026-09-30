@@ -74,25 +74,28 @@ struct MediaSourceSheet: View {
     @State private var importError: String?
     @State private var pendingImport: MediaImportDraft?
 
-    /// 创建媒体源入口；Apple TV 可复用首页导航栈以获得完整页面式流程。
+    /// 创建媒体源入口；Apple TV 从首页连接卡片进入时仍保留连接列表作为返回层级。
     /// - Parameters:
     ///   - onAdd: 无需导入预览的单视频添加回调。
     ///   - onImport: 经过确认导入页的媒体条目回调。
     ///   - onReturnHome: 导入完成后返回媒体库首页的回调。
     ///   - onSourcesChanged: 历史媒体源变化后的刷新回调。
     ///   - usesParentNavigation: 是否由外层 NavigationStack 管理返回层级。
+    ///   - initiallyBrowsingProfile: 首次进入时要打开的已有连接。
     init(
         onAdd: @escaping ([LibraryItem]) -> Void,
         onImport: @escaping ([LibraryItem]) -> Void,
         onReturnHome: @escaping () -> Void,
         onSourcesChanged: @escaping () -> Void,
-        usesParentNavigation: Bool = false
+        usesParentNavigation: Bool = false,
+        initiallyBrowsingProfile: MediaSourceProfile? = nil
     ) {
         self.onAdd = onAdd
         self.onImport = onImport
         self.onReturnHome = onReturnHome
         self.onSourcesChanged = onSourcesChanged
         self.usesParentNavigation = usesParentNavigation
+        _browsingProfile = State(initialValue: initiallyBrowsingProfile)
     }
 
     @ViewBuilder

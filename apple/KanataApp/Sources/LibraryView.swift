@@ -75,6 +75,9 @@ struct LibraryView: View {
     @State private var isSearching = false
     @State private var mediaSources = MediaSourceProfileStore.load()
     @State private var browsingSource: MediaSourceProfile?
+    #if os(tvOS)
+    @State private var sourceToOpenFromHome: MediaSourceProfile?
+    #endif
     @State private var progressRevision = 0
     @State private var sourceHealth: [String: MediaSourceHealth] = [:]
     @State private var filterMode = LibraryFilterMode.all
@@ -544,22 +547,12 @@ struct LibraryView: View {
                     onImport: addImportedMediaSourceItems,
                     onReturnHome: returnToLibraryAfterAddingSource,
                     onSourcesChanged: reloadMediaSources,
-                    usesParentNavigation: true
+                    usesParentNavigation: true,
+                    initiallyBrowsingProfile: sourceToOpenFromHome
                 )
             }
-            .navigationDestination(
-                isPresented: Binding(
-                    get: { browsingSource != nil },
-                    set: { if !$0 { browsingSource = nil } }
-                )
-            ) {
-                if let profile = browsingSource {
-                    MediaSourceChannelView(
-                        profile: profile,
-                        onAdd: addImportedMediaSourceItems,
-                        onReturnHome: returnToLibraryAfterAddingSource
-                    )
-                }
+            .onChange(of: isAddingMediaSource) { _, isPresented in
+                if !isPresented { sourceToOpenFromHome = nil }
             }
             #else
             .sheet(isPresented: $isShowingSettings) {
@@ -968,7 +961,12 @@ struct LibraryView: View {
                 LazyHStack(spacing: 12) {
                     ForEach(mediaSources) { profile in
                         Button {
+                            #if os(tvOS)
+                            sourceToOpenFromHome = profile
+                            isAddingMediaSource = true
+                            #else
                             browsingSource = profile
+                            #endif
                         } label: {
                             HStack(spacing: 16) {
                                 Image(systemName: profile.kind.symbol)
@@ -1249,6 +1247,9 @@ struct LibraryView: View {
         mediaSourceNotice = nil
         browsingSource = nil
         isAddingMediaSource = false
+        #if os(tvOS)
+        sourceToOpenFromHome = nil
+        #endif
     }
 
     /// 关闭电视端播放器与合集详情，返回首页并刷新播放进度。
