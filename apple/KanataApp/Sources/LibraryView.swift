@@ -243,6 +243,7 @@ struct LibraryView: View {
             Spacer(minLength: 12)
             Button("恢复全部", action: clearLibraryRefinement)
                 .buttonStyle(KanataSecondaryButtonStyle())
+                .frame(width: 160)
         }
         .padding(20)
         .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 22))
@@ -492,30 +493,28 @@ struct LibraryView: View {
             } message: {
                 Text(mediaSourceNotice ?? "")
             }
-            #if os(tvOS)
-            .overlay {
-                if let queue = playing {
-                    if queue.items.contains(where: { $0.resolveURL() != nil }) {
-                        PlayerScreen(
-                            items: queue.items,
-                            initialItemID: queue.initialItemID,
-                            onDismissPlayer: closeTVPlayer
-                        )
-                    } else {
-                        ContentUnavailableView(
-                            "无法访问该文件",
-                            systemImage: "exclamationmark.triangle",
-                            description: Text("文件可能已被移动或删除，请重新导入")
-                        )
-                    }
-                }
-            }
-            #else
+            #if !os(tvOS)
             .fullScreenCover(item: $playing, onDismiss: {
                 progressRevision += 1
             }) { queue in
                 if queue.items.contains(where: { $0.resolveURL() != nil }) {
                     PlayerScreen(items: queue.items, initialItemID: queue.initialItemID)
+                } else {
+                    ContentUnavailableView(
+                        "无法访问该文件",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text("文件可能已被移动或删除，请重新导入")
+                    )
+                }
+            }
+            #else
+            .fullScreenCover(item: $playing) { queue in
+                if queue.items.contains(where: { $0.resolveURL() != nil }) {
+                    PlayerScreen(
+                        items: queue.items,
+                        initialItemID: queue.initialItemID,
+                        onDismissPlayer: closeTVPlayer
+                    )
                 } else {
                     ContentUnavailableView(
                         "无法访问该文件",
@@ -530,7 +529,11 @@ struct LibraryView: View {
             }
             #if os(tvOS)
             .kanataModal(isPresented: $isSearching) {
-                TVLibrarySearchSheet(searchText: $searchText)
+                TVLibrarySearchSheet(
+                    searchText: $searchText,
+                    itemCount: items.count,
+                    resultCount: filteredItems.count
+                )
             }
             .navigationDestination(isPresented: $isShowingSettings) {
                 SettingsView(usesParentNavigation: true)
@@ -1248,8 +1251,9 @@ struct LibraryView: View {
         isAddingMediaSource = false
     }
 
-    /// 关闭电视端内嵌播放器并刷新首页播放进度。
+    /// 关闭电视端播放器与合集详情，返回首页并刷新播放进度。
     private func closeTVPlayer() {
+        selectedCollectionID = nil
         playing = nil
         progressRevision += 1
     }
@@ -1535,6 +1539,8 @@ private struct TVLibrarySearchButtonStyle: ButtonStyle {
 private struct TVLibrarySearchSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var searchText: String
+    let itemCount: Int
+    let resultCount: Int
     @FocusState private var focusedControl: SearchFocus?
 
     /// Apple TV 搜索页中的焦点目标。
@@ -1548,12 +1554,17 @@ private struct TVLibrarySearchSheet: View {
     var body: some View {
         ZStack {
             KanataAmbientBackground()
-            VStack(alignment: .leading, spacing: 28) {
-                HStack(alignment: .top, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("查找你的影片")
-                            .font(.system(size: 36, weight: .bold))
-                        Text("搜索标题、文件名或集数")
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 28) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 36, weight: .medium))
+                        .foregroundStyle(KanataTheme.accent)
+                        .frame(width: 88, height: 88)
+                        .background(KanataTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 24))
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("搜索媒体库")
+                            .font(.system(size: 52, weight: .bold))
+                        Text("查找影片、剧集和文件")
                             .font(.title3)
                             .foregroundStyle(.secondary)
                     }
@@ -1564,39 +1575,87 @@ private struct TVLibrarySearchSheet: View {
                     .buttonStyle(KanataTVActionButtonStyle())
                     .focused($focusedControl, equals: .close)
                 }
+                .padding(.bottom, 72)
 
-                TextField("输入标题、文件名或集数", text: $searchText)
-                    .font(.title2)
-                    .focused($focusedControl, equals: .field)
-                    .onSubmit { finishSearch() }
-                    .padding(.horizontal, 26)
-                    .frame(height: 82)
-                    .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 20))
+                Text("关键词")
+                    .font(.headline)
+                    .foregroundStyle(KanataTheme.accent)
+                    .padding(.bottom, 16)
+                HStack(spacing: 22) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 30, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextField("", text: $searchText)
+                        .font(.system(size: 32))
+                        .foregroundColor(.white)
+                        .focused($focusedControl, equals: .field)
+                        .focusEffectDisabled()
+                        .overlay {
+                            // 固定输入框底色，避开 tvOS 聚焦时白底白字与重复绘制。
+                            KanataTheme.surface
+                                .clipShape(RoundedRectangle(cornerRadius: 24))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 24)
+                                        .strokeBorder(KanataTheme.accent.opacity(0.65), lineWidth: 2)
+                                }
+                                .overlay(alignment: .leading) {
+                                    Text(searchText.isEmpty ? "输入片名、文件名或集数" : searchText)
+                                        .font(.system(size: 32))
+                                        .foregroundColor(searchText.isEmpty ? .gray : .white)
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 24)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .clipped()
+                                }
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                        .onSubmit { finishSearch() }
+                    if !searchText.isEmpty {
+                        Button { clearSearch() } label: {
+                            Label("清除", systemImage: "xmark.circle")
+                        }
+                        .buttonStyle(KanataTVActionButtonStyle())
+                        .focused($focusedControl, equals: .clear)
+                    }
+                }
+                .padding(.horizontal, 30)
+                .frame(height: 112)
+                .background(KanataTheme.elevatedSurface, in: RoundedRectangle(cornerRadius: 24))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24)
+                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                }
+                .padding(.bottom, 24)
 
-                HStack(spacing: 18) {
-                    Text("输入后选择“查看结果”，媒体库会显示匹配内容。")
+                Text(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                     ? "在 \(itemCount) 个媒体项目中搜索"
+                     : "找到 \(resultCount) 个匹配项目")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 80)
+
+                HStack {
+                    Text("输入完成后，在媒体库中浏览搜索结果")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    Spacer(minLength: 16)
-                    Button { clearSearch() } label: {
-                        Label("清除", systemImage: "xmark.circle")
-                    }
-                    .buttonStyle(KanataSecondaryButtonStyle())
-                    .focused($focusedControl, equals: .clear)
-                    .disabled(searchText.isEmpty)
+                    Spacer()
                     Button { finishSearch() } label: {
                         Label("查看结果", systemImage: "arrow.right")
                     }
                     .buttonStyle(KanataPrimaryButtonStyle())
+                    .frame(width: 260)
                     .focused($focusedControl, equals: .done)
+                }
+                .padding(.top, 32)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(.white.opacity(0.12)).frame(height: 1)
                 }
                 .focusSection()
             }
-            .padding(38)
-            .frame(maxWidth: 860)
-            .background(Color(red: 0.055, green: 0.065, blue: 0.085).opacity(0.96), in: RoundedRectangle(cornerRadius: 28))
-            .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(.white.opacity(0.16), lineWidth: 1) }
-            .padding(.horizontal, 80)
+            .frame(maxWidth: 1280, maxHeight: 700)
+            .padding(.horizontal, 96)
         }
         .onAppear { focusSearchField() }
         .onExitCommand { dismiss() }

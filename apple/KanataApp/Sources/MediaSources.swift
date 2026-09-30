@@ -1562,6 +1562,9 @@ private struct WebDAVChannelView: View {
     @State private var errorMessage: String?
     @State private var pendingImport: MediaImportDraft?
     private let client: WebDAVClient
+    #if os(tvOS)
+    @FocusState private var directoryFocus: TVDirectoryFocus?
+    #endif
 
     /// 从历史记录创建带认证信息的 WebDAV 浏览器。
     /// - Parameters:
@@ -1590,12 +1593,14 @@ private struct WebDAVChannelView: View {
             }
             .kanataDirectoryRowStyle(cornerRadius: 16)
             .disabled(entries.isEmpty || isLoading)
+            .focused($directoryFocus, equals: .current)
             if directoryStack.count > 1 {
                 Button { Task { await goBack() } } label: {
                     Label("返回上一级", systemImage: "arrow.turn.up.left")
                         .frame(maxWidth: .infinity, minHeight: 60)
                 }
                 .kanataDirectoryRowStyle(cornerRadius: 16)
+                .focused($directoryFocus, equals: .back)
             }
             Text("选择文件夹浏览内容，或用右侧加号加入媒体库。")
                 .font(.caption).foregroundStyle(.secondary)
@@ -1641,6 +1646,9 @@ private struct WebDAVChannelView: View {
         }
         .listStyle(.plain)
         .kanataFormBackground()
+        #if os(tvOS)
+        .modifier(TVDirectoryFocusRecovery(focus: $directoryFocus, entryIDs: entries.map(\.id), isLoading: isLoading || pendingImport != nil))
+        #endif
         .overlay {
             if isLoading {
                 ProgressView("正在读取目录…")
@@ -1653,6 +1661,9 @@ private struct WebDAVChannelView: View {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if directoryStack.count > 1 {
                     Button("上一级") { Task { await goBack() } }
+                        #if os(tvOS)
+                        .focused($directoryFocus, equals: .parent)
+                        #endif
                 }
             }
         }
@@ -1818,6 +1829,9 @@ private struct WebDAVChannelView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(MediaServerJoinedButtonStyle(cornerRadius: 11))
+        #if os(tvOS)
+        .focused($directoryFocus, equals: .browse(entry.id))
+        #endif
     }
 
     /// 构建 WebDAV 目录右侧的加入合集按钮。
@@ -1840,6 +1854,9 @@ private struct WebDAVChannelView: View {
         .foregroundStyle(KanataTheme.accent)
         .buttonStyle(MediaServerJoinedButtonStyle(cornerRadius: 11))
         .accessibilityLabel("把 \(entry.name) 添加为合集")
+        #if os(tvOS)
+        .focused($directoryFocus, equals: .add(entry.id))
+        #endif
     }
 
     /// 读取配置中的 WebDAV 起始目录。
@@ -2047,6 +2064,9 @@ private struct MediaServerChannelView: View {
     @State private var pendingImport: MediaImportDraft?
     private let mediaBrowserClient = MediaBrowserClient()
     private let plexClient = PlexClient()
+    #if os(tvOS)
+    @FocusState private var directoryFocus: TVDirectoryFocus?
+    #endif
 
     /// 按搜索关键词和内容类型过滤当前目录。
     private var visibleEntries: [MediaSourceEntry] {
@@ -2069,24 +2089,28 @@ private struct MediaServerChannelView: View {
         TVDirectoryLayout(title: "浏览内容", count: visibleEntries.count) {
             currentLocationCard
             TextField("搜索当前频道", text: $searchText)
+                .focused($directoryFocus, equals: .search)
             Picker("浏览分类", selection: $filter) {
                 ForEach(MediaChannelFilter.allCases) { value in
                     Text(value.title).tag(value)
                 }
             }
             .pickerStyle(.menu)
+            .focused($directoryFocus, equals: .filter)
             Button { Task { await addCurrentDirectory() } } label: {
                 Label("选择当前内容", systemImage: "plus")
                     .frame(maxWidth: .infinity, minHeight: 60)
             }
             .kanataDirectoryRowStyle(cornerRadius: 16)
             .disabled(entries.isEmpty || isLoading)
+            .focused($directoryFocus, equals: .current)
             if stack.count > 1 {
                 Button { Task { await goBack() } } label: {
                     Label("返回上一级", systemImage: "arrow.turn.up.left")
                         .frame(maxWidth: .infinity, minHeight: 60)
                 }
                 .kanataDirectoryRowStyle(cornerRadius: 16)
+                .focused($directoryFocus, equals: .back)
             }
         } rows: {
             if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
@@ -2136,6 +2160,9 @@ private struct MediaServerChannelView: View {
         }
         .listStyle(.plain)
         .kanataFormBackground()
+        #if os(tvOS)
+        .modifier(TVDirectoryFocusRecovery(focus: $directoryFocus, entryIDs: visibleEntries.map(\.id), isLoading: isLoading || pendingImport != nil))
+        #endif
         .overlay {
             if isLoading {
                 ProgressView("正在读取 \(profile.kind.title)…")
@@ -2151,6 +2178,9 @@ private struct MediaServerChannelView: View {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if stack.count > 1 {
                     Button("上一级") { Task { await goBack() } }
+                        #if os(tvOS)
+                        .focused($directoryFocus, equals: .parent)
+                        #endif
                 }
             }
         }
@@ -2269,6 +2299,9 @@ private struct MediaServerChannelView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(MediaServerJoinedButtonStyle(cornerRadius: 11))
+        #if os(tvOS)
+        .focused($directoryFocus, equals: .browse(entry.id))
+        #endif
     }
 
     /// 构建目录右侧独立的加入媒体库按钮。
@@ -2291,6 +2324,9 @@ private struct MediaServerChannelView: View {
         .foregroundStyle(KanataTheme.accent)
         .buttonStyle(MediaServerJoinedButtonStyle(cornerRadius: 11))
         .accessibilityLabel("把 \(entry.name) 添加为合集")
+        #if os(tvOS)
+        .focused($directoryFocus, equals: .add(entry.id))
+        #endif
     }
 
     /// 展示当前服务器与浏览层级，避免标题、图标和路径挤在列表边缘。
@@ -2577,6 +2613,78 @@ private struct MediaServerChannelView: View {
 
 /// 媒体服务器组合行的内嵌按钮样式，让主操作和“加入”共享底板且焦点互不挤压。
 #if os(tvOS)
+/// 目录内的主操作与加入按钮分别持有稳定焦点，不依赖滚动索引接管遥控器。
+private enum TVDirectoryFocus: Hashable {
+    case current, back, parent, search, filter
+    case browse(String), add(String)
+}
+
+/// 仅在目录按钮失去焦点且没有加载任务时恢复焦点，不干预正常方向移动和输入框。
+private struct TVDirectoryFocusRecovery: ViewModifier {
+    let focus: FocusState<TVDirectoryFocus?>.Binding
+    let entryIDs: [String]
+    let isLoading: Bool
+    @State private var lastFocus: TVDirectoryFocus?
+
+    /// 等待系统焦点切换完成，再恢复仍然存在的条目；正常获焦会取消等待。
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: focus.wrappedValue) { _, value in
+                if let value { lastFocus = value }
+            }
+            .task(id: focus.wrappedValue == nil && !isLoading && !entryIDs.isEmpty) {
+                guard focus.wrappedValue == nil, !isLoading, !entryIDs.isEmpty else { return }
+                do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                guard focus.wrappedValue == nil, !Task.isCancelled else { return }
+                switch lastFocus {
+                case .browse(let id) where entryIDs.contains(id), .add(let id) where entryIDs.contains(id):
+                    focus.wrappedValue = lastFocus
+                case .browse, .add, nil:
+                    if let id = entryIDs.first { focus.wrappedValue = .browse(id) }
+                default:
+                    break
+                }
+            }
+    }
+}
+
+/// 关闭 tvOS 独立的快速滚动索引；SwiftUI 的 scrollIndicators 不控制该覆盖层。
+private struct TVDirectoryScrollConfiguration: UIViewRepresentable {
+    /// 创建不接收触摸、也不参与焦点的滚动配置标记。
+    func makeUIView(context: Context) -> ScrollMarker {
+        let view = ScrollMarker()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    /// SwiftUI 复用目录内容时重新应用配置。
+    func updateUIView(_ uiView: ScrollMarker, context: Context) {
+        uiView.configureScrollView()
+    }
+
+    final class ScrollMarker: UIView {
+        /// 加入原生视图树后，仅配置包裹当前目录内容的最近滚动容器。
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            configureScrollView()
+        }
+
+        /// 禁用会遮住右侧加号并接管遥控导航的索引，保留正常滚动行为。
+        func configureScrollView() {
+            var ancestor = superview
+            while let view = ancestor {
+                if let scrollView = view as? UIScrollView {
+                    scrollView.indexDisplayMode = .alwaysHidden
+                    scrollView.showsVerticalScrollIndicator = false
+                    scrollView.showsHorizontalScrollIndicator = false
+                    return
+                }
+                ancestor = view.superview
+            }
+        }
+    }
+}
+
 /// 目录侧栏的来源信息，图标与长名称分行，不再挤在一条标题中。
 private struct TVDirectoryLocation: View {
     let title: String
@@ -2635,6 +2743,7 @@ private struct TVDirectoryLayout<Sidebar: View, Rows: View>: View {
                 ScrollView {
                     LazyVStack(spacing: 16) { rows }
                         .padding(6)
+                        .background(TVDirectoryScrollConfiguration())
                 }
                 .scrollIndicators(.hidden)
                 .focusSection()

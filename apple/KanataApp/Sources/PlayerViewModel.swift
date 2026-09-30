@@ -308,6 +308,11 @@ final class PlayerViewModel {
         options.isSecondOpen = true
         options.autoSelectEmbedSubtitle = true
         options.appendHeader(requestHeaders)
+        #if targetEnvironment(simulator)
+        // 模拟器不支持共享缓冲区线性纹理；输出 NV12 走 CVPixelBuffer 显示路径。
+        options.hardwareDecode = false
+        options.videoFilters.append("format=nv12")
+        #endif
         if let snapshot = PlaybackProgressStore.snapshot(for: mediaKey) {
             resumePosition = snapshot.position
             localDuration = snapshot.duration
