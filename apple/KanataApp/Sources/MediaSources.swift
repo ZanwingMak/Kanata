@@ -1559,9 +1559,13 @@ private struct WebDAVChannelView: View {
     let profile: MediaSourceProfile
     let onAdd: ([LibraryItem]) -> Void
     let onReturnHome: () -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var directoryStack: [(url: URL, name: String)] = []
     @State private var entries: [WebDAVEntry] = []
     @State private var isLoading = false
+    @State private var isNavigatingBack = false
+    @State private var lastBackNavigation = Date.distantPast
+    @State private var loadRequestID = UUID()
     @State private var errorMessage: String?
     @State private var pendingImport: MediaImportDraft?
     private let client: WebDAVClient
@@ -1598,13 +1602,19 @@ private struct WebDAVChannelView: View {
             .disabled(entries.isEmpty || isLoading)
             .focused($directoryFocus, equals: .current)
             if directoryStack.count > 1 {
-                Button { Task { await goBack() } } label: {
+                Button { goBack() } label: {
                     Label("返回上一级", systemImage: "arrow.turn.up.left")
                         .frame(maxWidth: .infinity, minHeight: 60)
                 }
                 .kanataDirectoryRowStyle(cornerRadius: 16)
                 .focused($directoryFocus, equals: .back)
             }
+            Button(action: onReturnHome) {
+                Label("返回首页", systemImage: "house")
+                    .frame(maxWidth: .infinity, minHeight: 60)
+            }
+            .kanataDirectoryRowStyle(cornerRadius: 16)
+            .focused($directoryFocus, equals: .home)
             Text("选择文件夹浏览内容，或用右侧加号加入媒体库。")
                 .font(.caption).foregroundStyle(.secondary)
         } rows: {
@@ -1663,16 +1673,16 @@ private struct WebDAVChannelView: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if directoryStack.count > 1 {
-                    Button("上一级") { Task { await goBack() } }
+                    Button("上一级") { goBack() }
                         #if os(tvOS)
                         .focused($directoryFocus, equals: .parent)
                         #endif
                 }
             }
         }
-        .kanataTVExitCommand(isEnabled: directoryStack.count > 1) {
-            Task { await goBack() }
-        }
+        #if os(tvOS)
+        .onExitCommand(perform: handleExitCommand)
+        #endif
         .task { await loadInitialDirectory() }
         #if os(tvOS)
         .navigationDestination(
@@ -1876,6 +1886,7 @@ private struct WebDAVChannelView: View {
     private func select(_ entry: WebDAVEntry) async {
         if entry.isDirectory {
             directoryStack.append((entry.url, entry.name))
+            entries = []
             await load(entry.url)
         } else {
             pendingImport = MediaImportDraft(
@@ -2012,22 +2023,49 @@ private struct WebDAVChannelView: View {
         )
     }
 
-    /// 返回上一级 WebDAV 目录并重新加载。
-    private func goBack() async {
-        guard directoryStack.count > 1 else { return }
+    /// 立即退回单层目录；读取完成前忽略重复返回，避免遥控器连发导致跳级。
+    private func goBack() {
+        guard directoryStack.count > 1, !isNavigatingBack,
+              Date().timeIntervalSince(lastBackNavigation) > 0.35 else { return }
+        lastBackNavigation = Date()
+        isNavigatingBack = true
         directoryStack.removeLast()
-        if let directory = directoryStack.last?.url { await load(directory) }
+        entries = []
+        guard let directory = directoryStack.last?.url else {
+            isNavigatingBack = false
+            return
+        }
+        Task {
+            await load(directory)
+            isNavigatingBack = false
+        }
+    }
+
+    /// 遥控器返回键在子目录退一层，在媒体源根目录回到连接列表。
+    private func handleExitCommand() {
+        guard !isNavigatingBack,
+              Date().timeIntervalSince(lastBackNavigation) > 0.35 else { return }
+        if directoryStack.count > 1 {
+            goBack()
+        } else {
+            dismiss()
+        }
     }
 
     /// 读取并显示指定 WebDAV 目录。
     /// - Parameter directory: 当前目录。
     private func load(_ directory: URL) async {
+        let requestID = UUID()
+        loadRequestID = requestID
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer { if loadRequestID == requestID { isLoading = false } }
         do {
-            entries = try await client.list(directory: directory)
+            let loadedEntries = try await client.list(directory: directory)
+            guard loadRequestID == requestID else { return }
+            entries = loadedEntries
         } catch {
+            guard loadRequestID == requestID else { return }
             entries = []
             errorMessage = error.localizedDescription
         }
@@ -2058,11 +2096,15 @@ private struct MediaServerChannelView: View {
     let profile: MediaSourceProfile
     let onAdd: ([LibraryItem]) -> Void
     let onReturnHome: () -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var stack: [(key: String?, name: String)] = []
     @State private var entries: [MediaSourceEntry] = []
     @State private var filter = MediaChannelFilter.all
     @State private var searchText = ""
     @State private var isLoading = false
+    @State private var isNavigatingBack = false
+    @State private var lastBackNavigation = Date.distantPast
+    @State private var loadRequestID = UUID()
     @State private var errorMessage: String?
     @State private var pendingImport: MediaImportDraft?
     private let mediaBrowserClient = MediaBrowserClient()
@@ -2108,13 +2150,19 @@ private struct MediaServerChannelView: View {
             .disabled(entries.isEmpty || isLoading)
             .focused($directoryFocus, equals: .current)
             if stack.count > 1 {
-                Button { Task { await goBack() } } label: {
+                Button { goBack() } label: {
                     Label("返回上一级", systemImage: "arrow.turn.up.left")
                         .frame(maxWidth: .infinity, minHeight: 60)
                 }
                 .kanataDirectoryRowStyle(cornerRadius: 16)
                 .focused($directoryFocus, equals: .back)
             }
+            Button(action: onReturnHome) {
+                Label("返回首页", systemImage: "house")
+                    .frame(maxWidth: .infinity, minHeight: 60)
+            }
+            .kanataDirectoryRowStyle(cornerRadius: 16)
+            .focused($directoryFocus, equals: .home)
         } rows: {
             if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             ForEach(visibleEntries) { entry in mediaServerEntryRow(entry) }
@@ -2180,16 +2228,16 @@ private struct MediaServerChannelView: View {
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if stack.count > 1 {
-                    Button("上一级") { Task { await goBack() } }
+                    Button("上一级") { goBack() }
                         #if os(tvOS)
                         .focused($directoryFocus, equals: .parent)
                         #endif
                 }
             }
         }
-        .kanataTVExitCommand(isEnabled: stack.count > 1) {
-            Task { await goBack() }
-        }
+        #if os(tvOS)
+        .onExitCommand(perform: handleExitCommand)
+        #endif
         .task { await loadInitialContent() }
         #if os(tvOS)
         .navigationDestination(
@@ -2393,6 +2441,7 @@ private struct MediaServerChannelView: View {
     private func select(_ entry: MediaSourceEntry) async {
         if entry.isDirectory, let key = entry.navigationKey {
             stack.append((key, entry.name))
+            entries = []
             await load(key: key)
         } else if let item = await makeItem(entry: entry, collectionID: nil, collectionTitle: nil, index: nil) {
             pendingImport = MediaImportDraft(
@@ -2579,22 +2628,46 @@ private struct MediaServerChannelView: View {
         return "play.rectangle"
     }
 
-    /// 返回上一级媒体服务器目录。
-    private func goBack() async {
-        guard stack.count > 1 else { return }
+    /// 立即退回单层媒体目录；读取完成前忽略重复返回。
+    private func goBack() {
+        guard stack.count > 1, !isNavigatingBack,
+              Date().timeIntervalSince(lastBackNavigation) > 0.35 else { return }
+        lastBackNavigation = Date()
+        isNavigatingBack = true
         stack.removeLast()
-        await load(key: stack.last?.key)
+        entries = []
+        let parentKey = stack.last?.key
+        Task {
+            await load(key: parentKey)
+            isNavigatingBack = false
+        }
+    }
+
+    /// 遥控器返回键在子目录退一层，在媒体源根目录回到连接列表。
+    private func handleExitCommand() {
+        guard !isNavigatingBack,
+              Date().timeIntervalSince(lastBackNavigation) > 0.35 else { return }
+        if stack.count > 1 {
+            goBack()
+        } else {
+            dismiss()
+        }
     }
 
     /// 读取指定媒体服务器目录并更新界面。
     /// - Parameter key: MediaBrowser 项目 ID 或 Plex API 路径。
     private func load(key: String?) async {
+        let requestID = UUID()
+        loadRequestID = requestID
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer { if loadRequestID == requestID { isLoading = false } }
         do {
-            entries = try await fetchEntries(key: key)
+            let loadedEntries = try await fetchEntries(key: key)
+            guard loadRequestID == requestID else { return }
+            entries = loadedEntries
         } catch {
+            guard loadRequestID == requestID else { return }
             entries = []
             errorMessage = error.localizedDescription
         }
@@ -2618,7 +2691,7 @@ private struct MediaServerChannelView: View {
 #if os(tvOS)
 /// 目录内的主操作与加入按钮分别持有稳定焦点，不依赖滚动索引接管遥控器。
 private enum TVDirectoryFocus: Hashable {
-    case current, back, parent, search, filter
+    case current, back, home, parent, search, filter
     case browse(String), add(String)
 }
 
