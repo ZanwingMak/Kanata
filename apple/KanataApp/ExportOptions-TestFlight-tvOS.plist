@@ -19,5 +19,7 @@
 	<string>2Q2LMV7BR6</string>
 	<key>uploadSymbols</key>
 	<true/>
+	<key>testFlightInternalTestingOnly</key>
+	<true/>
 </dict>
 </plist>
