@@ -8,6 +8,9 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
     case sunset
     case amethyst
     case gold
+    case sakura
+    case cyber
+    case summer
 
     static let appDefault: KanataAccentTheme = .amethyst
 
@@ -20,6 +23,19 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         case .sunset: "落日红"
         case .amethyst: "紫水晶"
         case .gold: "影院金"
+        case .sakura: "樱花物语"
+        case .cyber: "赛博霓虹"
+        case .summer: "夏日晴空"
+        }
+    }
+
+    /// 返回主题预览中的装饰图案。
+    var previewSymbol: String? {
+        switch self {
+        case .sakura: "sparkles"
+        case .cyber: "bolt.fill"
+        case .summer: "sun.max.fill"
+        default: nil
         }
     }
 
@@ -58,6 +74,9 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         case .sunset: UIColor(red: 0.78, green: 0.13, blue: 0.20, alpha: 1)
         case .amethyst: UIColor(red: 0.43, green: 0.28, blue: 0.76, alpha: 1)
         case .gold: UIColor(red: 0.62, green: 0.37, blue: 0.04, alpha: 1)
+        case .sakura: UIColor(red: 0.59, green: 0.15, blue: 0.38, alpha: 1)
+        case .cyber: UIColor(red: 0.00, green: 0.39, blue: 0.45, alpha: 1)
+        case .summer: UIColor(red: 0.07, green: 0.36, blue: 0.62, alpha: 1)
         }
     }
 
@@ -69,6 +88,9 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         case .sunset: UIColor(red: 1.00, green: 0.38, blue: 0.34, alpha: 1)
         case .amethyst: UIColor(red: 0.66, green: 0.48, blue: 0.96, alpha: 1)
         case .gold: UIColor(red: 0.94, green: 0.67, blue: 0.22, alpha: 1)
+        case .sakura: UIColor(red: 1.00, green: 0.52, blue: 0.73, alpha: 1)
+        case .cyber: UIColor(red: 0.20, green: 0.88, blue: 0.91, alpha: 1)
+        case .summer: UIColor(red: 0.32, green: 0.72, blue: 1.00, alpha: 1)
         }
     }
 
@@ -80,6 +102,9 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         case .sunset: UIColor(red: 0.62, green: 0.07, blue: 0.15, alpha: 1)
         case .amethyst: UIColor(red: 0.32, green: 0.18, blue: 0.62, alpha: 1)
         case .gold: UIColor(red: 0.48, green: 0.25, blue: 0.01, alpha: 1)
+        case .sakura: UIColor(red: 0.44, green: 0.08, blue: 0.29, alpha: 1)
+        case .cyber: UIColor(red: 0.00, green: 0.27, blue: 0.34, alpha: 1)
+        case .summer: UIColor(red: 0.03, green: 0.25, blue: 0.48, alpha: 1)
         }
     }
 
@@ -91,6 +116,9 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         case .sunset: UIColor(red: 0.82, green: 0.16, blue: 0.30, alpha: 1)
         case .amethyst: UIColor(red: 0.43, green: 0.28, blue: 0.82, alpha: 1)
         case .gold: UIColor(red: 0.72, green: 0.42, blue: 0.08, alpha: 1)
+        case .sakura: UIColor(red: 0.86, green: 0.31, blue: 0.58, alpha: 1)
+        case .cyber: UIColor(red: 0.04, green: 0.65, blue: 0.77, alpha: 1)
+        case .summer: UIColor(red: 0.12, green: 0.55, blue: 0.86, alpha: 1)
         }
     }
 
@@ -102,6 +130,9 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         case .sunset: UIColor(red: 0.70, green: 0.25, blue: 0.52, alpha: 1)
         case .amethyst: UIColor(red: 0.22, green: 0.42, blue: 0.77, alpha: 1)
         case .gold: UIColor(red: 0.68, green: 0.25, blue: 0.18, alpha: 1)
+        case .sakura: UIColor(red: 0.72, green: 0.29, blue: 0.62, alpha: 1)
+        case .cyber: UIColor(red: 0.39, green: 0.18, blue: 0.66, alpha: 1)
+        case .summer: UIColor(red: 0.05, green: 0.60, blue: 0.73, alpha: 1)
         }
     }
 
@@ -113,6 +144,9 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         case .sunset: UIColor(red: 0.70, green: 0.18, blue: 0.48, alpha: 1)
         case .amethyst: UIColor(red: 0.18, green: 0.34, blue: 0.72, alpha: 1)
         case .gold: UIColor(red: 0.64, green: 0.20, blue: 0.12, alpha: 1)
+        case .sakura: UIColor(red: 0.51, green: 0.15, blue: 0.49, alpha: 1)
+        case .cyber: UIColor(red: 0.32, green: 0.13, blue: 0.68, alpha: 1)
+        case .summer: UIColor(red: 0.04, green: 0.42, blue: 0.60, alpha: 1)
         }
     }
 
@@ -124,6 +158,9 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         case .sunset: UIColor(red: 0.92, green: 0.53, blue: 0.16, alpha: 1)
         case .amethyst: UIColor(red: 0.78, green: 0.25, blue: 0.58, alpha: 1)
         case .gold: UIColor(red: 0.90, green: 0.61, blue: 0.16, alpha: 1)
+        case .sakura: UIColor(red: 0.97, green: 0.64, blue: 0.66, alpha: 1)
+        case .cyber: UIColor(red: 0.67, green: 0.27, blue: 0.80, alpha: 1)
+        case .summer: UIColor(red: 0.94, green: 0.69, blue: 0.12, alpha: 1)
         }
     }
 
@@ -135,6 +172,9 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         case .sunset: UIColor(red: 0.92, green: 0.42, blue: 0.10, alpha: 1)
         case .amethyst: UIColor(red: 0.70, green: 0.18, blue: 0.54, alpha: 1)
         case .gold: UIColor(red: 0.86, green: 0.48, blue: 0.08, alpha: 1)
+        case .sakura: UIColor(red: 0.95, green: 0.46, blue: 0.62, alpha: 1)
+        case .cyber: UIColor(red: 0.62, green: 0.22, blue: 0.83, alpha: 1)
+        case .summer: UIColor(red: 0.94, green: 0.64, blue: 0.12, alpha: 1)
         }
     }
 
@@ -714,10 +754,18 @@ struct KanataThemePreview: View {
 
     var body: some View {
         #if os(tvOS)
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
             RoundedRectangle(cornerRadius: 12)
                 .fill(LinearGradient(colors: theme.palette, startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(height: 100)
+                .frame(height: 78)
+                .overlay(alignment: .trailing) {
+                    if let symbol = theme.previewSymbol {
+                        Image(systemName: symbol)
+                            .font(.system(size: 48, weight: .ultraLight))
+                            .foregroundStyle(.white.opacity(0.42))
+                            .padding(.trailing, 18)
+                    }
+                }
                 .overlay(alignment: .bottomLeading) {
                     HStack(spacing: 8) {
                         Image(systemName: "play.fill")
@@ -728,13 +776,13 @@ struct KanataThemePreview: View {
                     .padding(16)
                 }
             HStack {
-                Text(theme.title).font(.system(size: 23, weight: .medium))
+                Text(theme.title).font(.system(size: 21, weight: .medium))
                 Spacer()
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? theme.accent : Color.secondary.opacity(0.4))
             }
         }
-        .padding(14)
+        .padding(12)
         .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16))
         #else
         HStack(spacing: 8) {
@@ -750,6 +798,13 @@ struct KanataThemePreview: View {
                 .overlay {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(.white.opacity(0.35), lineWidth: 1)
+                }
+                .overlay {
+                    if let symbol = theme.previewSymbol {
+                        Image(systemName: symbol)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
                 }
             Text(theme.title)
                 .font(.subheadline.weight(.medium))

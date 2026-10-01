@@ -522,7 +522,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var themeChoices: some View {
         #if os(tvOS)
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 18), count: 3), spacing: 18) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 3), spacing: 14) {
             ForEach(KanataAccentTheme.allCases) { theme in themeButton(theme) }
         }
         .padding(8)
@@ -542,7 +542,9 @@ struct SettingsView: View {
         #if os(tvOS)
         .focused($appearanceFocus, equals: .theme(theme))
         .onMoveCommand { direction in
-            if direction == .left, theme == .galaxy || theme == .amethyst {
+            if direction == .left,
+               let index = KanataAccentTheme.allCases.firstIndex(of: theme),
+               index.isMultiple(of: 3) {
                 appearanceFocus = .category(.appearance)
             }
         }
