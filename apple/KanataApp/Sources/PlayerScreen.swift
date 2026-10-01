@@ -847,6 +847,7 @@ private struct TVPlayerQuickSettingsPanel: View {
 private struct TVPlayerEpisodeShelf: View {
     let items: [LibraryItem]
     let currentItemID: String
+    let isPlaying: Bool
     let onSelect: (LibraryItem) -> Void
     let onDismiss: () -> Void
     @FocusState private var focusedItemID: String?
@@ -907,6 +908,7 @@ private struct TVPlayerEpisodeShelf: View {
             )
         )
         .focusSection()
+        .onExitCommand(perform: onDismiss)
         .onAppear(perform: focusCurrentItem)
     }
 
@@ -937,8 +939,8 @@ private struct TVPlayerEpisodeShelf: View {
                     .foregroundStyle(isFocused ? Color.black.opacity(0.68) : Color.white.opacity(0.72))
                     .lineLimit(1)
                 HStack(spacing: 6) {
-                    Image(systemName: item.id == currentItemID ? "speaker.wave.2.fill" : "play.fill")
-                    Text(item.id == currentItemID ? "正在播放" : "播放此集")
+                    Image(systemName: item.id == currentItemID ? (isPlaying ? "speaker.wave.2.fill" : "pause.fill") : "play.fill")
+                    Text(item.id == currentItemID ? (isPlaying ? "正在播放" : "已暂停") : "播放此集")
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(isFocused ? Color.black.opacity(0.72) : item.id == currentItemID ? KanataTheme.accent : .white.opacity(0.58))
@@ -1169,6 +1171,7 @@ struct PlayerScreen: View {
                 TVPlayerEpisodeShelf(
                     items: items,
                     currentItemID: activeItem.id,
+                    isPlaying: isPlaying,
                     onSelect: selectItem,
                     onDismiss: dismissTVPlaylist
                 )
@@ -1973,6 +1976,7 @@ struct PlayerScreen: View {
         }
         .padding(.trailing, 74)
         .background(Color.black.opacity(0.08))
+        .onExitCommand(perform: dismissTVQuickSettings)
     }
 
     /// Apple TV 完整播放设置使用不超过半屏的右侧抽屉。
@@ -1989,6 +1993,7 @@ struct PlayerScreen: View {
                 .padding(.trailing, 38)
         }
         .background(Color.black.opacity(0.16))
+        .onExitCommand(perform: dismissTVPlaybackOptions)
     }
 
     /// Apple TV 弹幕设置沿用与播放设置一致的半屏右侧抽屉。
@@ -2019,6 +2024,7 @@ struct PlayerScreen: View {
             .padding(.trailing, 38)
         }
         .background(Color.black.opacity(0.16))
+        .onExitCommand(perform: dismissTVDanmakuSettings)
     }
     #endif
 
@@ -3227,13 +3233,13 @@ struct PlayerScreen: View {
         viewModel.pause()
         isPlaying = false
         dismissPlayer()
-        return
-        #endif
+        #else
         resumesAfterExitCancellation = isPlaying
         viewModel.pause()
         isPlaying = false
         setControlsVisible(true)
         isConfirmingExit = true
+        #endif
     }
 
     /// 关闭播放器；电视端内嵌覆盖层优先回调首页，触屏端继续使用系统模态关闭。

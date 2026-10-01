@@ -784,13 +784,11 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Button("清除在线缓存", role: .destructive) {
-                clearTarget = .onlineCache
+                requestStorageClear(.onlineCache, hasFiles: onlineCacheUsage.fileCount > 0)
             }
-            .disabled(onlineCacheUsage.fileCount == 0)
             Button("删除全部导入弹幕", role: .destructive) {
-                clearTarget = .importedDanmaku
+                requestStorageClear(.importedDanmaku, hasFiles: localDanmakuUsage.fileCount > 0)
             }
-            .disabled(localDanmakuUsage.fileCount == 0)
             if let storageResult {
                 Text(storageResult).font(.caption).foregroundStyle(.secondary)
             }
@@ -809,6 +807,15 @@ struct SettingsView: View {
     /// - Returns: “N 个 · 容量”格式。
     private func storageLabel(_ usage: DanmakuStorageUsage) -> String {
         "\(usage.fileCount) 个 · \(formatBytes(usage.totalBytes))"
+    }
+
+    /// 允许电视遥控器聚焦清理入口；空目录直接给出结果，有内容时再请求确认。
+    private func requestStorageClear(_ target: ClearTarget, hasFiles: Bool) {
+        if hasFiles {
+            clearTarget = target
+        } else {
+            storageResult = target == .onlineCache ? "当前没有在线缓存" : "当前没有导入弹幕"
+        }
     }
 
     /// 渲染单个弹幕来源的可用状态与延迟。
@@ -1005,7 +1012,8 @@ struct SettingsView: View {
 
     /// 把字节数格式化为适合设置页显示的容量文本。
     private func formatBytes(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        if bytes == 0 { return "0 KB" }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     /// 返回当前清理操作对应的不可逆影响说明。

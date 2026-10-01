@@ -9,6 +9,8 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
     case amethyst
     case gold
 
+    static let appDefault: KanataAccentTheme = .amethyst
+
     var id: String { rawValue }
 
     var title: String {
@@ -179,8 +181,8 @@ enum KanataTheme {
 
     /// 返回 UserDefaults 中当前选择的强调色主题。
     private static var currentAccentTheme: KanataAccentTheme {
-        let raw = UserDefaults.standard.string(forKey: accentStorageKey) ?? KanataAccentTheme.galaxy.rawValue
-        return KanataAccentTheme(rawValue: raw) ?? .galaxy
+        let raw = UserDefaults.standard.string(forKey: accentStorageKey) ?? KanataAccentTheme.appDefault.rawValue
+        return KanataAccentTheme(rawValue: raw) ?? .appDefault
     }
 
     static var accent: Color { currentAccentTheme.accent }
@@ -226,8 +228,10 @@ enum KanataTheme {
 /// 在所有层级页面后方绘制随主题变化的柔和环境光背景。
 struct KanataAmbientBackground: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(AppSettings.self) private var settings
 
     var body: some View {
+        let theme = settings.accentTheme
         ZStack {
             LinearGradient(
                 colors: [KanataTheme.backgroundTop, KanataTheme.background],
@@ -236,15 +240,15 @@ struct KanataAmbientBackground: View {
             )
             LinearGradient(
                 colors: [
-                    KanataTheme.ambientCompanion.opacity(colorScheme == .dark ? 0.08 : 0.08),
+                    theme.ambientCompanion.opacity(colorScheme == .dark ? 0.08 : 0.08),
                     .clear,
-                    KanataTheme.accent.opacity(colorScheme == .dark ? 0.06 : 0.06),
+                    theme.accent.opacity(colorScheme == .dark ? 0.06 : 0.06),
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             LinearGradient(
-                colors: [.clear, KanataTheme.ambientHighlight.opacity(colorScheme == .dark ? 0.07 : 0.04)],
+                colors: [.clear, theme.ambientHighlight.opacity(colorScheme == .dark ? 0.07 : 0.04)],
                 startPoint: .top,
                 endPoint: .bottomTrailing
             )
@@ -301,7 +305,7 @@ struct KanataSettingsForm<Content: View>: View {
         if #available(tvOS 18.0, *) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 28) {
+                    VStack(alignment: .leading, spacing: 28) {
                         ForEach(sections: content) { section in
                             VStack(alignment: .leading, spacing: 12) {
                                 section.header

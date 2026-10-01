@@ -511,19 +511,23 @@ struct LibraryView: View {
                 }
             }
             #else
-            .fullScreenCover(item: $playing) { queue in
-                if queue.items.contains(where: { $0.resolveURL() != nil }) {
-                    PlayerScreen(
-                        items: queue.items,
-                        initialItemID: queue.initialItemID,
-                        onDismissPlayer: closeTVPlayer
-                    )
-                } else {
-                    ContentUnavailableView(
-                        "无法访问该文件",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text("文件可能已被移动或删除，请重新导入")
-                    )
+            .disabled(playing != nil)
+            .overlay {
+                if let queue = playing {
+                    if queue.items.contains(where: { $0.resolveURL() != nil }) {
+                        PlayerScreen(
+                            items: queue.items,
+                            initialItemID: queue.initialItemID,
+                            onDismissPlayer: closeTVPlayer
+                        )
+                        .ignoresSafeArea()
+                    } else {
+                        ContentUnavailableView(
+                            "无法访问该文件",
+                            systemImage: "exclamationmark.triangle",
+                            description: Text("文件可能已被移动或删除，请重新导入")
+                        )
+                    }
                 }
             }
             #endif
@@ -616,7 +620,7 @@ struct LibraryView: View {
                 progressRevision += 1
             }
         }
-        .tint(KanataTheme.accent)
+        .tint(settings.accentTheme.accent)
     }
 
     #if os(tvOS)
@@ -1586,31 +1590,10 @@ private struct TVLibrarySearchSheet: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 30, weight: .medium))
                         .foregroundStyle(.secondary)
-                    TextField("", text: $searchText)
+                    TextField("输入片名、文件名或集数", text: $searchText)
                         .font(.system(size: 32))
-                        .foregroundColor(.white)
                         .focused($focusedControl, equals: .field)
                         .focusEffectDisabled()
-                        .overlay {
-                            // 固定输入框底色，避开 tvOS 聚焦时白底白字与重复绘制。
-                            KanataTheme.surface
-                                .clipShape(RoundedRectangle(cornerRadius: 24))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 24)
-                                        .strokeBorder(KanataTheme.accent.opacity(0.65), lineWidth: 2)
-                                }
-                                .overlay(alignment: .leading) {
-                                    Text(searchText.isEmpty ? "输入片名、文件名或集数" : searchText)
-                                        .font(.system(size: 32))
-                                        .foregroundColor(searchText.isEmpty ? .gray : .white)
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 24)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .clipped()
-                                }
-                                .allowsHitTesting(false)
-                                .accessibilityHidden(true)
-                        }
                         .onSubmit { finishSearch() }
                     if !searchText.isEmpty {
                         Button { clearSearch() } label: {

@@ -182,10 +182,10 @@ final class AppSettings {
         self.openSubtitlesAPIKey = KeychainStore.string(account: KeychainAccounts.openSubtitlesAPIKey) ?? ""
         self.accentTheme = KanataAccentTheme(
             rawValue: defaults.string(forKey: Keys.accentTheme) ?? ""
-        ) ?? .galaxy
+        ) ?? .appDefault
         self.appearance = KanataAppearance(
             rawValue: defaults.string(forKey: Keys.appearance) ?? ""
-        ) ?? .system
+        ) ?? .dark
         self.onlineDanmakuCacheLimitMB = max(
             defaults.object(forKey: Keys.onlineDanmakuCacheLimitMB) as? Int ?? 250,
             50
