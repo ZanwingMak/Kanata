@@ -11,32 +11,33 @@ import UIKit
 private struct TVMediaSourcePairingPayload: Sendable {
     let kind: MediaSourceKind
     let name: String
-    let scheme: String
-    let host: String
-    let port: Int?
-    let basePath: String
+    let serverAddress: String
     let rootPath: String
     let username: String
     let password: String
     let otp: String
 
-    /// 把结构化地址字段合成为可验证的服务器 URL。
+    /// 解析完整网址或主机地址，并补上当前媒体源的常用协议与端口。
     /// - Returns: 合法的 HTTP(S) URL；主机或协议无效时返回 nil。
     func serverURL() -> URL? {
-        var components = URLComponents()
-        components.scheme = scheme
-        components.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        components.port = port ?? defaultServerPort
-        let path = basePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        components.path = path.isEmpty ? "" : (path.hasPrefix("/") ? path : "/\(path)")
-        guard let url = components.url,
+        let address = serverAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty else { return nil }
+        let hasScheme = address.contains("://")
+        let preferredScheme = kind == .webDAV || kind == .synology ? "https" : "http"
+        guard var components = URLComponents(string: hasScheme ? address : "\(preferredScheme)://\(address)"),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
               components.host?.isEmpty == false,
-              ["http", "https"].contains(url.scheme?.lowercased()) else { return nil }
-        return url
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil else { return nil }
+        if !hasScheme, components.port == nil { components.port = defaultServerPort(for: scheme) }
+        return components.url
     }
 
     /// 手机未指定端口时按媒体源和协议选择连接端口。
-    private var defaultServerPort: Int {
+    private func defaultServerPort(for scheme: String) -> Int {
         let secure = scheme == "https"
         switch kind {
         case .webDAV: return secure ? 5006 : 5005
@@ -52,11 +53,11 @@ private final class TVPairingHTTPServer: @unchecked Sendable {
     let token = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     private let listener: NWListener
     private let queue = DispatchQueue(label: "com.kanata.tv-pairing")
-    private let onPayload: @Sendable (TVMediaSourcePairingPayload) -> Void
+    private let onPayload: @Sendable (TVMediaSourcePairingPayload) async -> (Bool, String)
 
     /// 创建一个系统随机端口的 TCP 监听器。
     /// - Parameter onPayload: 收到合法表单后的回调。
-    init(onPayload: @escaping @Sendable (TVMediaSourcePairingPayload) -> Void) throws {
+    init(onPayload: @escaping @Sendable (TVMediaSourcePairingPayload) async -> (Bool, String)) throws {
         self.listener = try NWListener(using: .tcp, on: .any)
         self.onPayload = onPayload
     }
@@ -162,16 +163,15 @@ private final class TVPairingHTTPServer: @unchecked Sendable {
         }
         guard components[0] == "POST",
               let body = request.components(separatedBy: "\r\n\r\n").dropFirst().joined(separator: "\r\n\r\n").data(using: .utf8),
-              let payload = parsePayload(body) else {
-            send(status: "400 Bad Request", html: resultPage("请完整填写服务器地址与账号"), connection: connection)
+              let payload = parsePayload(body),
+              payload.serverURL() != nil else {
+            sendJSON(success: false, message: "服务器地址无效，请填写完整网址或域名/IP 地址。", connection: connection)
             return
         }
-        onPayload(payload)
-        send(
-            status: "200 OK",
-            html: resultPage("已发送到 Apple TV，电视正在测试连接。成功后可直接关闭此页面。"),
-            connection: connection
-        )
+        Task { [weak self] in
+            let (success, message) = await self?.onPayload(payload) ?? (false, "配对已结束，请重新扫码。")
+            self?.sendJSON(success: success, message: message, connection: connection)
+        }
     }
 
     /// 解析 URL 编码表单为媒体源配置。
@@ -188,15 +188,12 @@ private final class TVPairingHTTPServer: @unchecked Sendable {
         guard let kindRaw = fields["kind"],
               let kind = MediaSourceKind(rawValue: kindRaw),
               kind != .plex,
-              let host = fields["host"],
-              !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+              let address = fields["serverAddress"],
+              !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         return TVMediaSourcePairingPayload(
             kind: kind,
             name: fields["name"] ?? "",
-            scheme: fields["scheme"] == "https" ? "https" : "http",
-            host: host,
-            port: Int(fields["port"] ?? ""),
-            basePath: fields["basePath"] ?? "",
+            serverAddress: address,
             rootPath: fields["rootPath"] ?? "/",
             username: fields["username"] ?? "",
             password: fields["password"] ?? "",
@@ -215,22 +212,43 @@ private final class TVPairingHTTPServer: @unchecked Sendable {
     /// - Returns: 不依赖外部资源的 HTML。
     private func configurationPage() -> String {
         """
-        <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+        <!doctype html>
+        <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
         <title>配置 Kanata Apple TV</title><style>
-        :root{color-scheme:light dark}body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:620px;margin:auto;padding:24px;background:#07101f;color:#f7f9ff}h1{font-size:28px}p{color:#aab6ca;line-height:1.5}.card{background:#121d30;border:1px solid #263650;border-radius:20px;padding:20px}label{display:block;margin:16px 0 6px;font-weight:650}input,select{box-sizing:border-box;width:100%;font:inherit;padding:13px;border-radius:12px;border:1px solid #3b4d69;background:#0b1526;color:#fff}button{width:100%;margin-top:22px;padding:15px;border:0;border-radius:14px;background:linear-gradient(135deg,#2dbbdc,#1689bd);color:white;font-size:17px;font-weight:700}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.hint{font-size:13px}</style></head><body>
-        <h1>配置 Kanata Apple TV</h1><p>手机与 Apple TV 需连接同一可信 Wi‑Fi。本页面只在电视停留于配对界面时有效，连接成功后密码只保存到 Apple TV 的 Keychain。</p>
-        <form class="card" method="post" action="/save?token=\(token)">
-        <label>媒体源类型</label><select name="kind"><option value="webDAV">WebDAV</option><option value="jellyfin">Jellyfin</option><option value="emby">Emby</option><option value="synology">群晖 DSM</option></select>
-        <label>显示名称（可选）</label><input name="name" placeholder="例如：客厅 NAS">
-        <div class="row"><div><label>协议</label><select name="scheme"><option value="http">HTTP</option><option value="https">HTTPS</option></select></div><div><label>端口</label><input name="port" inputmode="numeric" placeholder="留空自动选择"></div></div>
-        <label>域名或 IP 地址</label><input name="host" required autocapitalize="none" placeholder="输入服务器地址">
-        <label>基础路径（可选）</label><input name="basePath" autocapitalize="none" placeholder="例如 /dav"><p class="hint">仅当服务部署在子路径下才填写，例如反向代理入口 /dav；通常留空。</p>
-        <label>WebDAV 媒体起始目录（可选）</label><input name="rootPath" value="/" autocapitalize="none"><p class="hint">连接后从这个目录开始浏览；/ 表示根目录。非 WebDAV 来源可保持默认。</p>
-        <label>用户名</label><input name="username" autocomplete="username">
-        <label>密码</label><input name="password" type="password" autocomplete="current-password">
-        <label>群晖两步验证码（可选）</label><input name="otp" inputmode="numeric" autocomplete="one-time-code">
-        <button type="submit">发送并测试连接</button></form>
-        <p class="hint">Plex 请在电视端使用官方账号授权，以便自动发现并选择最快线路。</p></body></html>
+        :root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;background:#080d17;color:#f5f8ff}
+        *{box-sizing:border-box}body{max-width:560px;margin:0 auto;padding:28px 20px calc(32px + env(safe-area-inset-bottom))}
+        h1{font-size:29px;letter-spacing:-.03em;margin:8px 0 8px}p{margin:0;color:#9eacc2;line-height:1.55}.intro{margin-bottom:24px}
+        .eyebrow{color:#52d4c7;font-size:13px;font-weight:750;letter-spacing:.12em}.card{background:#151d2b;border:1px solid #2d3a4f;border-radius:22px;padding:22px;box-shadow:0 16px 40px #0004}
+        .field{margin:0 0 20px}.field:last-of-type{margin-bottom:0}.field[hidden]{display:none}label{display:block;margin-bottom:8px;font-size:15px;font-weight:680}
+        input,select{display:block;width:100%;min-height:52px;padding:13px 15px;border:1px solid #43516a;border-radius:13px;background:#0c1422;color:#fff;font:inherit;font-size:16px;outline:none}
+        input:focus,select:focus{border-color:#52d4c7;box-shadow:0 0 0 3px #52d4c72a}input::placeholder{color:#8591a4}
+        .hint{font-size:13px;margin-top:7px}.example{color:#c2d0e3}button{width:100%;min-height:54px;margin-top:24px;border:0;border-radius:14px;background:#58d9cb;color:#092322;font-size:17px;font-weight:750}
+        button:disabled{opacity:.55}.message{margin-top:16px;padding:13px 15px;border-radius:12px;background:#13352f;color:#b9f2e9;line-height:1.5}.message.error{background:#3b2528;color:#ffd4d5}
+        .foot{font-size:13px;margin:20px 4px 0}a{color:#80dfd5}
+        </style></head><body>
+        <div class="eyebrow">KANATA · APPLE TV</div><h1>用手机添加媒体源</h1>
+        <p class="intro">填写服务器地址与登录信息，Kanata 会在电视上测试连接。请让电视保持在二维码页面。</p>
+        <form id="source-form" class="card" method="post" action="/save?token=\(token)">
+          <div class="field"><label for="kind">媒体源类型</label><select id="kind" name="kind"><option value="webDAV">WebDAV</option><option value="jellyfin">Jellyfin</option><option value="emby">Emby</option><option value="synology">群晖 DSM</option></select></div>
+          <div class="field"><label for="name">显示名称 <span class="hint">（可选）</span></label><input id="name" name="name" autocomplete="off" placeholder="例如：客厅 NAS"></div>
+          <div class="field"><label for="serverAddress">服务器地址</label><input id="serverAddress" name="serverAddress" required spellcheck="false" autocapitalize="none" autocorrect="off" inputmode="url" placeholder="https://nas.example.com:5006" aria-describedby="address-hint"><p id="address-hint" class="hint">可粘贴完整网址，端口与子路径会保留。只填域名/IP 时将使用该类型的常用协议和端口。</p></div>
+          <div id="root-field" class="field"><label for="rootPath">媒体起始目录 <span class="hint">（可选）</span></label><input id="rootPath" name="rootPath" value="/" spellcheck="false" autocapitalize="none" autocorrect="off" placeholder="例如 /video"><p class="hint">从此目录开始浏览媒体。<span class="example">/</span> 表示 WebDAV 根目录；它与服务器网址里的部署路径不同。</p></div>
+          <div class="field"><label for="username">用户名</label><input id="username" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" placeholder="服务器账号"></div>
+          <div class="field"><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" placeholder="服务器密码"></div>
+          <div id="otp-field" class="field" hidden><label for="otp">群晖两步验证码 <span class="hint">（如已开启）</span></label><input id="otp" name="otp" inputmode="numeric" autocomplete="one-time-code"></div>
+          <button id="submit" type="submit">测试连接并保存到电视</button><div id="message" class="message" role="status" aria-live="polite" hidden></div>
+        </form>
+        <p class="foot">手机和 Apple TV 需连接同一可信 Wi‑Fi。密码只会保存在 Apple TV 的 Keychain。Plex 请在电视上授权。</p>
+        <script>
+        const form=document.getElementById('source-form'),kind=document.getElementById('kind'),address=document.getElementById('serverAddress'),message=document.getElementById('message'),submit=document.getElementById('submit');
+        /** 按媒体源类型显示对应字段及地址示例。 */
+        function updateKind(){const value=kind.value;document.getElementById('root-field').hidden=value!=='webDAV';document.getElementById('otp-field').hidden=value!=='synology';address.placeholder=({webDAV:'https://nas.example.com:5006',jellyfin:'http://nas.example.com:8096',emby:'http://nas.example.com:8096',synology:'https://nas.example.com:5001'})[value];document.getElementById('username').required=value!=='webDAV';document.getElementById('password').required=value!=='webDAV';}
+        /** 在表单内显示电视返回的连接结果。 */
+        function showMessage(value,error){message.hidden=false;message.className='message'+(error?' error':'');message.textContent=value;message.scrollIntoView({block:'nearest',behavior:'smooth'});}
+        /** 保留输入内容并等待电视完成实际连接测试。 */
+        async function sendForm(event){event.preventDefault();if(!form.reportValidity())return;submit.disabled=true;submit.textContent='电视正在测试连接…';showMessage('正在连接，请保持电视停留在二维码页面。',false);try{const response=await fetch(form.action,{method:'POST',body:new URLSearchParams(new FormData(form)),headers:{'Content-Type':'application/x-www-form-urlencoded'}});const result=await response.json();showMessage(result.message||'连接失败，请重试。',!result.success);if(result.success){submit.textContent='已保存到电视';return;}}catch(error){showMessage('无法连接 Apple TV，请检查同一 Wi‑Fi 并重新扫码。',true);}submit.disabled=false;submit.textContent='重新测试连接';}
+        kind.addEventListener('change',updateKind);form.addEventListener('submit',sendForm);updateKind();
+        </script></body></html>
         """
     }
 
@@ -241,6 +259,16 @@ private final class TVPairingHTTPServer: @unchecked Sendable {
         """
         <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kanata 配置</title><style>body{font-family:-apple-system,sans-serif;background:#07101f;color:#fff;padding:40px;line-height:1.6}.card{max-width:560px;margin:auto;background:#121d30;border-radius:20px;padding:24px}</style></head><body><div class="card"><h1>Kanata</h1><p>\(message)</p></div></body></html>
         """
+    }
+
+    /// 将电视端真实连接结果返回手机，失败时保留用户已填写的表单。
+    private func sendJSON(success: Bool, message: String, connection: NWConnection) {
+        let value: [String: Any] = ["success": success, "message": message]
+        let body = (try? JSONSerialization.data(withJSONObject: value)) ?? Data("{}".utf8)
+        let header = "HTTP/1.1 \(success ? "200 OK" : "422 Unprocessable Content")\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: \(body.count)\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n"
+        var response = Data(header.utf8)
+        response.append(body)
+        connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
     }
 
     /// 发送 UTF-8 HTML 响应并关闭当前连接。
@@ -265,6 +293,7 @@ private final class TVMediaSourcePairingServer {
     var qrImage: UIImage?
     var statusText = "正在启动局域网配对…"
     var savedProfile: MediaSourceProfile?
+    private var isConnecting = false
     private var server: TVPairingHTTPServer?
 
     /// 启动一次新的随机令牌配对会话。
@@ -272,7 +301,7 @@ private final class TVMediaSourcePairingServer {
         guard server == nil else { return }
         do {
             let value = try TVPairingHTTPServer { [weak self] payload in
-                Task { @MainActor in await self?.connect(payload) }
+                await self?.connect(payload) ?? (false, "配对已结束，请重新扫码。")
             }
             server = value
             value.start { [weak self] result in
@@ -306,11 +335,15 @@ private final class TVMediaSourcePairingServer {
 
     /// 验证手机提交的凭证，成功后写入媒体源历史和 Keychain。
     /// - Parameter payload: 手机表单提交的结构化配置。
-    private func connect(_ payload: TVMediaSourcePairingPayload) async {
-        guard savedProfile == nil, let url = payload.serverURL() else {
+    private func connect(_ payload: TVMediaSourcePairingPayload) async -> (Bool, String) {
+        guard savedProfile == nil else { return (false, "当前配对已完成，请在电视上重新打开手机配置。") }
+        guard !isConnecting else { return (false, "电视正在测试上一份配置，请稍后再试。") }
+        guard let url = payload.serverURL() else {
             statusText = "服务器地址无效，请在手机上检查后重新提交"
-            return
+            return (false, statusText)
         }
+        isConnecting = true
+        defer { isConnecting = false }
         statusText = "正在测试 \(payload.kind.title) 连接…"
         do {
             let secret: MediaSourceSecret
@@ -347,9 +380,11 @@ private final class TVMediaSourcePairingServer {
             )
             savedProfile = profile
             statusText = "“\(profile.name)”已连接并安全保存，可以返回媒体源列表"
-            stop()
+            return (true, statusText)
         } catch {
-            statusText = "连接失败：\(error.localizedDescription)。请在手机上修改后重新提交"
+            let detail = error is URLError ? "无法连接服务器，请检查地址、端口和网络。" : error.localizedDescription
+            statusText = "连接失败：\(detail)"
+            return (false, statusText)
         }
     }
 
