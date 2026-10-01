@@ -1661,6 +1661,11 @@ struct PlayerScreen: View {
             .playerGlassSurface(cornerRadius: 20, tint: Color.black.opacity(0.24))
             .foregroundStyle(.white)
         case .failed(let message):
+            #if os(tvOS)
+            let actionLayout = AnyLayout(HStackLayout(spacing: 16))
+            #else
+            let actionLayout = AnyLayout(VStackLayout(spacing: 12))
+            #endif
             VStack(spacing: 18) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 54, weight: .semibold))
@@ -1672,36 +1677,48 @@ struct PlayerScreen: View {
                     .foregroundStyle(.white.opacity(0.74))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 760)
-                HStack(spacing: 16) {
+                actionLayout {
                     if !isUsingCompatibilityStream, isCompatibilityAvailable {
                         Button("兼容播放") { retryWithCompatibilityStream() }
                             .buttonStyle(KanataPrimaryButtonStyle())
-                            .frame(width: 220)
                             #if os(tvOS)
+                            .frame(width: 220)
                             .focused($tvFocusedControl, equals: .failureCompatibility)
+                            #else
+                            .frame(maxWidth: .infinity)
                             #endif
                     }
                     Button("重试") {
                         Task { await openActiveItem() }
                     }
                     .buttonStyle(KanataSecondaryButtonStyle())
-                    .frame(width: 220)
                     #if os(tvOS)
+                    .frame(width: 220)
                     .focused($tvFocusedControl, equals: .failureRetry)
+                    #else
+                    .frame(maxWidth: .infinity)
                     #endif
                     Button("返回") { handleBack() }
                         .buttonStyle(KanataSecondaryButtonStyle())
-                        .frame(width: 220)
                         #if os(tvOS)
+                        .frame(width: 220)
                         .focused($tvFocusedControl, equals: .failureBack)
+                        #else
+                        .frame(maxWidth: .infinity)
                         #endif
                 }
                 #if os(tvOS)
                 .focusSection()
                 #endif
             }
+            #if os(tvOS)
             .padding(.horizontal, 46)
             .padding(.vertical, 38)
+            #else
+            .frame(maxWidth: 340)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 28)
+            #endif
             .foregroundStyle(.white)
             .playerGlassSurface(cornerRadius: 30, tint: Color.black.opacity(0.28))
             .shadow(color: .black.opacity(0.30), radius: 28, y: 14)
