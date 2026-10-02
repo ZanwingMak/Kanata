@@ -82,13 +82,15 @@ struct MediaSourceSheet: View {
     ///   - onSourcesChanged: 历史媒体源变化后的刷新回调。
     ///   - usesParentNavigation: 是否由外层 NavigationStack 管理返回层级。
     ///   - initiallyBrowsingProfile: 首次进入时要打开的已有连接。
+    ///   - initiallyEditingProfile: 首次进入时要修改的失效连接。
     init(
         onAdd: @escaping ([LibraryItem]) -> Void,
         onImport: @escaping ([LibraryItem]) -> Void,
         onReturnHome: @escaping () -> Void,
         onSourcesChanged: @escaping () -> Void,
         usesParentNavigation: Bool = false,
-        initiallyBrowsingProfile: MediaSourceProfile? = nil
+        initiallyBrowsingProfile: MediaSourceProfile? = nil,
+        initiallyEditingProfile: MediaSourceProfile? = nil
     ) {
         self.onAdd = onAdd
         self.onImport = onImport
@@ -96,6 +98,7 @@ struct MediaSourceSheet: View {
         self.onSourcesChanged = onSourcesChanged
         self.usesParentNavigation = usesParentNavigation
         _browsingProfile = State(initialValue: initiallyBrowsingProfile)
+        _editingProfile = State(initialValue: initiallyEditingProfile)
     }
 
     @ViewBuilder

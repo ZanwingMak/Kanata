@@ -3230,6 +3230,10 @@ struct PlayerScreen: View {
 
     /// 处理播放器返回动作；横屏全屏时优先恢复竖屏，再次点击才关闭播放器。
     private func handleBack() {
+        if isPlaybackFailed {
+            dismissPlayer()
+            return
+        }
         #if os(iOS)
         if isLandscapeFullscreen || PlayerOrientationController.isLandscape() {
             guard !isChangingOrientation else { return }

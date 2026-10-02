@@ -80,6 +80,9 @@ struct LibraryView: View {
     #endif
     @State private var progressRevision = 0
     @State private var sourceHealth: [String: MediaSourceHealth] = [:]
+    @State private var sourceFailureReasons: [String: String] = [:]
+    @State private var sourceToDiagnose: MediaSourceProfile?
+    @State private var sourceToEditFromHome: MediaSourceProfile?
     @State private var filterMode = LibraryFilterMode.all
     @State private var sortMode = LibrarySortMode.added
     @State private var favoriteIDs = LibraryFavoriteStore.load()
@@ -496,6 +499,23 @@ struct LibraryView: View {
             } message: {
                 Text(mediaSourceNotice ?? "")
             }
+            .alert(
+                "媒体源连接失败",
+                isPresented: Binding(
+                    get: { sourceToDiagnose != nil },
+                    set: { if !$0 { sourceToDiagnose = nil } }
+                )
+            ) {
+                if let profile = sourceToDiagnose {
+                    Button("重试") { Task { await retrySource(profile) } }
+                    Button("编辑连接") { openSourceEditor(profile) }
+                }
+                Button("稍后", role: .cancel) { sourceToDiagnose = nil }
+            } message: {
+                if let profile = sourceToDiagnose {
+                    Text("\(profile.name)：\(sourceFailureReasons[profile.id] ?? "连接暂时不可用")")
+                }
+            }
             #if !os(tvOS)
             .fullScreenCover(item: $playing, onDismiss: {
                 progressRevision += 1
@@ -552,11 +572,15 @@ struct LibraryView: View {
                     onReturnHome: returnToLibraryAfterAddingSource,
                     onSourcesChanged: reloadMediaSources,
                     usesParentNavigation: true,
-                    initiallyBrowsingProfile: sourceToOpenFromHome
+                    initiallyBrowsingProfile: sourceToOpenFromHome,
+                    initiallyEditingProfile: sourceToEditFromHome
                 )
             }
             .onChange(of: isAddingMediaSource) { _, isPresented in
-                if !isPresented { sourceToOpenFromHome = nil }
+                if !isPresented {
+                    sourceToOpenFromHome = nil
+                    sourceToEditFromHome = nil
+                }
             }
             #else
             .sheet(isPresented: $isShowingSettings) {
@@ -567,8 +591,12 @@ struct LibraryView: View {
                     onAdd: addMediaSourceItems,
                     onImport: addImportedMediaSourceItems,
                     onReturnHome: returnToLibraryAfterAddingSource,
-                    onSourcesChanged: reloadMediaSources
+                    onSourcesChanged: reloadMediaSources,
+                    initiallyEditingProfile: sourceToEditFromHome
                 )
+            }
+            .onChange(of: isAddingMediaSource) { _, isPresented in
+                if !isPresented { sourceToEditFromHome = nil }
             }
             .sheet(item: $browsingSource) { profile in
                 NavigationStack {
@@ -965,6 +993,10 @@ struct LibraryView: View {
                 LazyHStack(spacing: 12) {
                     ForEach(mediaSources) { profile in
                         Button {
+                            if sourceHealth[profile.id] == .offline {
+                                sourceToDiagnose = profile
+                                return
+                            }
                             #if os(tvOS)
                             sourceToOpenFromHome = profile
                             isAddingMediaSource = true
@@ -1052,6 +1084,7 @@ struct LibraryView: View {
     /// - Parameter profile: 要探测的历史连接。
     private func checkSource(_ profile: MediaSourceProfile) async {
         sourceHealth[profile.id] = .checking
+        sourceFailureReasons[profile.id] = nil
         do {
             switch profile.kind {
             case .webDAV:
@@ -1067,8 +1100,61 @@ struct LibraryView: View {
             }
             sourceHealth[profile.id] = .online
         } catch {
+            sourceFailureReasons[profile.id] = sourceFailureReason(error)
             sourceHealth[profile.id] = .offline
         }
+    }
+
+    /// 将媒体源错误转成用户可以据此检查连接的具体原因。
+    private func sourceFailureReason(_ error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost:
+                return "设备网络已断开，请检查网络后重试。"
+            case .cannotFindHost, .cannotConnectToHost, .timedOut:
+                return "无法访问服务器，请检查地址、端口和 NAS 网络。"
+            case .serverCertificateUntrusted, .serverCertificateHasBadDate, .secureConnectionFailed:
+                return "HTTPS 证书验证失败，请检查服务器证书。"
+            default:
+                return urlError.localizedDescription
+            }
+        }
+        if let sourceError = error as? MediaSourceError {
+            switch sourceError {
+            case .authenticationFailed, .missingCredential, .http(401), .http(403):
+                return "登录凭证无效或已过期，请编辑连接后重试。"
+            case .http(404):
+                return "服务器路径不存在，请检查媒体起始目录。"
+            case .http(let status):
+                return "服务器返回 HTTP \(status)，请检查服务状态。"
+            case .invalidResponse:
+                return "服务器响应无法识别，请检查地址和服务类型。"
+            }
+        }
+        return error.localizedDescription
+    }
+
+    /// 重新探测失效媒体源，恢复后直接打开该连接。
+    private func retrySource(_ profile: MediaSourceProfile) async {
+        sourceToDiagnose = nil
+        await checkSource(profile)
+        guard sourceHealth[profile.id] == .online else {
+            sourceToDiagnose = profile
+            return
+        }
+        #if os(tvOS)
+        sourceToOpenFromHome = profile
+        isAddingMediaSource = true
+        #else
+        browsingSource = profile
+        #endif
+    }
+
+    /// 从失效提示直接打开现有连接的编辑表单。
+    private func openSourceEditor(_ profile: MediaSourceProfile) {
+        sourceToDiagnose = nil
+        sourceToEditFromHome = profile
+        isAddingMediaSource = true
     }
 
     /// 创建一个带视频缩略图、来源与删除菜单的媒体卡片。

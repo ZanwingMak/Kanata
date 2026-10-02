@@ -66,6 +66,31 @@ enum KanataAccentTheme: String, CaseIterable, Identifiable {
         [accent, ambientCompanion, ambientHighlight]
     }
 
+    /// 让普通卡片也带有当前主题的色调，切换主题时整体界面同步变化。
+    var surface: Color {
+        Color(uiColor: UIColor { traits in
+            let isLight = traits.userInterfaceStyle == .light
+            let base = isLight
+                ? UIColor(red: 0.98, green: 0.985, blue: 0.995, alpha: 1)
+                : UIColor(red: 0.085, green: 0.095, blue: 0.115, alpha: 1)
+            return tintedSurface(base: base, accent: isLight ? lightAccent : darkAccent, amount: isLight ? 0.09 : 0.16)
+        })
+    }
+
+    /// 按固定比例混合卡片底色与主题色，并保持文本对比度。
+    private func tintedSurface(base: UIColor, accent: UIColor, amount: CGFloat) -> UIColor {
+        var baseRed: CGFloat = 0, baseGreen: CGFloat = 0, baseBlue: CGFloat = 0, baseAlpha: CGFloat = 0
+        var accentRed: CGFloat = 0, accentGreen: CGFloat = 0, accentBlue: CGFloat = 0, accentAlpha: CGFloat = 0
+        base.getRed(&baseRed, green: &baseGreen, blue: &baseBlue, alpha: &baseAlpha)
+        accent.getRed(&accentRed, green: &accentGreen, blue: &accentBlue, alpha: &accentAlpha)
+        return UIColor(
+            red: baseRed * (1 - amount) + accentRed * amount,
+            green: baseGreen * (1 - amount) + accentGreen * amount,
+            blue: baseBlue * (1 - amount) + accentBlue * amount,
+            alpha: 1
+        )
+    }
+
     /// 浅色背景使用较深的强调色，保证文字、图标与开关对比度。
     private var lightAccent: UIColor {
         switch self {
@@ -241,11 +266,7 @@ enum KanataTheme {
             ? UIColor(red: 0.95, green: 0.96, blue: 0.98, alpha: 1)
             : UIColor(red: 0.035, green: 0.041, blue: 0.055, alpha: 1)
     })
-    static let surface = Color(uiColor: UIColor { traits in
-        traits.userInterfaceStyle == .light
-            ? UIColor(red: 0.98, green: 0.985, blue: 0.995, alpha: 0.88)
-            : UIColor(red: 0.085, green: 0.095, blue: 0.115, alpha: 0.96)
-    })
+    static var surface: Color { currentAccentTheme.surface }
     static let elevatedSurface = Color(uiColor: UIColor { traits in
         traits.userInterfaceStyle == .light
             ? UIColor(red: 1, green: 1, blue: 1, alpha: 0.96)
@@ -280,15 +301,15 @@ struct KanataAmbientBackground: View {
             )
             LinearGradient(
                 colors: [
-                    theme.ambientCompanion.opacity(colorScheme == .dark ? 0.08 : 0.08),
+                    theme.ambientCompanion.opacity(colorScheme == .dark ? 0.28 : 0.20),
                     .clear,
-                    theme.accent.opacity(colorScheme == .dark ? 0.06 : 0.06),
+                    theme.accent.opacity(colorScheme == .dark ? 0.25 : 0.17),
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             LinearGradient(
-                colors: [.clear, theme.ambientHighlight.opacity(colorScheme == .dark ? 0.07 : 0.04)],
+                colors: [.clear, theme.ambientHighlight.opacity(colorScheme == .dark ? 0.19 : 0.13)],
                 startPoint: .top,
                 endPoint: .bottomTrailing
             )
@@ -303,6 +324,7 @@ struct KanataAmbientBackground: View {
 private struct KanataGlassSurfaceModifier: ViewModifier {
     let cornerRadius: CGFloat
     let isElevated: Bool
+    @Environment(AppSettings.self) private var settings
 
     /// 绘制带主题染色、内高光和柔和阴影的玻璃表面。
     /// - Parameter content: 需要承载的卡片内容。
@@ -312,7 +334,7 @@ private struct KanataGlassSurfaceModifier: ViewModifier {
         if isElevated {
             content.kanataFloatingSurface(cornerRadius: cornerRadius)
         } else {
-            content.background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: cornerRadius))
+            content.background(settings.accentTheme.surface, in: RoundedRectangle(cornerRadius: cornerRadius))
         }
     }
 }
@@ -398,6 +420,7 @@ extension View {
 /// 适合表单主操作的高对比度按钮样式。
 struct KanataPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(AppSettings.self) private var settings
     #if os(tvOS)
     @Environment(\.isFocused) private var isFocused
     #endif
@@ -416,8 +439,8 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
             .background(
                 LinearGradient(
                     colors: isEnabled
-                        ? [KanataTheme.actionFill, KanataTheme.actionFillStrong]
-                        : [KanataTheme.surface, KanataTheme.surface],
+                        ? [settings.accentTheme.actionFill, settings.accentTheme.actionFillStrong]
+                        : [settings.accentTheme.surface, settings.accentTheme.surface],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
@@ -454,6 +477,7 @@ struct KanataPrimaryButtonStyle: ButtonStyle {
 
 /// 适合列表和设置页次级操作的表面按钮样式。
 struct KanataSecondaryButtonStyle: ButtonStyle {
+    @Environment(AppSettings.self) private var settings
     #if os(tvOS)
     @Environment(\.isFocused) private var isFocused
     #endif
@@ -490,7 +514,7 @@ struct KanataSecondaryButtonStyle: ButtonStyle {
         #if os(tvOS)
         if isFocused { return KanataTheme.elevatedSurface }
         #endif
-        return KanataTheme.surface
+        return settings.accentTheme.surface
     }
 
     /// 返回次级按钮在电视高亮状态下的高对比度文字颜色。
@@ -749,6 +773,7 @@ struct KanataRowLabel: View {
 
 /// 在设置页中直观展示主题色与环境光配色。
 struct KanataThemePreview: View {
+    @Environment(AppSettings.self) private var settings
     let theme: KanataAccentTheme
     let isSelected: Bool
 
@@ -783,7 +808,7 @@ struct KanataThemePreview: View {
             }
         }
         .padding(12)
-        .background(KanataTheme.surface, in: RoundedRectangle(cornerRadius: 16))
+        .background(settings.accentTheme.surface, in: RoundedRectangle(cornerRadius: 16))
         #else
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
