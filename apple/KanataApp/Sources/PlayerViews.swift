@@ -270,7 +270,7 @@ struct DanmakuOverlay: UIViewRepresentable {
 }
 
 /// 弹幕设置面板（FR-DMK-103 / FR-SYNC-001）。
-/// 字号与延迟是使用频率最高的两项，放在最上方。
+/// Apple TV 把播放中常用的开关、密度和延迟放在最上方。
 struct DanmakuSettingsPanel: View {
     @Binding var config: DanmakuRenderConfig
     @Binding var offset: Double
@@ -288,6 +288,27 @@ struct DanmakuSettingsPanel: View {
                 TVPlayerPanelHeader(title: "弹幕设置", onClose: closePanel)
                 #endif
             KanataSettingsForm {
+                #if os(tvOS)
+                Section("观看时常用") {
+                    Toggle("显示弹幕", isOn: $config.enabled)
+                    TVValueAdjuster(
+                        title: "同屏上限",
+                        value: "\(config.densityLimit) 条",
+                        onDecrement: { config.densityLimit = max(25, config.densityLimit - 25) },
+                        onIncrement: { config.densityLimit = min(500, config.densityLimit + 25) }
+                    )
+                    delayControls
+                    HStack(spacing: 14) {
+                        ForEach([DanmakuDisplayArea.half, .threeQuarters, .full], id: \.self) { area in
+                            Button(area == .half ? "半屏" : area == .threeQuarters ? "3/4 屏" : "全屏") {
+                                config.displayArea = area
+                            }
+                            .buttonStyle(TVDanmakuChoiceButtonStyle(isSelected: config.displayArea == area))
+                        }
+                    }
+                    .focusSection()
+                }
+                #endif
                 Section("清晰样式") {
                     Button {
                         applyReadableDanmakuStyle()
@@ -353,43 +374,22 @@ struct DanmakuSettingsPanel: View {
                     #endif
                 }
 
+                #if !os(tvOS)
                 Section("弹幕延迟") {
-                    HStack {
-                        Text(offsetLabel)
-                            .monospacedDigit()
-                            .frame(width: 80, alignment: .leading)
-                        Spacer()
-                        Button {
-                            offset -= TimelineResolver.offsetStep
-                            onOffsetChanged()
-                        } label: {
-                            Image(systemName: "minus.circle.fill").font(.title2)
-                        }
-                        Button {
-                            offset += TimelineResolver.offsetStep
-                            onOffsetChanged()
-                        } label: {
-                            Image(systemName: "plus.circle.fill").font(.title2)
-                        }
-                        Button("归零") {
-                            offset = 0
-                            onOffsetChanged()
-                        }
-                        .font(.footnote)
-                    }
-                    .buttonStyle(.plain)
-                    #if !os(tvOS)
+                    delayControls
                     Slider(value: $offset, in: -120...120, step: TimelineResolver.offsetStep) { editing in
                         if !editing { onOffsetChanged() }
                     }
-                    #endif
                     Text("正值表示弹幕延后播放。设置会按季记住，同季其他集自动沿用。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                #endif
 
                 Section("显示") {
+                    #if !os(tvOS)
                     Toggle("显示弹幕", isOn: $config.enabled)
+                    #endif
                     #if os(tvOS)
                     TVValueAdjuster(
                         title: "不透明度",
@@ -434,12 +434,6 @@ struct DanmakuSettingsPanel: View {
                         value: String(format: "%.1f", config.strokeWidth),
                         onDecrement: { config.strokeWidth = max(0, config.strokeWidth - 0.25) },
                         onIncrement: { config.strokeWidth = min(3, config.strokeWidth + 0.25) }
-                    )
-                    TVValueAdjuster(
-                        title: "同屏上限",
-                        value: "\(config.densityLimit) 条",
-                        onDecrement: { config.densityLimit = max(50, config.densityLimit - 50) },
-                        onIncrement: { config.densityLimit = min(500, config.densityLimit + 50) }
                     )
                     #else
                     HStack {
@@ -522,6 +516,34 @@ struct DanmakuSettingsPanel: View {
             }
             .background(KanataTheme.background.opacity(0.96))
         }
+    }
+
+    /// 播放中直接调整弹幕时间偏移，并保持与现有季级记忆逻辑一致。
+    private var delayControls: some View {
+        HStack {
+            Text(offsetLabel)
+                .monospacedDigit()
+                .frame(width: 80, alignment: .leading)
+            Spacer()
+            Button {
+                offset -= TimelineResolver.offsetStep
+                onOffsetChanged()
+            } label: {
+                Image(systemName: "minus.circle.fill").font(.title2)
+            }
+            Button {
+                offset += TimelineResolver.offsetStep
+                onOffsetChanged()
+            } label: {
+                Image(systemName: "plus.circle.fill").font(.title2)
+            }
+            Button("归零") {
+                offset = 0
+                onOffsetChanged()
+            }
+            .font(.footnote)
+        }
+        .buttonStyle(.plain)
     }
 
     /// 根据承载方式关闭系统 Sheet 或 tvOS 右侧抽屉。

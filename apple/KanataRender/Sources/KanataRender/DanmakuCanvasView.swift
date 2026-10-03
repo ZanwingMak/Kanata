@@ -143,6 +143,11 @@ public final class DanmakuCanvasView: UIView {
         if config.opacity != previous.opacity {
             for item in active { item.layer.opacity = Float(config.opacity) }
         }
+        if active.count > config.densityLimit {
+            let overflow = active.count - max(config.densityLimit, 0)
+            for item in active.suffix(overflow) { item.layer.removeFromSuperlayer() }
+            active.removeLast(overflow)
+        }
         if !config.enabled {
             for item in active { item.layer.removeFromSuperlayer() }
             active.removeAll()
@@ -245,8 +250,8 @@ public final class DanmakuCanvasView: UIView {
         let now = currentTime
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        spawn(until: now)
         advance(to: now)
+        spawn(until: now)
         CATransaction.commit()
     }
 
@@ -260,8 +265,8 @@ public final class DanmakuCanvasView: UIView {
             cursor += 1
             // 落后超过一屏时长的弹幕直接跳过，避免 seek 后瞬间堆积
             guard now - item.time < config.scrollDuration else { continue }
-            // 密度限流：超过上限时丢弃低权重弹幕（FR-DMK-104）
-            if active.count >= config.densityLimit, (item.weight ?? 5) < 5 { continue }
+            // 同屏数量达到上限时停止入场，避免高权重弹幕突破用户设定的密度。
+            guard active.count < config.densityLimit else { continue }
             appendDanmaku(item, at: now, screenWidth: screenWidth)
         }
     }

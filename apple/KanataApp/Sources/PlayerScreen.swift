@@ -1416,7 +1416,7 @@ struct PlayerScreen: View {
         )
     }
 
-    /// 计算弹幕可用画布；竖屏避开顶部栏，横屏只保留上下间距且不改变左右范围。
+    /// 计算弹幕可用画布；播放字幕时预留底部阅读区域。
     /// - Parameters:
     ///   - size: 播放器容器尺寸。
     ///   - safeAreaInsets: 当前方向的系统安全区。
@@ -1428,7 +1428,10 @@ struct PlayerScreen: View {
         let bounds = CGRect(origin: .zero, size: size)
         let portrait = size.height > size.width
         let protectedTop = safeAreaInsets.top + (portrait ? 14 : 12)
-        let protectedBottom = size.height - safeAreaInsets.bottom - (portrait ? 6 : 12)
+        let hasSubtitles = (isExternalSubtitleEnabled && externalSubtitleName != nil)
+            || viewModel.selectedSubtitleTrackID != "off"
+        let subtitleInset = hasSubtitles ? max(portrait ? 48 : 72, size.height * 0.12) : 0
+        let protectedBottom = size.height - safeAreaInsets.bottom - (portrait ? 6 : 12) - subtitleInset
         let left = bounds.minX
         let right = bounds.maxX
         let top = max(bounds.minY, protectedTop)
@@ -3099,14 +3102,20 @@ struct PlayerScreen: View {
         activeItem.collectionID ?? activeItem.collectionTitle ?? activeItem.title
     }
 
-    /// 生成自动弹幕匹配名称；合集优先使用作品名与显式集号，避免服务器播放路径中的 `file`。
+    /// 用媒体库的作品名、季号和集号生成匹配词，避免季目录或冗长文件名降低命中率。
     private var automaticMatchName: String {
-        guard let collectionTitle = activeItem.collectionTitle,
-              !collectionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return activeItem.displayName
-        }
+        let collectionTitle = activeItem.collectionTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let parsedTitle = activeItem.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isSeasonFolder = collectionTitle.range(
+            of: #"(?i)^(?:season|series|s)\s*0*\d{1,3}$|^第?\s*0*\d{1,3}\s*[季期部]$"#,
+            options: .regularExpression
+        ) != nil
+        let title = !collectionTitle.isEmpty && !isSeasonFolder
+            ? collectionTitle
+            : (parsedTitle.isEmpty ? activeItem.displayName : parsedTitle)
         let episode = activeItem.episode ?? activeItem.collectionIndex
-        return episode.map { "\(collectionTitle) E\($0)" } ?? collectionTitle
+        guard let episode else { return title }
+        return "\(title) S\(activeItem.season ?? 1)E\(episode)"
     }
 
     /// 播放器顶部同时显示作品名和当前集数。
@@ -4058,6 +4067,12 @@ struct CandidatePicker: View {
                     .font(.headline)
                     .foregroundStyle(.secondary)
             }
+            if let parsed = viewModel.parsed {
+                Text("当前视频：\(parsed.title)\(parsed.season.map { " · 第 \($0) 季" } ?? "")\(parsed.episode.map { " · 第 \($0) 集" } ?? "")")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             if viewModel.candidates.isEmpty {
                 VStack(spacing: 18) {
                     Image(systemName: viewModel.isSearchingCandidates ? "hourglass" : "text.magnifyingglass")
@@ -4187,6 +4202,11 @@ struct CandidatePicker: View {
             )
             .font(.caption.weight(.semibold))
             .foregroundStyle(candidateAlignmentColor(candidate))
+            if viewModel.hasTimelineMismatch(for: candidate) {
+                Label("片长差异较大，请确认是否同一版本", systemImage: "clock.badge.exclamationmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(KanataTheme.warning)
+            }
         }
     }
 

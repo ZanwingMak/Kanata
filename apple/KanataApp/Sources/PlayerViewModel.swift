@@ -1,4 +1,5 @@
 import AVFoundation
+import CryptoKit
 import Foundation
 import KanataCore
 @preconcurrency import KSPlayer
@@ -161,6 +162,11 @@ final class PlayerViewModel {
         return localEpisode == remoteEpisode
             ? .matched(local: localEpisode, remote: remoteEpisode)
             : .mismatched(local: localEpisode, remote: remoteEpisode)
+    }
+
+    /// 标记候选片长与当前视频差异明显的情况，供来源列表提示用户核对版本。
+    func hasTimelineMismatch(for candidate: ProviderCandidate) -> Bool {
+        shouldHintTimeline(remote: candidate.duration)
     }
 
     /// 应用偏移后的弹幕，供渲染层使用
@@ -367,22 +373,31 @@ final class PlayerViewModel {
 
         danmakuStats = "正在匹配弹幕…"
         let fingerprint = try? FingerprintCalculator.compute(fileURL: url, duration: localDuration)
-        currentFingerprint = fingerprint
+        let bindingFingerprint = fingerprint ?? (url.isFileURL ? nil : Self.remoteBindingFingerprint(
+            mediaKey: mediaKey,
+            fileName: displayName,
+            duration: localDuration
+        ))
+        currentFingerprint = bindingFingerprint
 
-        if let fingerprint {
-            await loadPersistedLocalDanmaku(for: fingerprint)
+        if let bindingFingerprint {
+            await loadPersistedLocalDanmaku(for: bindingFingerprint)
         }
         guard canContinueDanmakuWork else { return }
 
-        let savedCandidate = fingerprint.flatMap { DanmakuBindingStore.candidate(for: $0) }
+        let savedCandidate = bindingFingerprint.flatMap { DanmakuBindingStore.candidate(for: $0) }
+            .flatMap { candidate -> ProviderCandidate? in
+                if case .mismatched = episodeAlignment(for: candidate) { return nil }
+                return candidate
+            }
         currentBinding = savedCandidate
 
         guard client != nil
                 || builtInClient != nil
                 || builtInPublicClient != nil
                 || dandanplayChannelClient != nil else {
-            if let fingerprint, let savedCandidate,
-               await restoreCachedDanmaku(for: savedCandidate, fingerprint: fingerprint) {
+            if let bindingFingerprint, let savedCandidate,
+               await restoreCachedDanmaku(for: savedCandidate, fingerprint: bindingFingerprint) {
                 return
             }
             danmakuStats = localItems.isEmpty
@@ -391,9 +406,9 @@ final class PlayerViewModel {
             return
         }
 
-        if let fingerprint, let savedCandidate {
+        if let bindingFingerprint, let savedCandidate {
             danmakuStats = "正在加载已保存的弹幕匹配…"
-            if await restoreCachedDanmaku(for: savedCandidate, fingerprint: fingerprint) {
+            if await restoreCachedDanmaku(for: savedCandidate, fingerprint: bindingFingerprint) {
                 return
             }
             if await loadDanmaku(for: savedCandidate, persistBinding: false) {
@@ -404,30 +419,66 @@ final class PlayerViewModel {
             danmakuStats = "已保存来源不可用，正在重新匹配…"
         }
 
-        let result = await resolveCandidates(
-            ResolveRequest(
-                title: parsedTitle.title,
-                season: parsedTitle.season,
-                episode: parsedTitle.isCollection ? nil : parsedTitle.episode,
-                duration: localDuration,
-                fingerprint: fingerprint
-            )
+        let request = ResolveRequest(
+            title: parsedTitle.title,
+            season: parsedTitle.season,
+            episode: parsedTitle.isCollection ? nil : parsedTitle.episode,
+            duration: localDuration,
+            year: parsedTitle.year,
+            fingerprint: fingerprint
         )
+        var result = await resolveCandidates(request)
+        var usedBroadSearch = false
+        if request.episode != nil,
+           (result.candidates.isEmpty || result.candidates.allSatisfy({ candidateEpisodePriority($0) == 0 })) {
+            // 平台采用绝对集号或特别篇编号时，放宽集号只用于展示候选，不直接自动绑定。
+            let fallback = await resolveCandidates(ResolveRequest(
+                title: request.title,
+                season: request.season,
+                episode: nil,
+                duration: request.duration,
+                year: request.year,
+                fingerprint: request.fingerprint
+            ))
+            if !fallback.candidates.isEmpty {
+                result = fallback
+                usedBroadSearch = true
+            }
+        }
         guard canContinueDanmakuWork else { return }
-        candidates = result.candidates
-        guard let best = result.candidates.first else {
+        candidates = Array(result.candidates.prefix(60))
+        guard let best = candidates.first else {
             let detail = result.errors.isEmpty ? "" : "（\(result.errors.joined(separator: "；"))）"
             danmakuStats = failureMessage("未匹配到弹幕\(detail)，可输入剧名、集数或平台链接搜索")
             isShowingCandidates = false
             return
         }
         // 置信度足够高时直接采用，否则保留候选并等待用户主动打开。
-        if best.confidence >= 0.9 {
+        if best.confidence >= 0.9,
+           !usedBroadSearch,
+           (candidateEpisodePriority(best) == 2 || parsedTitle.episode == nil),
+           !hasTimelineMismatch(for: best) {
             await loadDanmaku(for: best)
         } else {
-            danmakuStats = "找到 \(result.candidates.count) 个候选，可打开匹配选择"
+            danmakuStats = "找到 \(candidates.count) 个候选，可打开匹配选择"
             isShowingCandidates = false
         }
+    }
+
+    /// 为网络媒体生成仅用于本机绑定和缓存的稳定键，不参与平台文件指纹请求。
+    private static func remoteBindingFingerprint(
+        mediaKey: String,
+        fileName: String,
+        duration: Double
+    ) -> MediaFingerprint {
+        let digest = SHA256.hash(data: Data(mediaKey.utf8))
+        let hash = digest.map { String(format: "%02x", $0) }.joined()
+        return MediaFingerprint(
+            fileName: URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent,
+            fileHash: "remote-\(hash)",
+            fileSize: 0,
+            videoDuration: duration.isFinite ? Int(max(0, duration.rounded())) : 0
+        )
     }
 
     /// 选择自动匹配弹幕使用的名称，过滤媒体服务器常见的无意义路径段。
@@ -714,7 +765,7 @@ final class PlayerViewModel {
         return abs(localDuration - remote) / localDuration > 0.05
     }
 
-    /// 手动搜索并刷新候选列表
+    /// 解析用户明确输入的季集号；搜索失败时回退作品级结果供手动选择。
     func search(keyword: String) async {
         let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canContinueDanmakuWork,
@@ -729,15 +780,24 @@ final class PlayerViewModel {
         isSearchingCandidates = true
         defer { isSearchingCandidates = false }
         danmakuStats = "正在搜索…"
-        // 手动搜索不强制文件名解析出的集号，避免错误集号把全部候选过滤掉。
-        let result = await resolveCandidates(
-            ResolveRequest(title: query, duration: localDuration)
-        )
+        let isDirectLink = query.contains("://")
+            || query.range(of: #"(?i)^(?:BV[0-9A-Za-z]+|(?:ep|ss)\d+)$"#, options: .regularExpression) != nil
+        let parsedQuery = isDirectLink ? nil : TitleParser.parse(query)
+        let title = parsedQuery.flatMap { $0.title.isEmpty ? nil : $0.title } ?? query
+        var result = await resolveCandidates(ResolveRequest(
+            title: title,
+            season: parsedQuery?.season,
+            episode: parsedQuery?.episode,
+            duration: localDuration
+        ))
+        if result.candidates.isEmpty, parsedQuery?.episode != nil {
+            result = await resolveCandidates(ResolveRequest(title: title, duration: localDuration))
+        }
         guard canContinueDanmakuWork else { return }
-        candidates = result.candidates
-        danmakuStats = result.candidates.isEmpty
+        candidates = Array(result.candidates.prefix(60))
+        danmakuStats = candidates.isEmpty
             ? "没有找到结果\(result.errors.isEmpty ? "" : "：\(result.errors.joined(separator: "；"))")"
-            : "找到 \(result.candidates.count) 个候选"
+            : "找到 \(candidates.count) 个候选"
     }
 
     /// 读取当前视频此前导入的本地弹幕归档。
