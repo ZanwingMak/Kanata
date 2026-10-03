@@ -388,11 +388,11 @@ struct LibraryView: View {
                 }
             }
             #if os(tvOS)
-            .safeAreaInset(edge: .top, spacing: 24) {
+            .safeAreaInset(edge: .top, spacing: 20) {
                 tvLibraryHeader
                     .padding(.horizontal, libraryHorizontalPadding)
-                    .padding(.bottom, 18)
-                    .background(KanataTheme.background.opacity(0.96))
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
             }
             .navigationTitle("")
             #else
@@ -654,19 +654,33 @@ struct LibraryView: View {
     #if os(tvOS)
     /// 构建 Apple TV 首页标题和带文字的主要操作，避免用户猜测小图标含义。
     private var tvLibraryHeader: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Kanata")
-                    .font(.system(size: 38, weight: .bold, design: .rounded))
-                Text("你的私人影院")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            HStack(spacing: 14) {
+                Image(systemName: "play.rectangle.on.rectangle.fill")
+                    .font(.system(size: 27, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 58, height: 58)
+                    .background(
+                        LinearGradient(
+                            colors: [KanataTheme.accent, KanataTheme.ambientCompanion],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Kanata")
+                        .font(.system(size: 33, weight: .bold, design: .rounded))
+                    Text("你的私人影院")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
             }
-            Spacer(minLength: 40)
+            Spacer(minLength: 24)
             Button { isShowingSettings = true } label: {
                 Label("设置", systemImage: "gearshape")
             }
-            .buttonStyle(KanataTVActionButtonStyle())
+            .buttonStyle(TVLibraryHeaderButtonStyle())
             .focused($tvFocusedControl, equals: .settings)
             .onMoveCommand(perform: moveFromTVHeader)
             Button { isSearching = true } label: {
@@ -709,7 +723,7 @@ struct LibraryView: View {
             } label: {
                 Label("整理", systemImage: "arrow.up.arrow.down")
             }
-            .buttonStyle(KanataTVActionButtonStyle())
+            .buttonStyle(TVLibraryHeaderButtonStyle())
             .focused($tvFocusedControl, equals: .organize)
             .onMoveCommand(perform: moveFromTVHeader)
             .disabled(items.isEmpty && mediaSources.isEmpty)
@@ -722,11 +736,37 @@ struct LibraryView: View {
             } label: {
                 Label("添加", systemImage: "plus")
             }
-            .buttonStyle(KanataTVActionButtonStyle())
+            .buttonStyle(TVLibraryHeaderButtonStyle())
             .focused($tvFocusedControl, equals: .add)
             .onMoveCommand(perform: moveFromTVHeader)
         }
-        .padding(.top, 16)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 13)
+        .kanataFloatingSurface(cornerRadius: 30)
+        .overlay(alignment: .top) {
+            LinearGradient(
+                colors: [.clear, .white.opacity(0.44), KanataTheme.accent.opacity(0.24), .clear],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(height: 1)
+            .padding(.horizontal, 38)
+            .padding(.top, 2)
+            .allowsHitTesting(false)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [.white.opacity(0.34), .white.opacity(0.10), KanataTheme.accent.opacity(0.16)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+                .allowsHitTesting(false)
+        }
+        .shadow(color: KanataTheme.accent.opacity(0.10), radius: 24, y: 10)
         .focusSection()
     }
 
@@ -1609,9 +1649,34 @@ private extension View {
 }
 
 #if os(tvOS)
+/// 首页顶栏操作与玻璃容器共用轻量焦点高光。
+private struct TVLibraryHeaderButtonStyle: ButtonStyle {
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// 在玻璃底色上绘制稳定的遥控器焦点，不使用纯白填充。
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 24, weight: .semibold))
+            .foregroundStyle(Color.primary.opacity(isFocused ? 1 : 0.86))
+            .padding(.horizontal, 18)
+            .frame(minHeight: 60)
+            .background(KanataTheme.accent.opacity(isFocused ? 0.24 : 0.05), in: RoundedRectangle(cornerRadius: 18))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18)
+                    .strokeBorder(.white.opacity(isFocused ? 0.70 : 0.10), lineWidth: isFocused ? 2 : 1)
+            }
+            .focusEffectDisabled()
+            .scaleEffect(isFocused && !reduceMotion ? 1.04 : 1)
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isFocused)
+    }
+}
+
 /// Apple TV 首页搜索框区分输入入口与其它工具按钮，聚焦时保持高对比度。
 private struct TVLibrarySearchButtonStyle: ButtonStyle {
     @Environment(\.isFocused) private var isFocused
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// 绘制尺寸稳定的搜索入口，避免焦点材质覆盖文字。
     /// - Parameter configuration: 按钮当前状态。
@@ -1619,16 +1684,20 @@ private struct TVLibrarySearchButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 24, weight: .medium))
-            .foregroundStyle(isFocused ? Color.black : Color.white.opacity(0.84))
+            .foregroundStyle(Color.primary.opacity(isFocused ? 1 : 0.84))
             .padding(.horizontal, 22)
             .frame(height: 60)
-            .background(isFocused ? Color.white : KanataTheme.surface, in: RoundedRectangle(cornerRadius: 18))
+            .kanataFloatingSurface(cornerRadius: 18)
+            .background(KanataTheme.accent.opacity(isFocused ? 0.20 : 0.04), in: RoundedRectangle(cornerRadius: 18))
             .overlay {
                 RoundedRectangle(cornerRadius: 18)
-                    .strokeBorder(isFocused ? KanataTheme.accent : .white.opacity(0.12), lineWidth: isFocused ? 3 : 1)
+                    .strokeBorder(.white.opacity(isFocused ? 0.76 : 0.18), lineWidth: isFocused ? 2 : 1)
             }
             .focusEffectDisabled()
+            .scaleEffect(isFocused && !reduceMotion ? 1.035 : 1)
+            .shadow(color: KanataTheme.accent.opacity(isFocused ? 0.24 : 0), radius: 12)
             .opacity(configuration.isPressed ? 0.75 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isFocused)
     }
 }
 
