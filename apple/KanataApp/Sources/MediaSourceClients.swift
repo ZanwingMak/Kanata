@@ -14,12 +14,14 @@ struct WebDAVEntry: Identifiable, Sendable {
 actor WebDAVClient {
     let headers: [String: String]
     private let session: URLSession
+    private let requiresCredential: Bool
 
     /// 创建 WebDAV 客户端，账号为空时使用匿名访问。
     /// - Parameters:
     ///   - username: WebDAV 用户名。
     ///   - password: WebDAV 密码。
     init(username: String, password: String) {
+        self.requiresCredential = false
         if username.isEmpty {
             self.headers = [:]
         } else {
@@ -33,6 +35,7 @@ actor WebDAVClient {
     /// - Parameter profile: WebDAV 媒体源配置。
     init(profile: MediaSourceProfile) {
         self.headers = MediaSourceProfileStore.playbackHeaders(for: profile)
+        self.requiresCredential = !profile.username.isEmpty
         self.session = Self.makeSession()
     }
 
@@ -80,6 +83,9 @@ actor WebDAVClient {
     /// - Parameter directory: 要读取的 WebDAV 目录。
     /// - Returns: 排除目录自身后的原始条目。
     private func rawEntries(directory: URL) async throws -> [WebDAVEntry] {
+        if requiresCredential && headers["Authorization"] == nil {
+            throw MediaSourceError.missingCredential
+        }
         var request = URLRequest(url: directory)
         request.httpMethod = "PROPFIND"
         request.setValue("1", forHTTPHeaderField: "Depth")

@@ -993,7 +993,7 @@ struct LibraryView: View {
                 LazyHStack(spacing: 12) {
                     ForEach(mediaSources) { profile in
                         Button {
-                            if sourceHealth[profile.id] == .offline {
+                            if sourceHealth[profile.id] == .offline || sourceHealth[profile.id] == .needsLogin {
                                 sourceToDiagnose = profile
                                 return
                             }
@@ -1068,7 +1068,7 @@ struct LibraryView: View {
                 ProgressView().controlSize(.mini)
             } else {
                 Circle()
-                    .fill(health == .online ? Color.green : Color.red)
+                    .fill(health == .online ? Color.green : (health == .needsLogin ? Color.orange : Color.red))
                     .frame(width: 7, height: 7)
             }
             Text(health.title)
@@ -1076,7 +1076,7 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 4)
-        .foregroundStyle(health == .offline ? Color.red : Color.primary)
+        .foregroundStyle(health == .offline ? Color.red : (health == .needsLogin ? Color.orange : Color.primary))
         .background(KanataTheme.elevatedSurface, in: Capsule())
     }
 
@@ -1101,7 +1101,11 @@ struct LibraryView: View {
             sourceHealth[profile.id] = .online
         } catch {
             sourceFailureReasons[profile.id] = sourceFailureReason(error)
-            sourceHealth[profile.id] = .offline
+            if let sourceError = error as? MediaSourceError, case .missingCredential = sourceError {
+                sourceHealth[profile.id] = .needsLogin
+            } else {
+                sourceHealth[profile.id] = .offline
+            }
         }
     }
 
@@ -1121,8 +1125,10 @@ struct LibraryView: View {
         }
         if let sourceError = error as? MediaSourceError {
             switch sourceError {
-            case .authenticationFailed, .missingCredential, .http(401), .http(403):
-                return "登录凭证无效或已过期，请编辑连接后重试。"
+            case .missingCredential:
+                return "本机未找到保存的凭证，请编辑连接并重新输入密码或令牌。"
+            case .authenticationFailed, .http(401), .http(403):
+                return "服务器拒绝了当前凭证，请编辑连接后重试。"
             case .http(404):
                 return "服务器路径不存在，请检查媒体起始目录。"
             case .http(let status):
@@ -2686,12 +2692,14 @@ private struct CollectionDetailView: View {
 private enum MediaSourceHealth: Equatable {
     case checking
     case online
+    case needsLogin
     case offline
 
     var title: String {
         switch self {
         case .checking: "检测中"
         case .online: "在线"
+        case .needsLogin: "需登录"
         case .offline: "不可用"
         }
     }
