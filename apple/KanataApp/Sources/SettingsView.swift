@@ -24,6 +24,8 @@ struct SettingsView: View {
     @State private var isTestingBuiltInSource = false
     @State private var dandanplayChannelResult: String?
     @State private var isTestingDandanplayChannel = false
+    @State private var compatibleDanmakuResult: String?
+    @State private var isTestingCompatibleDanmaku = false
     @State private var isShowingBilibiliQRCode = false
     @State private var versionTapCount = 0
     @State private var isShowingFeatureAccessNotice = false
@@ -262,6 +264,34 @@ struct SettingsView: View {
                     Text("Kanata 不内置或代填弹弹play凭据。AppID 与 AppSecret 由用户自行申请，并仅保存在当前设备的 Keychain。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                if settings.isFullFeatureAccessEnabled {
+                    Section("更多弹幕来源") {
+                        TextField("聚合弹幕服务地址（含访问令牌路径）", text: $settings.compatibleDanmakuURLString)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            #if os(iOS)
+                            .keyboardType(.URL)
+                            #endif
+                        Button {
+                            Task { await testCompatibleDanmaku() }
+                        } label: {
+                            HStack {
+                                Label("测试聚合来源", systemImage: "network.badge.shield.half.filled")
+                                if isTestingCompatibleDanmaku { Spacer(); ProgressView() }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                        .disabled(settings.makeCompatibleDanmakuClient() == nil || isTestingCompatibleDanmaku)
+                        if let compatibleDanmakuResult {
+                            Text(compatibleDanmakuResult).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text("填写自己部署的弹弹play兼容聚合服务地址，搜索时可获得该服务接入的更多平台弹幕。留空则不使用。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 }
@@ -928,6 +958,19 @@ struct SettingsView: View {
         dandanplayChannelResult = available
             ? "连接成功 · \(elapsed)ms · 渠道已启用"
             : "连接失败 · 请检查 AppID、AppSecret 与开放平台额度"
+    }
+
+    /// 检查用户配置的聚合弹幕服务能否返回候选分集。
+    private func testCompatibleDanmaku() async {
+        guard let client = settings.makeCompatibleDanmakuClient() else {
+            compatibleDanmakuResult = "请填写有效的 HTTP 或 HTTPS 服务地址"
+            return
+        }
+        isTestingCompatibleDanmaku = true
+        defer { isTestingCompatibleDanmaku = false }
+        compatibleDanmakuResult = await client.health()
+            ? "连接成功，已加入弹幕搜索"
+            : "连接失败，请检查服务地址及令牌路径"
     }
 
     /// 导入可选 Cookie 后，通过网关校验 B 站登录态。

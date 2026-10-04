@@ -22,6 +22,20 @@ export function normalizeTitle(title: string): string {
     .replace(/[\s\-_~·:：,，.。!！?？'"'"()（）\[\]【】]/g, '');
 }
 
+/** 读取标题中明确写出的季数；没有标记时不猜测。 */
+export function explicitSeasonNumber(title: string): number | undefined {
+  const chinese = title.match(/第\s*([一二三四五六七八九十\d]+)\s*[季期部]/);
+  if (chinese) {
+    const digits = Number(chinese[1]);
+    if (Number.isInteger(digits) && digits >= 0) return digits;
+    const names = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+    const position = names.indexOf(chinese[1] ?? '');
+    if (position >= 0) return position + 1;
+  }
+  const english = title.match(/\b(?:season|s)\s*0*(\d{1,2})\b/i);
+  return english ? Number(english[1]) : undefined;
+}
+
 /** 计算两个字符串的编辑距离（Levenshtein），用于相似度评分 */
 function editDistance(a: string, b: string): number {
   if (a.length === 0) return b.length;

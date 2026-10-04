@@ -43,11 +43,27 @@ actor BuiltInBilibiliClient {
         }
 
         try await ensureAnonymousFingerprint()
-        let ranked = try await searchSeasons(title: request.title).prefix(3)
+        let ranked = try await searchSeasons(title: request.title)
+            .sorted { left, right in
+                let leftSeason = TitleParser.parse(left.title).season
+                let rightSeason = TitleParser.parse(right.title).season
+                let leftMatches = request.season != nil && leftSeason == request.season
+                let rightMatches = request.season != nil && rightSeason == request.season
+                return leftMatches == rightMatches ? left.score > right.score : leftMatches
+            }
+            .prefix(3)
 
         var candidates: [ProviderCandidate] = []
         for result in ranked {
-            let episodes = try await loadSeasonEpisodes(seasonID: result.seasonID)
+            let season = try await loadSeason(seasonID: result.seasonID)
+            let candidateTitle: String
+            if TitleParser.parse(result.title).season == nil, let seasonTitle = season.seasonTitle {
+                candidateTitle = "\(result.title) · \(seasonTitle)"
+            } else {
+                candidateTitle = result.title
+            }
+            let remoteSeason = TitleParser.parse(candidateTitle).season
+            let episodes = season.episodes
             for (index, episode) in episodes.enumerated() {
                 let number = Int(episode.title ?? "") ?? index + 1
                 if let requestedEpisode = request.episode, requestedEpisode != number { continue }
@@ -58,14 +74,16 @@ actor BuiltInBilibiliClient {
                     localDuration: request.duration,
                     remoteDuration: duration
                 )
+                let seasonConflict = request.season != nil && remoteSeason != nil
+                    && request.season != remoteSeason
                 candidates.append(ProviderCandidate(
                     source: .bilibili,
                     sourceInstanceName: "哔哩哔哩（App 内置）",
                     platformEpisodeId: duration.map { "\(cid)@\(Int($0.rounded()))" } ?? String(cid),
-                    title: result.title,
+                    title: candidateTitle,
                     episodeTitle: Self.episodeLabel(number: number, title: episode.longTitle),
                     duration: duration,
-                    confidence: confidence
+                    confidence: seasonConflict ? min(confidence, 0.35) : confidence
                 ))
             }
         }
@@ -223,7 +241,7 @@ actor BuiltInBilibiliClient {
     /// 读取一个季度的全部分集。
     /// - Parameter seasonID: B 站季度 ID。
     /// - Returns: 平台分集数组。
-    private func loadSeasonEpisodes(seasonID: Int) async throws -> [SeasonEpisode] {
+    private func loadSeason(seasonID: Int) async throws -> (episodes: [SeasonEpisode], seasonTitle: String?) {
         guard let url = URL(string: "https://api.bilibili.com/pgc/view/web/season?season_id=\(seasonID)") else {
             throw BuiltInBilibiliError.invalidResponse
         }
@@ -231,7 +249,7 @@ actor BuiltInBilibiliClient {
         guard response.code == 0, let episodes = response.result?.episodes else {
             throw BuiltInBilibiliError.upstream(response.message ?? "季度信息读取失败")
         }
-        return episodes
+        return (episodes, response.result?.seasonTitle)
     }
 
     /// 拉取并解析一个 6 分钟弹幕分片。
@@ -713,6 +731,12 @@ private struct SeasonEnvelope: Decodable {
 
 private struct SeasonResult: Decodable {
     let episodes: [SeasonEpisode]?
+    let seasonTitle: String?
+
+    enum CodingKeys: String, CodingKey {
+        case episodes
+        case seasonTitle = "season_title"
+    }
 }
 
 private struct SeasonEpisode: Decodable {

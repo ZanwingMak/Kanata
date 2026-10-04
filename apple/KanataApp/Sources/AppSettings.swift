@@ -61,6 +61,11 @@ final class AppSettings {
         didSet { defaults.set(dandanplayChannelEnabled, forKey: Keys.dandanplayChannelEnabled) }
     }
 
+    /// 用户自建的弹弹play兼容聚合服务地址，可提供更多平台的弹幕。
+    var compatibleDanmakuURLString: String {
+        didSet { KeychainStore.setString(compatibleDanmakuURLString, account: KeychainAccounts.compatibleDanmakuURL) }
+    }
+
     /// 用户自己的弹弹play开放平台 AppID，仅保存在本机 Keychain。
     var dandanplayAppID: String {
         didSet { KeychainStore.setString(dandanplayAppID, account: KeychainAccounts.dandanplayAppID) }
@@ -137,6 +142,7 @@ final class AppSettings {
         static let dandanplayAppID = "credential.dandanplay.appID"
         static let dandanplayAppSecret = "credential.dandanplay.appSecret"
         static let openSubtitlesAPIKey = "credential.opensubtitles.apiKey"
+        static let compatibleDanmakuURL = "credential.compatibleDanmaku.url"
     }
 
     private struct StoredBilibiliCredential: Codable {
@@ -179,6 +185,7 @@ final class AppSettings {
         self.dandanplayAppID = KeychainStore.string(account: KeychainAccounts.dandanplayAppID) ?? ""
         self.dandanplayAppSecret = KeychainStore.string(account: KeychainAccounts.dandanplayAppSecret) ?? ""
         self.dandanplayChannelEnabled = defaults.object(forKey: Keys.dandanplayChannelEnabled) as? Bool ?? false
+        self.compatibleDanmakuURLString = KeychainStore.string(account: KeychainAccounts.compatibleDanmakuURL) ?? ""
         self.openSubtitlesAPIKey = KeychainStore.string(account: KeychainAccounts.openSubtitlesAPIKey) ?? ""
         self.accentTheme = KanataAccentTheme(
             rawValue: defaults.string(forKey: Keys.accentTheme) ?? ""
@@ -312,6 +319,15 @@ final class AppSettings {
     func makeDandanplayChannelClient() -> DandanplayChannelClient? {
         guard dandanplayChannelEnabled, hasDandanplayConfiguration else { return nil }
         return DandanplayChannelClient(appID: normalizedDandanplayAppID, appSecret: normalizedDandanplayAppSecret)
+    }
+
+    /// 校验并创建用户自建的弹弹play兼容聚合弹幕客户端。
+    func makeCompatibleDanmakuClient() -> DandanplayChannelClient? {
+        guard isFullFeatureAccessEnabled else { return nil }
+        let value = compatibleDanmakuURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: value), ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              url.host != nil else { return nil }
+        return DandanplayChannelClient(compatibleBaseURL: url)
     }
 
     /// 当前设备是否已填写完整的弹弹play开放平台凭据。

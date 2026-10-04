@@ -2,11 +2,12 @@ import CryptoKit
 import Foundation
 import KanataCore
 
-/// 使用用户自有 AppID 与 AppSecret 的弹弹play开放平台渠道客户端。
+/// 弹弹play开放平台及用户自建兼容聚合服务的弹幕客户端。
 actor DandanplayChannelClient {
-    private let baseURL = URL(string: "https://api.dandanplay.net")!
+    private let baseURL: URL
     private let appID: String
     private let appSecret: String
+    private let isCompatibleService: Bool
     private let session: URLSession
 
     /// 使用用户填写的凭据创建签名客户端，并使用不落盘 Cookie 的短超时会话。
@@ -14,8 +15,23 @@ actor DandanplayChannelClient {
     ///   - appID: 开放平台应用 ID。
     ///   - appSecret: 仅保存在用户本机 Keychain 中的应用密钥。
     init(appID: String, appSecret: String) {
+        self.baseURL = URL(string: "https://api.dandanplay.net")!
         self.appID = appID
         self.appSecret = appSecret
+        self.isCompatibleService = false
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 12
+        configuration.timeoutIntervalForResource = 25
+        configuration.requestCachePolicy = .returnCacheDataElseLoad
+        self.session = URLSession(configuration: configuration)
+    }
+
+    /// 连接用户部署的弹弹play兼容聚合服务，可扩展更多平台弹幕。
+    init(compatibleBaseURL: URL) {
+        self.baseURL = compatibleBaseURL
+        self.appID = ""
+        self.appSecret = ""
+        self.isCompatibleService = true
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 12
         configuration.timeoutIntervalForResource = 25
@@ -27,6 +43,7 @@ actor DandanplayChannelClient {
     /// - Parameter query: 播放页的统一匹配请求。
     /// - Returns: 可与其他内置来源合并的候选列表。
     func resolve(_ query: ResolveRequest) async throws -> [ProviderCandidate] {
+        if isCompatibleService { return try await search(query) }
         if let fingerprint = query.fingerprint {
             let matches = try await match(fingerprint)
             if matches.contains(where: { $0.confidence >= 0.9 }) { return matches }
@@ -51,9 +68,10 @@ actor DandanplayChannelClient {
         return (response.animes ?? []).flatMap { anime in
             (anime.episodes ?? []).map { episode in
                 ProviderCandidate(
-                    source: .dandanplay,
-                    sourceInstanceName: "弹弹play（自配置）",
-                    platformEpisodeId: String(episode.episodeId),
+                    source: isCompatibleService ? .custom : .dandanplay,
+                    sourceInstanceId: isCompatibleService ? "compatible-api" : nil,
+                    sourceInstanceName: isCompatibleService ? "聚合弹幕（多平台）" : "弹弹play（自配置）",
+                    platformEpisodeId: isCompatibleService ? "compatible:\(episode.episodeId)" : String(episode.episodeId),
                     title: anime.animeTitle,
                     episodeTitle: episode.episodeTitle,
                     confidence: Self.titleConfidence(query.title, anime.animeTitle)
@@ -94,7 +112,10 @@ actor DandanplayChannelClient {
     /// - Parameter platformEpisodeID: 剧集 ID，可带 `@时轴偏移`。
     /// - Returns: 已应用官方时轴修正并排序的普通弹幕。
     func danmaku(platformEpisodeID: String) async throws -> [DanmakuItem] {
-        let parts = platformEpisodeID.split(separator: "@", maxSplits: 1).map(String.init)
+        let value = platformEpisodeID.hasPrefix("compatible:")
+            ? String(platformEpisodeID.dropFirst("compatible:".count))
+            : platformEpisodeID
+        let parts = value.split(separator: "@", maxSplits: 1).map(String.init)
         guard let episodeID = parts.first, episodeID.allSatisfy(\.isNumber) else {
             throw DandanplayClientError.invalidResponse
         }
@@ -107,7 +128,7 @@ actor DandanplayChannelClient {
             ]
         )
         return (response.comments ?? []).compactMap { comment in
-            Self.makeDanmaku(comment, shift: shift)
+            Self.makeDanmaku(comment, shift: shift, source: isCompatibleService ? .custom : .dandanplay)
         }
         .sorted { $0.time < $1.time }
     }
@@ -167,9 +188,11 @@ actor DandanplayChannelClient {
         request.httpBody = bodyData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if bodyData != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
-        request.setValue(appID, forHTTPHeaderField: "X-AppId")
-        request.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
-        request.setValue(signature, forHTTPHeaderField: "X-Signature")
+        if !isCompatibleService {
+            request.setValue(appID, forHTTPHeaderField: "X-AppId")
+            request.setValue(timestamp, forHTTPHeaderField: "X-Timestamp")
+            request.setValue(signature, forHTTPHeaderField: "X-Signature")
+        }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw DandanplayClientError.invalidResponse }
         if http.statusCode == 401 || http.statusCode == 403 { throw DandanplayClientError.credentialRejected }
@@ -185,8 +208,9 @@ actor DandanplayChannelClient {
     /// - Parameters:
     ///   - comment: 官方弹幕条目。
     ///   - shift: 文件匹配给出的时轴修正秒数。
+    ///   - source: 实际来源标识。
     /// - Returns: 普通弹幕模型；格式无效时返回 nil。
-    private static func makeDanmaku(_ comment: Comment, shift: Double) -> DanmakuItem? {
+    private static func makeDanmaku(_ comment: Comment, shift: Double, source: DanmakuSourceId) -> DanmakuItem? {
         let parts = comment.p.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
         guard parts.count >= 3,
               let rawTime = Double(parts[0]),
@@ -195,13 +219,13 @@ actor DandanplayChannelClient {
         let time = rawTime + shift
         guard time >= 0 else { return nil }
         return DanmakuItem(
-            id: "dandanplay:\(comment.cid)",
+            id: "\(source.rawValue):\(comment.cid)",
             time: time,
             mode: mode,
-            color: Int(parts[2]) ?? 16_777_215,
+            color: Int(parts.count >= 8 ? parts[3] : parts[2]) ?? 16_777_215,
             content: comment.m,
-            source: .dandanplay,
-            senderHash: parts.count > 3 ? parts[3] : nil,
+            source: source,
+            senderHash: parts.count >= 8 ? parts[6] : (parts.count > 3 ? parts[3] : nil),
             weight: 5
         )
     }
@@ -258,6 +282,23 @@ actor DandanplayChannelClient {
     private struct Episode: Decodable {
         let episodeId: Int
         let episodeTitle: String
+
+        /// 同时解析官方数字 ID 与兼容服务返回的数字字符串。
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            if let number = try? values.decode(Int.self, forKey: .episodeId) {
+                episodeId = number
+            } else {
+                let text = try values.decode(String.self, forKey: .episodeId)
+                guard let number = Int(text) else {
+                    throw DecodingError.dataCorruptedError(forKey: .episodeId, in: values, debugDescription: "无效剧集 ID")
+                }
+                episodeId = number
+            }
+            episodeTitle = try values.decode(String.self, forKey: .episodeTitle)
+        }
+
+        private enum CodingKeys: String, CodingKey { case episodeId, episodeTitle }
     }
 
     private struct MatchBody: Encodable {
@@ -287,9 +328,23 @@ actor DandanplayChannelClient {
     }
 
     private struct Comment: Decodable {
-        let cid: Int
+        let cid: String
         let p: String
         let m: String
+
+        /// 兼容不同平台返回的数字或字符串弹幕 ID。
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            if let number = try? values.decode(Int.self, forKey: .cid) {
+                cid = String(number)
+            } else {
+                cid = try values.decode(String.self, forKey: .cid)
+            }
+            p = try values.decode(String.self, forKey: .p)
+            m = try values.decode(String.self, forKey: .m)
+        }
+
+        private enum CodingKeys: String, CodingKey { case cid, p, m }
     }
 }
 

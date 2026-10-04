@@ -3799,6 +3799,8 @@ struct CandidatePicker: View {
     let viewModel: PlayerViewModel
     @State private var keyword = ""
     @State private var operationError: String?
+    @State private var selectedSource: DanmakuSourceId?
+    @State private var pendingSeasonMismatch: ProviderCandidate?
     @Environment(\.dismiss) private var dismiss
     #if os(tvOS)
     @FocusState private var focusedControl: TVCandidateFocus?
@@ -3828,9 +3830,29 @@ struct CandidatePicker: View {
             focusInitialTVControl()
             #endif
         }
+        .onChange(of: viewModel.candidates.map(\.id)) { _, _ in
+            selectedSource = nil
+        }
+        .alert("弹幕季度不同", isPresented: Binding(
+            get: { pendingSeasonMismatch != nil },
+            set: { if !$0 { pendingSeasonMismatch = nil } }
+        )) {
+            Button("取消", role: .cancel) { pendingSeasonMismatch = nil }
+            Button("仍然使用") {
+                if let candidate = pendingSeasonMismatch { loadCandidate(candidate) }
+                pendingSeasonMismatch = nil
+            }
+        } message: {
+            if let candidate = pendingSeasonMismatch {
+                Text("\(viewModel.seasonAlignment(for: candidate).title)。可能显示另一季的剧情弹幕，请确认后再使用。")
+            }
+        }
         #if os(tvOS)
         .onChange(of: viewModel.candidates.map(\.id)) { _, ids in
             if let id = ids.first { focusedControl = .candidate(id) }
+        }
+        .onChange(of: selectedSource) { _, _ in
+            if let first = displayedCandidates.first { focusedControl = .candidate(first.id) }
         }
         #endif
         .alert(
@@ -3897,18 +3919,19 @@ struct CandidatePicker: View {
                     Button("搜索") { searchCandidates() }
                         .buttonStyle(KanataPrimaryButtonStyle())
                         .disabled(isSearchDisabled)
-                    Text("搜索不会再强制使用文件名推断的集号；选择正确分集后会记住，下次自动加载。")
+                    Text("请核对季度和集数。不同季的候选需要再次确认，选定后会记住。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
             Section("候选（\(viewModel.candidates.count)）") {
+                sourceSelector
                 if viewModel.candidates.isEmpty {
                     Text(emptyCandidateMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                ForEach(viewModel.candidates) { candidate in
+                ForEach(displayedCandidates) { candidate in
                     Button { selectCandidate(candidate) } label: {
                         candidateDetails(candidate)
                     }
@@ -3993,7 +4016,7 @@ struct CandidatePicker: View {
                     .buttonStyle(KanataPrimaryButtonStyle())
                     .focused($focusedControl, equals: .searchButton)
                     .disabled(isSearchDisabled)
-                    Text("选择正确分集后会保存匹配，下次播放自动加载。")
+                    Text("请核对季度和集数；不同季的候选需要再次确认。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -4073,6 +4096,7 @@ struct CandidatePicker: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            sourceSelector
             if viewModel.candidates.isEmpty {
                 VStack(spacing: 18) {
                     Image(systemName: viewModel.isSearchingCandidates ? "hourglass" : "text.magnifyingglass")
@@ -4089,10 +4113,12 @@ struct CandidatePicker: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(viewModel.candidates) { candidate in
+                        ForEach(displayedCandidates) { candidate in
                             Button { selectCandidate(candidate) } label: {
                                 HStack(spacing: 20) {
-                                    Image(systemName: viewModel.episodeAlignment(for: candidate).symbol)
+                                    Image(systemName: candidateHasSeasonMismatch(candidate)
+                                          ? "exclamationmark.triangle.fill"
+                                          : viewModel.episodeAlignment(for: candidate).symbol)
                                         .font(.title2)
                                         .foregroundStyle(candidateAlignmentColor(candidate))
                                         .frame(width: 42)
@@ -4101,7 +4127,7 @@ struct CandidatePicker: View {
                                     VStack(alignment: .trailing, spacing: 6) {
                                         Text("\(Int(candidate.confidence * 100))%")
                                             .font(.title3.monospacedDigit().bold())
-                                        Text("匹配度")
+                                        Text(candidateHasSeasonMismatch(candidate) ? "需核对季度" : "匹配度")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -4147,6 +4173,49 @@ struct CandidatePicker: View {
         viewModel.danmakuStats.isEmpty ? "输入作品关键词开始搜索" : viewModel.danmakuStats
     }
 
+    /// 当前来源筛选后的候选；切换筛选不会重新请求网络。
+    private var displayedCandidates: [ProviderCandidate] {
+        guard let selectedSource else { return viewModel.candidates }
+        return viewModel.candidates.filter { $0.source == selectedSource }
+    }
+
+    /// 按实际搜索结果列出来源入口及数量，便于逐平台查找正确季度。
+    private var sourceSelector: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 10) {
+                sourceButton(nil, title: "全部 · \(viewModel.candidates.count)")
+                ForEach(DanmakuSourceId.allCases.filter { source in
+                    viewModel.candidates.contains { $0.source == source }
+                }, id: \.self) { source in
+                    let count = viewModel.candidates.filter { $0.source == source }.count
+                    sourceButton(source, title: "\(source.displayName) · \(count)")
+                }
+            }
+            .padding(4)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// 构建一个可聚焦的弹幕来源筛选按钮。
+    private func sourceButton(_ source: DanmakuSourceId?, title: String) -> some View {
+        Button { selectedSource = source } label: {
+            Text(title)
+                .font(.callout.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    selectedSource == source ? KanataTheme.accent.opacity(0.22) : KanataTheme.elevatedSurface,
+                    in: Capsule()
+                )
+        }
+        #if os(tvOS)
+        .kanataTVFocus(cornerRadius: 20)
+        #else
+        .buttonStyle(.plain)
+        #endif
+    }
+
     /// 返回搜索按钮当前是否不可用。
     private var isSearchDisabled: Bool {
         keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSearchingCandidates
@@ -4160,9 +4229,24 @@ struct CandidatePicker: View {
     /// 加载用户选择的弹幕来源，成功后关闭弹窗。
     /// - Parameter candidate: 用户确认的候选分集。
     private func selectCandidate(_ candidate: ProviderCandidate) {
+        if candidateHasSeasonMismatch(candidate) {
+            pendingSeasonMismatch = candidate
+            return
+        }
+        loadCandidate(candidate)
+    }
+
+    /// 加载已由用户确认的弹幕候选。
+    private func loadCandidate(_ candidate: ProviderCandidate) {
         Task {
             if await viewModel.loadDanmaku(for: candidate) { dismiss() }
         }
+    }
+
+    /// 判断来源标题是否明确属于另一季。
+    private func candidateHasSeasonMismatch(_ candidate: ProviderCandidate) -> Bool {
+        if case .mismatched = viewModel.seasonAlignment(for: candidate) { return true }
+        return false
     }
 
     /// 移除当前视频关联的本地弹幕，并显示失败原因。
@@ -4196,6 +4280,19 @@ struct CandidatePicker: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            if candidateHasSeasonMismatch(candidate) {
+                Label(viewModel.seasonAlignment(for: candidate).title, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(KanataTheme.warning)
+            } else if case .matched = viewModel.seasonAlignment(for: candidate) {
+                Label(viewModel.seasonAlignment(for: candidate).title, systemImage: "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(KanataTheme.success)
+            } else if candidate.source == .bilibili {
+                Label("季度未标明，请手动核对", systemImage: "questionmark.circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
             Label(
                 viewModel.episodeAlignment(for: candidate).title,
                 systemImage: viewModel.episodeAlignment(for: candidate).symbol
@@ -4240,7 +4337,8 @@ struct CandidatePicker: View {
     /// - Parameter candidate: 当前候选。
     /// - Returns: 一致为绿色，不一致为橙色，其余为次级文字色。
     private func candidateAlignmentColor(_ candidate: ProviderCandidate) -> Color {
-        switch viewModel.episodeAlignment(for: candidate) {
+        if candidateHasSeasonMismatch(candidate) { return KanataTheme.warning }
+        return switch viewModel.episodeAlignment(for: candidate) {
         case .matched: KanataTheme.success
         case .mismatched: KanataTheme.warning
         case .unavailable, .unverified: .secondary

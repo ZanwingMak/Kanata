@@ -9,7 +9,7 @@
 import { ErrorCode, GatewayError } from '../../errors.js';
 import { mapWithLimit } from '../../http.js';
 import { toDanmakuMode } from '../../normalize/danmaku.js';
-import { titleSimilarity } from '../../normalize/title.js';
+import { explicitSeasonNumber, titleSimilarity } from '../../normalize/title.js';
 import type { DanmakuItem, ProviderCandidate, ResolveRequest } from '../../types.js';
 import type { DanmakuProvider, HealthResult, ProviderContext } from '../types.js';
 import { parseDmSegment } from './protobuf.js';
@@ -165,11 +165,21 @@ export class BilibiliProvider implements DanmakuProvider {
         title: (item.title ?? '').replace(/<[^>]+>/g, ''),
       }))
       .map((item) => ({ ...item, score: titleSimilarity(query.title, item.title) }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 2);
+      .sort((a, b) => {
+        const leftMatches = query.season !== undefined && explicitSeasonNumber(a.title) === query.season;
+        const rightMatches = query.season !== undefined && explicitSeasonNumber(b.title) === query.season;
+        return leftMatches === rightMatches ? b.score - a.score : (leftMatches ? -1 : 1);
+      })
+      .slice(0, 3);
 
     for (const item of ranked) {
-      const episodes = await this.fetchSeasonEpisodes(item.seasonId, ctx);
+      const season = await this.fetchSeasonEpisodes(item.seasonId, ctx);
+      const title = explicitSeasonNumber(item.title) === undefined && season.seasonTitle
+        ? `${item.title} · ${season.seasonTitle}` : item.title;
+      const seasonConflict = query.season !== undefined
+        && explicitSeasonNumber(title) !== undefined
+        && explicitSeasonNumber(title) !== query.season;
+      const episodes = season.episodes;
       for (const [index, episode] of episodes.entries()) {
         const episodeNumber = Number.parseInt(episode.title ?? '', 10);
         const number = Number.isFinite(episodeNumber) ? episodeNumber : index + 1;
@@ -179,10 +189,10 @@ export class BilibiliProvider implements DanmakuProvider {
           platformEpisodeId: episode.duration
             ? `${episode.cid}@${Math.round(episode.duration / 1000)}`
             : String(episode.cid),
-          title: item.title,
+          title,
           episodeTitle: formatEpisodeTitle(number, episode.long_title),
           duration: episode.duration ? Math.round(episode.duration / 1000) : undefined,
-          confidence: Number(item.score.toFixed(3)),
+          confidence: seasonConflict ? Math.min(item.score, 0.35) : Number(item.score.toFixed(3)),
         });
       }
     }
@@ -193,14 +203,14 @@ export class BilibiliProvider implements DanmakuProvider {
   private async fetchSeasonEpisodes(
     seasonId: number,
     ctx: ProviderContext,
-  ): Promise<SeasonEpisode[]> {
+  ): Promise<{ episodes: SeasonEpisode[]; seasonTitle?: string }> {
     const response = await ctx.fetch(
       `https://api.bilibili.com/pgc/view/web/season?season_id=${seasonId}`,
       { headers: this.headers(ctx) },
     );
     const data = (await response.json()) as {
       code?: number;
-      result?: { episodes?: SeasonEpisode[] };
+      result?: { episodes?: SeasonEpisode[]; season_title?: string };
     };
     if (data.code !== 0 || !Array.isArray(data.result?.episodes)) {
       throw new GatewayError(
@@ -209,7 +219,7 @@ export class BilibiliProvider implements DanmakuProvider {
         JSON.stringify(data).slice(0, 512),
       );
     }
-    return data.result.episodes;
+    return { episodes: data.result.episodes, seasonTitle: data.result.season_title };
   }
 
   /** 把 bv/ep/ss 标识解析成 `cid@时长` 形式 */

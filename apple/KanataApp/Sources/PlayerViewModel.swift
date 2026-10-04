@@ -44,6 +44,21 @@ enum DanmakuEpisodeAlignment: Equatable {
     }
 }
 
+/// 当前视频与弹幕候选的季度对应状态。
+enum DanmakuSeasonAlignment: Equatable {
+    case unverified
+    case matched(Int)
+    case mismatched(local: Int, remote: Int)
+
+    var title: String {
+        switch self {
+        case .unverified: "季数待核对"
+        case .matched(let season): "第 \(season) 季一致"
+        case .mismatched(let local, let remote): "季数不一致 · 视频第 \(local) 季 / 弹幕第 \(remote) 季"
+        }
+    }
+}
+
 /// 播放页状态机：打开文件 → 识别 → 匹配弹幕 → 播放。
 @MainActor
 @Observable
@@ -112,6 +127,7 @@ final class PlayerViewModel {
     private var builtInClient: BuiltInBilibiliClient?
     private var builtInPublicClient: BuiltInPublicDanmakuClient?
     private var dandanplayChannelClient: DandanplayChannelClient?
+    private var compatibleDanmakuClient: DandanplayChannelClient?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var timeControlObservation: NSKeyValueObservation?
@@ -162,6 +178,13 @@ final class PlayerViewModel {
         return localEpisode == remoteEpisode
             ? .matched(local: localEpisode, remote: remoteEpisode)
             : .mismatched(local: localEpisode, remote: remoteEpisode)
+    }
+
+    /// 比较候选标题中的明确季数与当前视频；未写季数的来源保持待核对。
+    func seasonAlignment(for candidate: ProviderCandidate) -> DanmakuSeasonAlignment {
+        guard let local = parsed?.season,
+              let remote = TitleParser.parse(candidate.title).season else { return .unverified }
+        return local == remote ? .matched(local) : .mismatched(local: local, remote: remote)
     }
 
     /// 标记候选片长与当前视频差异明显的情况，供来源列表提示用户核对版本。
@@ -253,6 +276,7 @@ final class PlayerViewModel {
         builtInClient = settings.makeBuiltInBilibiliClient()
         builtInPublicClient = settings.makeBuiltInPublicDanmakuClient()
         dandanplayChannelClient = settings.makeDandanplayChannelClient()
+        compatibleDanmakuClient = settings.makeCompatibleDanmakuClient()
         onlineCacheLimitBytes = Int64(settings.onlineDanmakuCacheLimitMB) * 1024 * 1024
         mediaKey = progressKey ?? url.absoluteString
         currentPlaybackURL = url
@@ -388,6 +412,8 @@ final class PlayerViewModel {
         let savedCandidate = bindingFingerprint.flatMap { DanmakuBindingStore.candidate(for: $0) }
             .flatMap { candidate -> ProviderCandidate? in
                 if case .mismatched = episodeAlignment(for: candidate) { return nil }
+                if case .mismatched = seasonAlignment(for: candidate) { return nil }
+                if !canAutomaticallyUseSeason(of: candidate) { return nil }
                 return candidate
             }
         currentBinding = savedCandidate
@@ -395,7 +421,8 @@ final class PlayerViewModel {
         guard client != nil
                 || builtInClient != nil
                 || builtInPublicClient != nil
-                || dandanplayChannelClient != nil else {
+                || dandanplayChannelClient != nil
+                || compatibleDanmakuClient != nil else {
             if let bindingFingerprint, let savedCandidate,
                await restoreCachedDanmaku(for: savedCandidate, fingerprint: bindingFingerprint) {
                 return
@@ -456,6 +483,8 @@ final class PlayerViewModel {
         // 置信度足够高时直接采用，否则保留候选并等待用户主动打开。
         if best.confidence >= 0.9,
            !usedBroadSearch,
+           candidateAlignmentPriority(best) >= 2,
+           canAutomaticallyUseSeason(of: best),
            (candidateEpisodePriority(best) == 2 || parsedTitle.episode == nil),
            !hasTimelineMismatch(for: best) {
             await loadDanmaku(for: best)
@@ -540,6 +569,13 @@ final class PlayerViewModel {
                 errors.append("弹弹play渠道：\(error.localizedDescription)")
             }
         }
+        if let compatibleDanmakuClient {
+            do {
+                append(try await compatibleDanmakuClient.resolve(request))
+            } catch {
+                errors.append("聚合弹幕：\(error.localizedDescription)")
+            }
+        }
         if let client {
             do {
                 let response = try await client.resolve(request)
@@ -552,10 +588,10 @@ final class PlayerViewModel {
             }
         }
         let candidates = merged.values.sorted { left, right in
-            let leftEpisodePriority = candidateEpisodePriority(left)
-            let rightEpisodePriority = candidateEpisodePriority(right)
-            if leftEpisodePriority != rightEpisodePriority {
-                return leftEpisodePriority > rightEpisodePriority
+            let leftPriority = candidateAlignmentPriority(left)
+            let rightPriority = candidateAlignmentPriority(right)
+            if leftPriority != rightPriority {
+                return leftPriority > rightPriority
             }
             if left.confidence == right.confidence { return left.id < right.id }
             return left.confidence > right.confidence
@@ -572,6 +608,23 @@ final class PlayerViewModel {
         case .unverified, .unavailable: 1
         case .mismatched: 0
         }
+    }
+
+    /// 先排除季度冲突，再按集数一致程度排序候选。
+    private func candidateAlignmentPriority(_ candidate: ProviderCandidate) -> Int {
+        if case .mismatched = seasonAlignment(for: candidate) { return 0 }
+        let episode = candidateEpisodePriority(candidate)
+        guard episode > 0 else { return 0 }
+        if case .matched = seasonAlignment(for: candidate) { return episode + 2 }
+        return episode
+    }
+
+    /// B 站季度未标明时暂停自动绑定，避免同名后续季度误配当前视频。
+    private func canAutomaticallyUseSeason(of candidate: ProviderCandidate) -> Bool {
+        if case .mismatched = seasonAlignment(for: candidate) { return false }
+        guard candidate.source == .bilibili, parsed?.season != nil else { return true }
+        if case .matched = seasonAlignment(for: candidate) { return true }
+        return false
     }
 
     /// 拉取指定候选的弹幕，并在成功后保存文件指纹绑定。
@@ -646,7 +699,28 @@ final class PlayerViewModel {
                 errors.append(error.localizedDescription)
             }
         }
-        if let client {
+        if candidate.platformEpisodeId.hasPrefix("compatible:"), let compatibleDanmakuClient {
+            let startedAt = Date()
+            do {
+                let items = try await compatibleDanmakuClient.danmaku(
+                    platformEpisodeID: candidate.platformEpisodeId
+                )
+                if !items.isEmpty {
+                    await applyLoadedDanmaku(
+                        items,
+                        candidate: candidate,
+                        elapsedMs: Int(Date().timeIntervalSince(startedAt) * 1_000),
+                        fallback: false,
+                        persistBinding: persistBinding
+                    )
+                    return true
+                }
+                errors.append("聚合来源返回空弹幕")
+            } catch {
+                errors.append(error.localizedDescription)
+            }
+        }
+        if let client, !candidate.platformEpisodeId.hasPrefix("compatible:") {
             do {
                 let response = try await client.danmaku(
                     refs: [DanmakuRef(source: candidate.source, platformEpisodeId: candidate.platformEpisodeId)]
@@ -773,7 +847,8 @@ final class PlayerViewModel {
               client != nil
                 || builtInClient != nil
                 || builtInPublicClient != nil
-                || dandanplayChannelClient != nil else {
+                || dandanplayChannelClient != nil
+                || compatibleDanmakuClient != nil else {
             danmakuStats = "没有启用可用的在线弹幕来源"
             return
         }
