@@ -1076,6 +1076,7 @@ struct PlayerScreen: View {
     @State private var playbackRouteMode = PlaybackRouteMode.automatic
     #if os(tvOS)
     @State private var isShowingTVQuickSettings = false
+    @State private var isTVRemoteSeekPending = false
     @State private var lastTVExitCommandDate = Date.distantPast
     @FocusState private var tvFocusedControl: TVPlayerFocus?
     #endif
@@ -1276,7 +1277,11 @@ struct PlayerScreen: View {
             )
         }
         .kanataModal(isPresented: $viewModel.isShowingCandidates, onDismiss: restoreCandidateFocus) {
-            CandidatePicker(viewModel: viewModel)
+            CandidatePicker(
+                viewModel: viewModel,
+                initialKeyword: savedDanmakuSearchTitle,
+                onSearchKeyword: rememberDanmakuSearchTitle
+            )
         }
         .kanataFileImporter(
             isPresented: $isImportingDanmaku,
@@ -2834,7 +2839,7 @@ struct PlayerScreen: View {
                 controlsTask?.cancel()
                 focusPlaybackFailureActions()
             case .ready:
-                tvFocusedControl = .playPause
+                tvFocusedControl = shouldShowPlayerControls ? .playPause : .background
             case .idle, .preparing:
                 tvFocusedControl = nil
             }
@@ -2848,14 +2853,13 @@ struct PlayerScreen: View {
             : .failureRetry
     }
 
-    /// 在画面焦点下响应遥控器左右操作，并显示最新时间轴位置。
+    /// 在画面焦点下响应左右跳转，只显示操作提示并保持控件条隐藏。
     /// - Parameter seconds: 正数快进，负数快退。
     private func seekFromTVRemote(by seconds: Double) {
         let target = min(max(currentTime + seconds, 0), max(viewModel.duration, 0))
+        isTVRemoteSeekPending = true
         currentTime = target
         commitSeek(to: target)
-        setControlsVisible(true)
-        tvFocusedControl = .progress
         showOSD("\(seconds < 0 ? "后退" : "前进") \(Int(abs(seconds))) 秒 · \(timeLabel(target))")
     }
     #endif
@@ -2911,6 +2915,11 @@ struct PlayerScreen: View {
             bridge.sync(time: time, rate: rate)
         }
         viewModel.onPlaybackStateChanged = { playing in
+            #if os(tvOS)
+            // 遥控跳转引起的临时缓冲不视为用户暂停，也不唤出控件条。
+            if isTVRemoteSeekPending, !playing, viewModel.isBuffering { return }
+            if playing { isTVRemoteSeekPending = false }
+            #endif
             isPlaying = playing
             bridge.sync(time: currentTime, rate: playing ? viewModel.playbackRate : 0)
             if playing {
@@ -3115,6 +3124,27 @@ struct PlayerScreen: View {
         activeItem.collectionID ?? activeItem.collectionTitle ?? activeItem.title
     }
 
+    /// 使用稳定合集标识共享搜索名称，独立视频只保存自己的名称。
+    private var danmakuSearchTitleKey: String {
+        activeItem.collectionID.map { "collection:\($0)" } ?? "item:\(activeItem.id)"
+    }
+
+    /// 读取用户修正过的弹幕作品名，重新打开播放器时仍可复用。
+    private var savedDanmakuSearchTitle: String? {
+        DanmakuBindingStore.searchTitle(for: danmakuSearchTitleKey)
+    }
+
+    /// 记住手动提交的作品名；具体播放页链接只作用于当前集，不传给下一集。
+    private func rememberDanmakuSearchTitle(_ keyword: String) {
+        let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, !query.contains("://"),
+              query.range(of: #"(?i)^(?:BV[0-9A-Za-z]+|(?:ep|ss|ac)\d+|XN[0-9A-Za-z]+={0,2})$"#,
+                          options: .regularExpression) == nil else { return }
+        let title = TitleParser.parse(query).title
+        guard !title.isEmpty else { return }
+        DanmakuBindingStore.saveSearchTitle(title, for: danmakuSearchTitleKey)
+    }
+
     /// 用媒体库的作品名、季号和集号生成匹配词，避免季目录或冗长文件名降低命中率。
     private var automaticMatchName: String {
         let collectionTitle = activeItem.collectionTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -3123,9 +3153,9 @@ struct PlayerScreen: View {
             of: #"(?i)^(?:season|series|s)\s*0*\d{1,3}$|^第?\s*0*\d{1,3}\s*[季期部]$"#,
             options: .regularExpression
         ) != nil
-        let title = !collectionTitle.isEmpty && !isSeasonFolder
+        let title = savedDanmakuSearchTitle ?? (!collectionTitle.isEmpty && !isSeasonFolder
             ? collectionTitle
-            : (parsedTitle.isEmpty ? activeItem.displayName : parsedTitle)
+            : (parsedTitle.isEmpty ? activeItem.displayName : parsedTitle))
         let episode = activeItem.episode ?? activeItem.collectionIndex
         guard let episode else { return title }
         return "\(title) S\(activeItem.season ?? 1)E\(episode)"
@@ -3331,6 +3361,9 @@ struct PlayerScreen: View {
     /// 显示或隐藏控制层，并遵守“减少动态效果”辅助功能设置。
     private func setControlsVisible(_ visible: Bool) {
         controlsTask?.cancel()
+        #if os(tvOS)
+        if visible { isTVRemoteSeekPending = false }
+        #endif
         if reduceMotion {
             isShowingControls = visible
         } else {
@@ -3810,6 +3843,8 @@ private struct PlaylistPicker: View {
 /// 弹幕来源候选选择（FR-MATCH-003）
 struct CandidatePicker: View {
     let viewModel: PlayerViewModel
+    let initialKeyword: String?
+    let onSearchKeyword: (String) -> Void
     @State private var keyword = ""
     @State private var operationError: String?
     @State private var selectedSource: DanmakuSourceId?
@@ -3838,7 +3873,7 @@ struct CandidatePicker: View {
             #endif
         }
         .onAppear {
-            keyword = viewModel.parsed?.title ?? ""
+            keyword = initialKeyword ?? viewModel.parsed?.title ?? ""
             #if os(tvOS)
             focusInitialTVControl()
             #endif
@@ -4236,6 +4271,7 @@ struct CandidatePicker: View {
 
     /// 发起一次手动弹幕搜索。
     private func searchCandidates() {
+        onSearchKeyword(keyword)
         Task { await viewModel.search(keyword: keyword) }
     }
 

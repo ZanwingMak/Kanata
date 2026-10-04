@@ -4,6 +4,16 @@ import Foundation
 public enum DanmakuBindingStore {
     private static let storageKey = "kanata.danmaku.bindings.v1"
 
+    /// 读取同一合集或单个视频此前手动搜索的作品名。
+    public static func searchTitle(for mediaKey: String) -> String? {
+        UserDefaults.standard.string(forKey: "kanata.danmaku.searchTitle.v1.\(mediaKey)")
+    }
+
+    /// 保存作品级搜索名称，供后续分集使用自己的季集号重新匹配。
+    public static func saveSearchTitle(_ title: String, for mediaKey: String) {
+        UserDefaults.standard.set(title, forKey: "kanata.danmaku.searchTitle.v1.\(mediaKey)")
+    }
+
     /// 根据视频指纹读取已保存的候选；没有绑定或数据损坏时返回 nil。
     public static func candidate(for fingerprint: MediaFingerprint) -> ProviderCandidate? {
         loadAll()[key(for: fingerprint)]
