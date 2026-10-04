@@ -182,18 +182,16 @@ struct SettingsView: View {
                             settingsLabel("哔哩哔哩", symbol: "play.rectangle.on.rectangle")
                         }
                         Toggle(isOn: $settings.builtInPublicSourcesEnabled) {
-                            settingsLabel("公共平台来源", symbol: "network")
+                            settingsLabel("启用公共平台来源", symbol: "network")
                         }
-                        if settings.builtInPublicSourcesEnabled {
-                            Toggle(isOn: $settings.builtInIqiyiEnabled) {
-                                settingsLabel("爱奇艺", symbol: "i.square")
-                            }
-                            Toggle(isOn: $settings.builtInQQEnabled) {
-                                settingsLabel("腾讯视频", symbol: "play.square")
-                            }
-                            Toggle(isOn: $settings.builtInBahamutEnabled) {
-                                settingsLabel("巴哈姆特动画疯", symbol: "sparkles.tv")
-                            }
+                        Toggle(isOn: publicSourceBinding(\.builtInIqiyiEnabled)) {
+                            settingsLabel("爱奇艺", symbol: "i.square")
+                        }
+                        Toggle(isOn: publicSourceBinding(\.builtInQQEnabled)) {
+                            settingsLabel("腾讯视频", symbol: "play.square")
+                        }
+                        Toggle(isOn: publicSourceBinding(\.builtInBahamutEnabled)) {
+                            settingsLabel("巴哈姆特动画疯", symbol: "sparkles.tv")
                         }
                         Text("无需服务器即可跨平台搜索作品、逐集选择并加载弹幕；网关不可用时仍可正常使用。")
                             .font(.caption)
@@ -208,16 +206,6 @@ struct SettingsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(KanataSecondaryButtonStyle())
-                        .disabled(
-                            (
-                                !settings.builtInBilibiliEnabled
-                                && (!settings.builtInPublicSourcesEnabled
-                                    || (!settings.builtInIqiyiEnabled
-                                        && !settings.builtInQQEnabled
-                                        && !settings.builtInBahamutEnabled))
-                            )
-                            || isTestingBuiltInSource
-                        )
                         if let builtInSourceResult {
                             Text(builtInSourceResult).font(.caption).foregroundStyle(.secondary)
                         }
@@ -251,7 +239,6 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(KanataSecondaryButtonStyle())
-                    .disabled(!settings.hasDandanplayConfiguration || isTestingDandanplayChannel)
                     if settings.hasDandanplayConfiguration {
                         Button("清除渠道配置", role: .destructive) {
                             settings.clearDandanplayConfiguration()
@@ -284,7 +271,6 @@ struct SettingsView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(KanataSecondaryButtonStyle())
-                        .disabled(settings.makeCompatibleDanmakuClient() == nil || isTestingCompatibleDanmaku)
                         if let compatibleDanmakuResult {
                             Text(compatibleDanmakuResult).font(.caption).foregroundStyle(.secondary)
                         }
@@ -734,6 +720,17 @@ struct SettingsView: View {
         }
     }
 
+    /// 保持各平台选项可见；单独启用平台时同时打开公共来源总开关。
+    private func publicSourceBinding(_ keyPath: ReferenceWritableKeyPath<AppSettings, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { settings.builtInPublicSourcesEnabled && settings[keyPath: keyPath] },
+            set: { enabled in
+                settings[keyPath: keyPath] = enabled
+                if enabled { settings.builtInPublicSourcesEnabled = true }
+            }
+        )
+    }
+
     /// 记录版本号连续点击次数，并在达到要求时开放完整功能。
     private func registerVersionTap() {
         guard !settings.isFullFeatureAccessEnabled else { return }
@@ -908,6 +905,7 @@ struct SettingsView: View {
 
     /// 检查无需网关的内置弹幕来源是否可访问。
     private func testBuiltInSource() async {
+        guard !isTestingBuiltInSource else { return }
         let bilibiliClient = settings.makeBuiltInBilibiliClient()
         let publicClient = settings.makeBuiltInPublicDanmakuClient()
         guard bilibiliClient != nil || publicClient != nil else {
@@ -939,6 +937,7 @@ struct SettingsView: View {
 
     /// 使用用户填写的 AppID 与 AppSecret 检查弹弹play开放平台渠道。
     private func testDandanplayChannel() async {
+        guard !isTestingDandanplayChannel else { return }
         guard settings.hasDandanplayConfiguration else {
             dandanplayChannelResult = "请先填写完整的 AppID 与 AppSecret"
             return
@@ -962,6 +961,7 @@ struct SettingsView: View {
 
     /// 检查用户配置的聚合弹幕服务能否返回候选分集。
     private func testCompatibleDanmaku() async {
+        guard !isTestingCompatibleDanmaku else { return }
         guard let client = settings.makeCompatibleDanmakuClient() else {
             compatibleDanmakuResult = "请填写有效的 HTTP 或 HTTPS 服务地址"
             return
