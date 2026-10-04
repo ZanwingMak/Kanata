@@ -647,6 +647,9 @@ private struct TVDanmakuScalePicker: View {
                         option.title,
                         systemImage: isSelected(option.value) ? "checkmark.circle.fill" : "circle"
                     )
+                    .font(.system(size: 24, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(TVDanmakuChoiceButtonStyle(isSelected: isSelected(option.value)))

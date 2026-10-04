@@ -1888,6 +1888,19 @@ struct PlayerScreen: View {
             .onMoveCommand { handleTVActionMove($0, from: .danmakuToggle) }
             .accessibilityLabel(settings.danmakuConfig.enabled ? "关闭弹幕" : "开启弹幕")
 
+            Button(action: presentDanmakuSettings) {
+                TVPlayerActionLabel(
+                    symbol: "slider.horizontal.3",
+                    title: "弹幕设置",
+                    detail: nil,
+                    isActive: false
+                )
+            }
+            .buttonStyle(TVPlayerActionButtonStyle())
+            .focused($tvFocusedControl, equals: .danmakuSettings)
+            .onMoveCommand { handleTVActionMove($0, from: .danmakuSettings) }
+            .accessibilityLabel("弹幕设置")
+
             if settings.isFullFeatureAccessEnabled {
                 Button(action: presentDanmakuCandidates) {
                     TVPlayerActionLabel(
@@ -2530,7 +2543,7 @@ struct PlayerScreen: View {
     private func tvActionFocusOrder() -> [TVPlayerFocus] {
         var controls: [TVPlayerFocus] = []
         if items.count > 1 { controls.append(.playlist) }
-        controls.append(contentsOf: [.subtitle, .danmakuToggle])
+        controls.append(contentsOf: [.subtitle, .danmakuToggle, .danmakuSettings])
         if settings.isFullFeatureAccessEnabled { controls.append(.manualMatch) }
         controls.append(.more)
         return controls
@@ -2614,7 +2627,7 @@ struct PlayerScreen: View {
     /// 收起右侧弹幕设置并恢复弹幕设置入口焦点。
     private func dismissTVDanmakuSettings() {
         isShowingDanmakuPanel = false
-        tvFocusedControl = .more
+        tvFocusedControl = .danmakuSettings
         setControlsVisible(true)
     }
 
