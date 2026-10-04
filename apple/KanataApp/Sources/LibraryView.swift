@@ -530,26 +530,6 @@ struct LibraryView: View {
                     )
                 }
             }
-            #else
-            .disabled(playing != nil)
-            .overlay {
-                if let queue = playing {
-                    if queue.items.contains(where: { $0.resolveURL() != nil }) {
-                        PlayerScreen(
-                            items: queue.items,
-                            initialItemID: queue.initialItemID,
-                            onDismissPlayer: closeTVPlayer
-                        )
-                        .ignoresSafeArea()
-                    } else {
-                        ContentUnavailableView(
-                            "无法访问该文件",
-                            systemImage: "exclamationmark.triangle",
-                            description: Text("文件可能已被移动或删除，请重新导入")
-                        )
-                    }
-                }
-            }
             #endif
             .kanataModal(item: $pendingLocalImport) { draft in
                 MediaImportPreview(draft: draft, onConfirm: addMediaItems)
@@ -648,10 +628,37 @@ struct LibraryView: View {
                 progressRevision += 1
             }
         }
+        #if os(tvOS)
+        .disabled(playing != nil)
+        .overlay {
+            tvPlayerOverlay
+        }
+        #endif
         .tint(settings.accentTheme.accent)
     }
 
     #if os(tvOS)
+    /// 在整个导航容器上方显示播放器，避免合集详情遮住已启动的视频。
+    @ViewBuilder
+    private var tvPlayerOverlay: some View {
+        if let queue = playing {
+            if queue.items.contains(where: { $0.resolveURL() != nil }) {
+                PlayerScreen(
+                    items: queue.items,
+                    initialItemID: queue.initialItemID,
+                    onDismissPlayer: closeTVPlayer
+                )
+                .ignoresSafeArea()
+            } else {
+                ContentUnavailableView(
+                    "无法访问该文件",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("文件可能已被移动或删除，请重新导入")
+                )
+            }
+        }
+    }
+
     /// 构建 Apple TV 首页标题和带文字的主要操作，避免用户猜测小图标含义。
     private var tvLibraryHeader: some View {
         HStack(spacing: 12) {
