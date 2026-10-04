@@ -181,25 +181,28 @@ struct SettingsView: View {
                         Toggle(isOn: $settings.builtInPublicSourcesEnabled) {
                             settingsLabel("启用平台弹幕来源", symbol: "network")
                         }
-                        Toggle(isOn: publicSourceBinding(\.builtInBilibiliEnabled)) {
-                            settingsLabel("哔哩哔哩", symbol: "play.rectangle.on.rectangle")
+                        Group {
+                            Toggle(isOn: publicSourceBinding(\.builtInBilibiliEnabled)) {
+                                settingsLabel("哔哩哔哩", symbol: "play.rectangle.on.rectangle")
+                            }
+                            Toggle(isOn: publicSourceBinding(\.builtInIqiyiEnabled)) {
+                                settingsLabel("爱奇艺", symbol: "i.square")
+                            }
+                            Toggle(isOn: publicSourceBinding(\.builtInQQEnabled)) {
+                                settingsLabel("腾讯视频", symbol: "play.square")
+                            }
+                            Toggle(isOn: publicSourceBinding(\.builtInBahamutEnabled)) {
+                                settingsLabel("巴哈姆特动画疯", symbol: "sparkles.tv")
+                            }
+                            Toggle(isOn: publicSourceBinding(\.builtInAcfunEnabled)) {
+                                settingsLabel("AcFun", symbol: "play.tv")
+                            }
+                            Toggle(isOn: publicSourceBinding(\.builtInYoukuEnabled)) {
+                                settingsLabel("优酷（支持粘贴视频链接）", symbol: "play.rectangle")
+                            }
                         }
-                        Toggle(isOn: publicSourceBinding(\.builtInIqiyiEnabled)) {
-                            settingsLabel("爱奇艺", symbol: "i.square")
-                        }
-                        Toggle(isOn: publicSourceBinding(\.builtInQQEnabled)) {
-                            settingsLabel("腾讯视频", symbol: "play.square")
-                        }
-                        Toggle(isOn: publicSourceBinding(\.builtInBahamutEnabled)) {
-                            settingsLabel("巴哈姆特动画疯", symbol: "sparkles.tv")
-                        }
-                        Toggle(isOn: publicSourceBinding(\.builtInAcfunEnabled)) {
-                            settingsLabel("AcFun", symbol: "play.tv")
-                        }
-                        Toggle(isOn: publicSourceBinding(\.builtInYoukuEnabled)) {
-                            settingsLabel("优酷（支持粘贴视频链接）", symbol: "play.rectangle")
-                        }
-                        Text("无需自建服务器即可使用。优酷目前支持粘贴视频链接匹配；其他已启用平台可按作品搜索。")
+                        .disabled(!settings.builtInPublicSourcesEnabled)
+                        Text("开启总开关会默认启用全部平台，可再单独关闭。优酷支持粘贴视频链接匹配；其他平台可按作品搜索。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button {
@@ -726,14 +729,11 @@ struct SettingsView: View {
         }
     }
 
-    /// 保持各平台选项可见；单独启用平台时同时打开平台来源总开关。
+    /// 显示各平台在总开关下的生效状态，并只修改对应平台的选择。
     private func publicSourceBinding(_ keyPath: ReferenceWritableKeyPath<AppSettings, Bool>) -> Binding<Bool> {
         Binding(
             get: { settings.builtInPublicSourcesEnabled && settings[keyPath: keyPath] },
-            set: { enabled in
-                settings[keyPath: keyPath] = enabled
-                if enabled { settings.builtInPublicSourcesEnabled = true }
-            }
+            set: { settings[keyPath: keyPath] = $0 }
         )
     }
 

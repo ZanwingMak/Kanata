@@ -917,7 +917,7 @@ private struct MediaSourceConnectionView: View {
             }
             let value: MediaSourceProfile
             if let existingProfile {
-                value = MediaSourceProfileStore.update(
+                value = try MediaSourceProfileStore.update(
                     existingProfile,
                     name: resolvedName(server: serverURL),
                     serverURL: serverURL,
@@ -926,7 +926,7 @@ private struct MediaSourceConnectionView: View {
                     secret: replacesSecret ? secret : nil
                 )
             } else {
-                value = MediaSourceProfileStore.upsert(
+                value = try MediaSourceProfileStore.upsert(
                     kind: kind,
                     name: resolvedName(server: serverURL),
                     serverURL: serverURL,

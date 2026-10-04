@@ -38,7 +38,17 @@ final class AppSettings {
 
     /// 所有内置平台弹幕来源的总开关，沿用旧存储键保留用户设置。
     var builtInPublicSourcesEnabled: Bool {
-        didSet { defaults.set(builtInPublicSourcesEnabled, forKey: Keys.builtInPublicSourcesEnabled) }
+        didSet {
+            defaults.set(builtInPublicSourcesEnabled, forKey: Keys.builtInPublicSourcesEnabled)
+            if builtInPublicSourcesEnabled && !oldValue {
+                builtInBilibiliEnabled = true
+                builtInIqiyiEnabled = true
+                builtInQQEnabled = true
+                builtInBahamutEnabled = true
+                builtInAcfunEnabled = true
+                builtInYoukuEnabled = true
+            }
+        }
     }
 
     /// 独立启用爱奇艺内置弹幕来源。
@@ -529,20 +539,28 @@ enum KeychainStore {
         set(data, account: account)
     }
 
-    /// 更新或新增指定账号的凭证数据。
-    static func set(_ data: Data, account: String) {
+    /// 更新或新增指定账号的凭证数据，并报告 Keychain 是否接受写入。
+    @discardableResult
+    static func set(_ data: Data, account: String) -> Bool {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
         let attributes: [String: Any] = [kSecValueData as String: data]
-        if SecItemUpdate(query as CFDictionary, attributes as CFDictionary) == errSecItemNotFound {
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
             var item = query
             item[kSecValueData as String] = data
             item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            SecItemAdd(item as CFDictionary, nil)
+            let added = SecItemAdd(item as CFDictionary, nil)
+            if added == errSecDuplicateItem {
+                return SecItemUpdate(query as CFDictionary, attributes as CFDictionary) == errSecSuccess
+                    && Self.data(account: account) == data
+            }
+            return added == errSecSuccess && Self.data(account: account) == data
         }
+        return status == errSecSuccess && Self.data(account: account) == data
     }
 
     /// 删除指定账号的 Keychain 记录。

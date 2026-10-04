@@ -1167,6 +1167,8 @@ struct LibraryView: View {
             switch sourceError {
             case .missingCredential:
                 return "本机未找到保存的凭证，请编辑连接并重新输入密码或令牌。"
+            case .credentialStorageFailed:
+                return "连接成功，但凭证未能保存到本机 Keychain，请重新保存连接。"
             case .authenticationFailed, .http(401), .http(403):
                 return "服务器拒绝了当前凭证，请编辑连接后重试。"
             case .http(404):

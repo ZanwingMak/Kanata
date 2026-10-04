@@ -1364,6 +1364,7 @@ enum MediaSourceError: LocalizedError {
     case invalidResponse
     case authenticationFailed
     case missingCredential
+    case credentialStorageFailed
     case http(Int)
 
     var errorDescription: String? {
@@ -1371,6 +1372,7 @@ enum MediaSourceError: LocalizedError {
         case .invalidResponse: "服务器响应格式无效"
         case .authenticationFailed: "账号、密码或访问令牌不正确"
         case .missingCredential: "登录记录已失效，请重新添加该媒体源"
+        case .credentialStorageFailed: "连接成功，但无法保存凭证；请检查设备 Keychain 后重试"
         case .http(let status): "服务器返回 HTTP \(status)"
         }
     }

@@ -99,7 +99,7 @@ enum MediaSourceProfileStore {
         username: String,
         rootPath: String? = nil,
         secret: MediaSourceSecret
-    ) -> MediaSourceProfile {
+    ) throws -> MediaSourceProfile {
         var profiles = load()
         let normalizedServer = normalizedServerString(serverURL)
         let existingIndex = profiles.firstIndex {
@@ -121,8 +121,9 @@ enum MediaSourceProfileStore {
             credentialAccount: account,
             updatedAt: Date()
         )
-        if let data = try? JSONEncoder().encode(secret) {
-            KeychainStore.set(data, account: account)
+        let data = try JSONEncoder().encode(secret)
+        guard KeychainStore.set(data, account: account) else {
+            throw MediaSourceError.credentialStorageFailed
         }
         if let existingIndex {
             profiles[existingIndex] = profile
@@ -149,7 +150,7 @@ enum MediaSourceProfileStore {
         username: String,
         rootPath: String?,
         secret: MediaSourceSecret?
-    ) -> MediaSourceProfile {
+    ) throws -> MediaSourceProfile {
         var profiles = load()
         let displayName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let updated = MediaSourceProfile(
@@ -162,8 +163,11 @@ enum MediaSourceProfileStore {
             credentialAccount: profile.credentialAccount,
             updatedAt: Date()
         )
-        if let secret, let data = try? JSONEncoder().encode(secret) {
-            KeychainStore.set(data, account: profile.credentialAccount)
+        if let secret {
+            let data = try JSONEncoder().encode(secret)
+            guard KeychainStore.set(data, account: profile.credentialAccount) else {
+                throw MediaSourceError.credentialStorageFailed
+            }
         }
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = updated
@@ -213,7 +217,7 @@ enum MediaSourceProfileStore {
         try? JSONEncoder().encode(load())
     }
 
-    /// 从 iCloud 恢复非敏感媒体源配置，并尽量复用本机已有 Keychain 凭证。
+    /// 从 iCloud 合并非敏感媒体源配置，保留本机连接及其 Keychain 凭证关联。
     /// - Parameter data: 云端媒体源配置 JSON。
     /// - Returns: 云端媒体源 ID 到本机实际 ID 的映射。
     static func importCloudData(_ data: Data?) -> [String: String] {
@@ -223,23 +227,32 @@ enum MediaSourceProfileStore {
         }
         let localProfiles = load()
         var mapping: [String: String] = [:]
-        let restored = cloudProfiles.map { cloud -> MediaSourceProfile in
-            guard let local = localProfiles.first(where: { profilesMatch($0, cloud) }) else {
+        var matchedLocalIDs = Set<String>()
+        var restored = cloudProfiles.map { cloud -> MediaSourceProfile in
+            guard let local = localProfiles.first(where: { $0.id == cloud.id && !matchedLocalIDs.contains($0.id) })
+                ?? localProfiles.first(where: { profilesMatch($0, cloud) && !matchedLocalIDs.contains($0.id) }) else {
                 mapping[cloud.id] = cloud.id
                 return cloud
             }
             mapping[cloud.id] = local.id
-            return MediaSourceProfile(
-                id: local.id,
-                kind: cloud.kind,
-                name: cloud.name,
-                serverURLString: cloud.serverURLString,
-                username: cloud.username,
-                rootPath: cloud.rootPath,
-                credentialAccount: local.credentialAccount,
-                updatedAt: max(cloud.updatedAt, local.updatedAt)
-            )
+            matchedLocalIDs.insert(local.id)
+            if profilesMatch(local, cloud),
+               KeychainStore.data(account: local.credentialAccount) == nil,
+               KeychainStore.data(account: cloud.credentialAccount) != nil {
+                return MediaSourceProfile(
+                    id: local.id,
+                    kind: local.kind,
+                    name: local.name,
+                    serverURLString: local.serverURLString,
+                    username: local.username,
+                    rootPath: local.rootPath,
+                    credentialAccount: cloud.credentialAccount,
+                    updatedAt: local.updatedAt
+                )
+            }
+            return local
         }
+        restored.append(contentsOf: localProfiles.filter { !matchedLocalIDs.contains($0.id) })
         persist(restored, schedulesCloudPush: false)
         return mapping
     }

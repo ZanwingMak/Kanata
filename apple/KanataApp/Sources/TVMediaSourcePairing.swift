@@ -370,7 +370,7 @@ private final class TVMediaSourcePairingServer {
                 throw MediaSourceError.invalidResponse
             }
             let displayName = payload.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            let profile = MediaSourceProfileStore.upsert(
+            let profile = try MediaSourceProfileStore.upsert(
                 kind: payload.kind,
                 name: displayName.isEmpty ? "\(payload.kind.title) · \(url.host ?? "服务器")" : displayName,
                 serverURL: url,
