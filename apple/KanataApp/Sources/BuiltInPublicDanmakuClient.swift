@@ -1,8 +1,9 @@
 import Compression
+import CryptoKit
 import Foundation
 import KanataCore
 
-/// App 内置的爱奇艺、腾讯视频与巴哈姆特动画疯弹幕客户端。
+/// App 内置的平台弹幕客户端，单个来源失败不会阻塞其他来源。
 actor BuiltInPublicDanmakuClient {
     private static let iqiyiSegmentSeconds = 300
     private static let segmentConcurrency = 5
@@ -12,7 +13,7 @@ actor BuiltInPublicDanmakuClient {
 
     /// 创建使用临时会话的内置公共来源客户端。
     /// - Parameter enabledSources: 用户允许参与搜索和探活的来源集合。
-    init(enabledSources: Set<DanmakuSourceId> = [.iqiyi, .qq, .bahamut]) {
+    init(enabledSources: Set<DanmakuSourceId> = [.iqiyi, .qq, .bahamut, .acfun, .youku]) {
         self.enabledSources = enabledSources
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 15
@@ -21,9 +22,9 @@ actor BuiltInPublicDanmakuClient {
         session = URLSession(configuration: configuration)
     }
 
-    /// 同时搜索爱奇艺、腾讯视频与巴哈姆特，并返回按置信度排序的逐集候选。
+    /// 搜索已启用的平台弹幕来源，并返回按置信度排序的候选。
     /// - Parameter request: 标题、可选集号和本地视频时长。
-    /// - Returns: 两个平台合并后的候选列表。
+    /// - Returns: 各平台合并后的候选列表。
     func search(_ request: ResolveRequest) async -> [ProviderCandidate] {
         var candidates: [ProviderCandidate] = []
         if enabledSources.contains(.iqiyi), let iqiyi = try? await searchIqiyi(request) {
@@ -35,6 +36,12 @@ actor BuiltInPublicDanmakuClient {
         if enabledSources.contains(.bahamut), let bahamut = try? await searchBahamut(request) {
             candidates.append(contentsOf: bahamut)
         }
+        if enabledSources.contains(.acfun), let acfun = try? await searchAcfun(request) {
+            candidates.append(contentsOf: acfun)
+        }
+        if enabledSources.contains(.youku), let youku = try? await searchYouku(request) {
+            candidates.append(contentsOf: youku)
+        }
         return candidates.sorted { left, right in
             if left.confidence == right.confidence {
                 return (left.episodeTitle ?? "") < (right.episodeTitle ?? "")
@@ -44,7 +51,7 @@ actor BuiltInPublicDanmakuClient {
     }
 
     /// 按候选来源拉取完整弹幕。
-    /// - Parameter candidate: 爱奇艺或腾讯视频候选。
+    /// - Parameter candidate: 已启用平台返回的候选。
     /// - Returns: 已按时间排序的统一弹幕。
     func danmaku(for candidate: ProviderCandidate) async throws -> [DanmakuItem] {
         switch candidate.source {
@@ -54,13 +61,17 @@ actor BuiltInPublicDanmakuClient {
             return try await loadQQDanmaku(candidate.platformEpisodeId)
         case .bahamut:
             return try await loadBahamutDanmaku(candidate.platformEpisodeId)
+        case .acfun:
+            return try await loadAcfunDanmaku(candidate.platformEpisodeId)
+        case .youku:
+            return try await loadYoukuDanmaku(candidate.platformEpisodeId)
         default:
             throw PublicDanmakuError.unsupportedSource
         }
     }
 
-    /// 轻量探测爱奇艺、腾讯视频和巴哈姆特弹幕是否可访问。
-    /// - Returns: 每个内置公共来源的可用状态。
+    /// 轻量探测已启用的平台弹幕是否可访问。
+    /// - Returns: 每个已启用平台的可用状态。
     func health() async -> [DanmakuSourceId: Bool] {
         var result: [DanmakuSourceId: Bool] = [:]
         if enabledSources.contains(.iqiyi) {
@@ -76,6 +87,12 @@ actor BuiltInPublicDanmakuClient {
         }
         if enabledSources.contains(.bahamut) {
             result[.bahamut] = ((try? await loadBahamutDanmaku("31599").count) ?? 0) > 20
+        }
+        if enabledSources.contains(.acfun) {
+            result[.acfun] = ((try? await loadAcfunPage(videoID: "11137579", cursor: "1").danmakus?.count) ?? 0) > 0
+        }
+        if enabledSources.contains(.youku) {
+            result[.youku] = ((try? await loadYoukuDanmaku("XNTE3ODIxMDEzNg==@120").count) ?? 0) > 0
         }
         return result
     }
@@ -467,6 +484,199 @@ actor BuiltInPublicDanmakuClient {
         .sorted { $0.time < $1.time }
     }
 
+    /// 搜索 AcFun 视频；只有标题和集号明确相符的结果才进入候选。
+    private func searchAcfun(_ request: ResolveRequest) async throws -> [ProviderCandidate] {
+        if let contentID = Self.regexMatches(pattern: #"(?:acfun\.cn/v/ac|^ac)(\d+)"#, text: request.title).first?.last,
+           let page = URL(string: "https://www.acfun.cn/v/ac\(contentID)") {
+            let html = String(decoding: try await loadData(makeRequest(url: page, referer: "https://www.acfun.cn/")), as: UTF8.self)
+            guard let videoID = Self.regexMatches(pattern: #"\"videoList\":\[\{[^}]*\"id\":\"(\d+)\""#, text: html).first?.last else {
+                throw PublicDanmakuError.invalidResponse
+            }
+            return [ProviderCandidate(source: .acfun, sourceInstanceName: "AcFun（App 内置）",
+                                      platformEpisodeId: videoID, title: "AcFun 视频",
+                                      episodeTitle: request.episode.map { "第 \($0) 集" } ?? "指定视频", confidence: 1)]
+        }
+        var components = URLComponents(string: "https://www.acfun.cn/rest/pc-direct/search/video")
+        components?.queryItems = [URLQueryItem(name: "keyword", value: request.title),
+                                  URLQueryItem(name: "page", value: "1"),
+                                  URLQueryItem(name: "pageSize", value: "20")]
+        guard let url = components?.url else { throw PublicDanmakuError.invalidURL }
+        let result: AcfunSearchEnvelope = try await loadJSON(makeRequest(url: url, referer: "https://www.acfun.cn/"))
+        guard result.result == 0 else { throw PublicDanmakuError.invalidResponse }
+        return (result.videoList ?? []).compactMap { video in
+            guard let videoID = video.videoId, let title = video.title, !title.isEmpty else { return nil }
+            let score = Self.titleSimilarity(request.title, title)
+            guard score >= 0.45 else { return nil }
+            let numbers = Self.regexMatches(pattern: #"(?:第\s*(\d+)\s*[集话]|(?:EP|E)\s*0*(\d+))"#, text: title)
+            let episode = numbers.first?.dropFirst().first(where: { !$0.isEmpty }).flatMap(Int.init)
+            if let expected = request.episode, episode != expected { return nil }
+            return ProviderCandidate(source: .acfun, sourceInstanceName: "AcFun（App 内置）",
+                                     platformEpisodeId: videoID, title: title,
+                                     episodeTitle: episode.map { "第 \($0) 集" } ?? "单个视频",
+                                     confidence: min(score, 0.88), danmakuCount: video.danmuCount)
+        }
+        .sorted { $0.confidence > $1.confidence }
+        .prefix(12)
+        .map { $0 }
+    }
+
+    /// 按 AcFun 分页游标拉取一页视频弹幕。
+    private func loadAcfunPage(videoID: String, cursor: String) async throws -> AcfunDanmakuEnvelope {
+        guard let url = URL(string: "https://www.acfun.cn/rest/pc-direct/new-danmaku/list") else {
+            throw PublicDanmakuError.invalidURL
+        }
+        var request = makeRequest(url: url, referer: "https://www.acfun.cn/")
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        var body = URLComponents()
+        body.queryItems = [URLQueryItem(name: "resourceId", value: videoID),
+                           URLQueryItem(name: "resourceType", value: "9"),
+                           URLQueryItem(name: "enableAdvanced", value: "true"),
+                           URLQueryItem(name: "pcursor", value: cursor),
+                           URLQueryItem(name: "count", value: "200"),
+                           URLQueryItem(name: "sortType", value: "2"),
+                           URLQueryItem(name: "asc", value: "true")]
+        request.httpBody = body.percentEncodedQuery?.data(using: .utf8)
+        let result: AcfunDanmakuEnvelope = try await loadJSON(request)
+        guard result.result == 0 else { throw PublicDanmakuError.invalidResponse }
+        return result
+    }
+
+    /// 拉取 AcFun 全部分页并转换为统一弹幕模型。
+    private func loadAcfunDanmaku(_ videoID: String) async throws -> [DanmakuItem] {
+        guard !videoID.isEmpty, videoID.allSatisfy(\.isNumber) else { throw PublicDanmakuError.invalidEpisodeID }
+        var cursor = "1"
+        var seen = Set<String>()
+        var items: [DanmakuItem] = []
+        for _ in 0..<100 {
+            guard seen.insert(cursor).inserted else { break }
+            let page = try await loadAcfunPage(videoID: videoID, cursor: cursor)
+            items.append(contentsOf: (page.danmakus ?? []).compactMap { bullet in
+                guard let position = bullet.position, position >= 0,
+                      let content = bullet.body?.trimmingCharacters(in: .whitespacesAndNewlines), !content.isEmpty else { return nil }
+                let mode: DanmakuMode = bullet.mode == 4 ? .bottom : bullet.mode == 5 ? .top : .scroll
+                return DanmakuItem(id: "acfun:\(bullet.danmakuId ?? 0)", time: Double(position) / 1_000,
+                                   mode: mode, fontSize: Double(bullet.size ?? 25),
+                                   color: bullet.color ?? 16_777_215, content: content, source: .acfun,
+                                   senderHash: bullet.userId.map(String.init),
+                                   createdAt: bullet.createTime.map { $0 / 1_000 }, weight: bullet.rank)
+            })
+            guard let next = page.pcursor, next != "no_more", next != cursor else { break }
+            cursor = next
+        }
+        return items.sorted { $0.time < $1.time }
+    }
+
+    /// 优酷公开搜索接口当前不可用；仅对用户粘贴的视频链接或 vid 建立准确候选。
+    private func searchYouku(_ request: ResolveRequest) async throws -> [ProviderCandidate] {
+        let value = request.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.contains("youku.com") || value.hasPrefix("XN") else { return [] }
+        let path = URLComponents(string: value)?.url?.path ?? value
+        let videoID = Self.regexMatches(pattern: #"(?:v_show/id_|^)([A-Za-z0-9]+={0,2})(?:\.html)?$"#, text: path).first?.last
+        guard let videoID, videoID.count >= 12 else { return [] }
+        let duration = request.duration.flatMap { $0 > 0 ? Int($0) : nil } ?? 1_800
+        return [ProviderCandidate(source: .youku, sourceInstanceName: "优酷（App 内置）",
+                                  platformEpisodeId: "\(videoID)@\(duration)", title: "优酷视频",
+                                  episodeTitle: request.episode.map { "第 \($0) 集" } ?? "指定视频",
+                                  duration: request.duration, confidence: 1)]
+    }
+
+    /// 获取优酷 MTOP 临时令牌；仅在内存中使用，不持久化 Cookie。
+    private func youkuToken() async throws -> (token: String, encoded: String) {
+        guard let url = URL(string: "https://acs.youku.com/h5/mtop.com.youku.aplatform.weakget/1.0/?jsv=2.5.1&appKey=24679788") else {
+            throw PublicDanmakuError.invalidURL
+        }
+        let (_, response) = try await session.data(for: makeRequest(url: url, referer: "https://v.youku.com/"))
+        guard let http = response as? HTTPURLResponse else { throw PublicDanmakuError.invalidResponse }
+        let headers = Dictionary(uniqueKeysWithValues: http.allHeaderFields.compactMap { key, value -> (String, String)? in
+            guard let key = key as? String, let value = value as? String else { return nil }
+            return (key, value)
+        })
+        let cookies = session.configuration.httpCookieStorage?.cookies(for: url)
+            ?? HTTPCookie.cookies(withResponseHeaderFields: headers, for: url)
+        guard let token = cookies.first(where: { $0.name == "_m_h5_tk" })?.value,
+              let encoded = cookies.first(where: { $0.name == "_m_h5_tk_enc" })?.value else {
+            throw PublicDanmakuError.invalidResponse
+        }
+        return (token, encoded)
+    }
+
+    /// 请求一个 60 秒优酷弹幕分片，并解析双层 JSON 响应。
+    private func loadYoukuSegment(videoID: String, minute: Int, token: String, encoded: String) async throws -> [DanmakuItem] {
+        var message: [String: Any] = ["ctime": Int(Date().timeIntervalSince1970 * 1_000),
+                                      "ctype": 10004, "cver": "v1.0", "guid": UUID().uuidString,
+                                      "mat": minute, "mcount": 1, "pid": 0, "sver": "3.1.0",
+                                      "type": 1, "vid": videoID]
+        let encodedMessage = try JSONSerialization.data(withJSONObject: message, options: [.sortedKeys]).base64EncodedString()
+        message["msg"] = encodedMessage
+        message["sign"] = Self.md5(encodedMessage + "MkmC9SoIw6xCkSKHhJ7b5D2r51kBiREr")
+        let data = String(decoding: try JSONSerialization.data(withJSONObject: message, options: [.sortedKeys]), as: UTF8.self)
+        let timestamp = String(Int(Date().timeIntervalSince1970 * 1_000))
+        let prefix = String(token.prefix(while: { $0 != "_" }))
+        var components = URLComponents(string: "https://acs.youku.com/h5/mopen.youku.danmu.list/1.0/")
+        components?.queryItems = [URLQueryItem(name: "jsv", value: "2.5.6"),
+                                  URLQueryItem(name: "appKey", value: "24679788"),
+                                  URLQueryItem(name: "t", value: timestamp),
+                                  URLQueryItem(name: "sign", value: Self.md5("\(prefix)&\(timestamp)&24679788&\(data)")),
+                                  URLQueryItem(name: "api", value: "mopen.youku.danmu.list"),
+                                  URLQueryItem(name: "v", value: "1.0"),
+                                  URLQueryItem(name: "type", value: "originaljson"),
+                                  URLQueryItem(name: "dataType", value: "jsonp")]
+        guard let url = components?.url else { throw PublicDanmakuError.invalidURL }
+        var request = makeRequest(url: url, referer: "https://v.youku.com/")
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("_m_h5_tk=\(token); _m_h5_tk_enc=\(encoded)", forHTTPHeaderField: "Cookie")
+        var body = URLComponents()
+        body.queryItems = [URLQueryItem(name: "data", value: data)]
+        request.httpBody = body.percentEncodedQuery?.data(using: .utf8)
+        let outer: YoukuEnvelope = try await loadJSON(request)
+        guard let inner = outer.data?.result?.data(using: .utf8),
+              let result = try? JSONDecoder().decode(YoukuResult.self, from: inner), result.code == 1 else {
+            throw PublicDanmakuError.invalidResponse
+        }
+        return (result.data?.result ?? []).compactMap { bullet in
+            guard let milliseconds = bullet.playat,
+                  let content = bullet.content?.trimmingCharacters(in: .whitespacesAndNewlines), !content.isEmpty else { return nil }
+            let style = bullet.propertis?.data(using: .utf8)
+                .flatMap { try? JSONDecoder().decode(YoukuBulletStyle.self, from: $0) }
+            let mode: DanmakuMode = style?.pos == 2 ? .top : style?.pos == 3 ? .bottom : .scroll
+            return DanmakuItem(id: "youku:\(bullet.id ?? 0)", time: Double(milliseconds) / 1_000,
+                               mode: mode, color: style?.color ?? 16_777_215,
+                               content: content, source: .youku, senderHash: bullet.uid)
+        }
+    }
+
+    /// 按本地片长获取优酷所有分钟分片，单个空分片不影响其余结果。
+    private func loadYoukuDanmaku(_ platformEpisodeID: String) async throws -> [DanmakuItem] {
+        let parts = platformEpisodeID.split(separator: "@", maxSplits: 1).map(String.init)
+        guard let videoID = parts.first, videoID.count >= 12 else { throw PublicDanmakuError.invalidEpisodeID }
+        let duration = parts.count > 1 ? Int(parts[1]) ?? 1_800 : 1_800
+        let segments = min(max(Int(ceil(Double(duration) / 60)), 1), 120)
+        let credential = try await youkuToken()
+        var items: [DanmakuItem] = []
+        for start in stride(from: 0, to: segments, by: Self.segmentConcurrency) {
+            let batch = await withTaskGroup(of: [DanmakuItem].self) { group in
+                for minute in start..<min(start + Self.segmentConcurrency, segments) {
+                    group.addTask {
+                        (try? await self.loadYoukuSegment(videoID: videoID, minute: minute,
+                                                         token: credential.token, encoded: credential.encoded)) ?? []
+                    }
+                }
+                var values: [DanmakuItem] = []
+                for await value in group { values.append(contentsOf: value) }
+                return values
+            }
+            items.append(contentsOf: batch)
+        }
+        return items.sorted { $0.time < $1.time }
+    }
+
+    /// 计算优酷请求使用的小写 MD5 十六进制签名。
+    private static func md5(_ value: String) -> String {
+        Insecure.MD5.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// 创建带来源页请求头的 GET 请求。
     private func makeRequest(url: URL, referer: String) -> URLRequest {
         var request = URLRequest(url: url)
@@ -836,6 +1046,65 @@ private struct BahamutBullet: Decodable {
     let time: Int
     let sn: Int
     let userid: String
+}
+
+private struct AcfunSearchEnvelope: Decodable {
+    let result: Int?
+    let videoList: [AcfunSearchVideo]?
+}
+
+private struct AcfunSearchVideo: Decodable {
+    let videoId: String?
+    let title: String?
+    let danmuCount: Int?
+}
+
+private struct AcfunDanmakuEnvelope: Decodable {
+    let result: Int?
+    let danmakus: [AcfunBullet]?
+    let pcursor: String?
+}
+
+private struct AcfunBullet: Decodable {
+    let danmakuId: Int?
+    let position: Int?
+    let body: String?
+    let mode: Int?
+    let size: Int?
+    let color: Int?
+    let userId: Int?
+    let createTime: Int?
+    let rank: Int?
+}
+
+private struct YoukuEnvelope: Decodable {
+    let data: YoukuEnvelopeData?
+}
+
+private struct YoukuEnvelopeData: Decodable {
+    let result: String?
+}
+
+private struct YoukuResult: Decodable {
+    let code: Int?
+    let data: YoukuResultData?
+}
+
+private struct YoukuResultData: Decodable {
+    let result: [YoukuBullet]?
+}
+
+private struct YoukuBullet: Decodable {
+    let id: Int?
+    let playat: Int?
+    let content: String?
+    let propertis: String?
+    let uid: String?
+}
+
+private struct YoukuBulletStyle: Decodable {
+    let color: Int?
+    let pos: Int?
 }
 
 private struct QQEpisodeEnvelope: Decodable {

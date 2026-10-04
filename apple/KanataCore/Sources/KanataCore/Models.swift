@@ -13,7 +13,7 @@ public enum DanmakuMode: Int, Codable, Sendable {
 
 /// 弹幕来源标识
 public enum DanmakuSourceId: String, Codable, Sendable, CaseIterable {
-    case dandanplay, bilibili, iqiyi, qq, youku, mgtv, bahamut, local, custom
+    case dandanplay, bilibili, iqiyi, qq, youku, mgtv, bahamut, acfun, local, custom
 
     /// 面向用户展示的完整来源名称，避免暴露内部标识或使用不合规简称
     public var displayName: String {
@@ -25,6 +25,7 @@ public enum DanmakuSourceId: String, Codable, Sendable, CaseIterable {
         case .youku: "优酷"
         case .mgtv: "芒果TV"
         case .bahamut: "巴哈姆特动画疯"
+        case .acfun: "AcFun"
         case .local: "本地弹幕"
         case .custom: "自定义弹幕源"
         }

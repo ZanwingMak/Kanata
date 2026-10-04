@@ -36,7 +36,7 @@ final class AppSettings {
         didSet { defaults.set(builtInBilibiliEnabled, forKey: Keys.builtInBilibiliEnabled) }
     }
 
-    /// 无需部署网关即可使用的爱奇艺、腾讯视频与巴哈姆特来源开关。
+    /// 所有内置平台弹幕来源的总开关，沿用旧存储键保留用户设置。
     var builtInPublicSourcesEnabled: Bool {
         didSet { defaults.set(builtInPublicSourcesEnabled, forKey: Keys.builtInPublicSourcesEnabled) }
     }
@@ -54,6 +54,16 @@ final class AppSettings {
     /// 独立启用巴哈姆特动画疯内置弹幕来源。
     var builtInBahamutEnabled: Bool {
         didSet { defaults.set(builtInBahamutEnabled, forKey: Keys.builtInBahamutEnabled) }
+    }
+
+    /// 独立启用 AcFun 内置弹幕来源。
+    var builtInAcfunEnabled: Bool {
+        didSet { defaults.set(builtInAcfunEnabled, forKey: Keys.builtInAcfunEnabled) }
+    }
+
+    /// 独立启用优酷内置弹幕来源。
+    var builtInYoukuEnabled: Bool {
+        didSet { defaults.set(builtInYoukuEnabled, forKey: Keys.builtInYoukuEnabled) }
     }
 
     /// 用户自行配置的弹弹play开放平台渠道开关。
@@ -128,6 +138,8 @@ final class AppSettings {
         static let builtInIqiyiEnabled = "source.iqiyi.builtInEnabled"
         static let builtInQQEnabled = "source.qq.builtInEnabled"
         static let builtInBahamutEnabled = "source.bahamut.builtInEnabled"
+        static let builtInAcfunEnabled = "source.acfun.builtInEnabled"
+        static let builtInYoukuEnabled = "source.youku.builtInEnabled"
         static let dandanplayChannelEnabled = "source.dandanplay.channelEnabled"
         static let legacyBuiltInDandanplayEnabled = "source.dandanplay.builtInEnabled"
         static let accentTheme = KanataTheme.accentStorageKey
@@ -182,6 +194,10 @@ final class AppSettings {
             && (defaults.object(forKey: Keys.builtInQQEnabled) as? Bool ?? true)
         self.builtInBahamutEnabled = fullFeatureAccessEnabled
             && (defaults.object(forKey: Keys.builtInBahamutEnabled) as? Bool ?? true)
+        self.builtInAcfunEnabled = fullFeatureAccessEnabled
+            && (defaults.object(forKey: Keys.builtInAcfunEnabled) as? Bool ?? true)
+        self.builtInYoukuEnabled = fullFeatureAccessEnabled
+            && (defaults.object(forKey: Keys.builtInYoukuEnabled) as? Bool ?? true)
         self.dandanplayAppID = KeychainStore.string(account: KeychainAccounts.dandanplayAppID) ?? ""
         self.dandanplayAppSecret = KeychainStore.string(account: KeychainAccounts.dandanplayAppSecret) ?? ""
         self.dandanplayChannelEnabled = defaults.object(forKey: Keys.dandanplayChannelEnabled) as? Bool ?? false
@@ -298,11 +314,11 @@ final class AppSettings {
     /// 按当前凭证创建无需自建网关的内置 B 站客户端。
     /// - Returns: 用户关闭内置来源时返回 nil。
     func makeBuiltInBilibiliClient() -> BuiltInBilibiliClient? {
-        guard isFullFeatureAccessEnabled, builtInBilibiliEnabled else { return nil }
+        guard isFullFeatureAccessEnabled, builtInPublicSourcesEnabled, builtInBilibiliEnabled else { return nil }
         return BuiltInBilibiliClient(cookie: bilibiliCookieHeader)
     }
 
-    /// 创建无需网关的爱奇艺、腾讯视频与巴哈姆特弹幕客户端。
+    /// 创建无需网关的其他内置平台弹幕客户端。
     /// - Returns: 用户关闭内置公共来源时返回 nil。
     func makeBuiltInPublicDanmakuClient() -> BuiltInPublicDanmakuClient? {
         guard isFullFeatureAccessEnabled, builtInPublicSourcesEnabled else { return nil }
@@ -310,6 +326,8 @@ final class AppSettings {
         if builtInIqiyiEnabled { enabledSources.insert(.iqiyi) }
         if builtInQQEnabled { enabledSources.insert(.qq) }
         if builtInBahamutEnabled { enabledSources.insert(.bahamut) }
+        if builtInAcfunEnabled { enabledSources.insert(.acfun) }
+        if builtInYoukuEnabled { enabledSources.insert(.youku) }
         guard !enabledSources.isEmpty else { return nil }
         return BuiltInPublicDanmakuClient(enabledSources: enabledSources)
     }
@@ -398,6 +416,8 @@ final class AppSettings {
         builtInIqiyiEnabled = true
         builtInQQEnabled = true
         builtInBahamutEnabled = true
+        builtInAcfunEnabled = true
+        builtInYoukuEnabled = true
         danmakuConfig.enabled = true
         return true
     }

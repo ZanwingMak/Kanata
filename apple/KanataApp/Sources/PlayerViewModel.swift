@@ -559,7 +559,7 @@ final class PlayerViewModel {
             let candidates = await builtInPublicClient.search(request)
             append(candidates)
             if candidates.isEmpty {
-                errors.append("爱奇艺、腾讯视频、巴哈姆特未找到匹配结果")
+                errors.append("已启用的平台来源未找到匹配结果")
             }
         }
         if let dandanplayChannelClient {
@@ -659,7 +659,7 @@ final class PlayerViewModel {
                 errors.append(error.localizedDescription)
             }
         }
-        if [.iqiyi, .qq, .bahamut].contains(candidate.source), let builtInPublicClient {
+        if [.iqiyi, .qq, .bahamut, .acfun, .youku].contains(candidate.source), let builtInPublicClient {
             let startedAt = Date()
             do {
                 let items = try await builtInPublicClient.danmaku(for: candidate)
@@ -856,7 +856,7 @@ final class PlayerViewModel {
         defer { isSearchingCandidates = false }
         danmakuStats = "正在搜索…"
         let isDirectLink = query.contains("://")
-            || query.range(of: #"(?i)^(?:BV[0-9A-Za-z]+|(?:ep|ss)\d+)$"#, options: .regularExpression) != nil
+            || query.range(of: #"(?i)^(?:BV[0-9A-Za-z]+|(?:ep|ss|ac)\d+|XN[0-9A-Za-z]+={0,2})$"#, options: .regularExpression) != nil
         let parsedQuery = isDirectLink ? nil : TitleParser.parse(query)
         let title = parsedQuery.flatMap { $0.title.isEmpty ? nil : $0.title } ?? query
         var result = await resolveCandidates(ResolveRequest(

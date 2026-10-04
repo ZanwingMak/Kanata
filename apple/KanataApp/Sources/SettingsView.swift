@@ -177,12 +177,12 @@ struct SettingsView: View {
                 }
                 if selectedCategory == .danmaku {
                 if settings.isFullFeatureAccessEnabled {
-                    Section("开箱即用弹幕") {
-                        Toggle(isOn: $settings.builtInBilibiliEnabled) {
-                            settingsLabel("哔哩哔哩", symbol: "play.rectangle.on.rectangle")
-                        }
+                    Section("平台弹幕来源") {
                         Toggle(isOn: $settings.builtInPublicSourcesEnabled) {
-                            settingsLabel("启用公共平台来源", symbol: "network")
+                            settingsLabel("启用平台弹幕来源", symbol: "network")
+                        }
+                        Toggle(isOn: publicSourceBinding(\.builtInBilibiliEnabled)) {
+                            settingsLabel("哔哩哔哩", symbol: "play.rectangle.on.rectangle")
                         }
                         Toggle(isOn: publicSourceBinding(\.builtInIqiyiEnabled)) {
                             settingsLabel("爱奇艺", symbol: "i.square")
@@ -193,14 +193,20 @@ struct SettingsView: View {
                         Toggle(isOn: publicSourceBinding(\.builtInBahamutEnabled)) {
                             settingsLabel("巴哈姆特动画疯", symbol: "sparkles.tv")
                         }
-                        Text("无需服务器即可跨平台搜索作品、逐集选择并加载弹幕；网关不可用时仍可正常使用。")
+                        Toggle(isOn: publicSourceBinding(\.builtInAcfunEnabled)) {
+                            settingsLabel("AcFun", symbol: "play.tv")
+                        }
+                        Toggle(isOn: publicSourceBinding(\.builtInYoukuEnabled)) {
+                            settingsLabel("优酷（支持粘贴视频链接）", symbol: "play.rectangle")
+                        }
+                        Text("无需自建服务器即可使用。优酷目前支持粘贴视频链接匹配；其他已启用平台可按作品搜索。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button {
                             Task { await testBuiltInSource() }
                         } label: {
                             HStack {
-                                Label("测试全部内置来源", systemImage: "checkmark.circle")
+                                Label("测试平台弹幕来源", systemImage: "checkmark.circle")
                                 if isTestingBuiltInSource { Spacer(); ProgressView() }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -720,7 +726,7 @@ struct SettingsView: View {
         }
     }
 
-    /// 保持各平台选项可见；单独启用平台时同时打开公共来源总开关。
+    /// 保持各平台选项可见；单独启用平台时同时打开平台来源总开关。
     private func publicSourceBinding(_ keyPath: ReferenceWritableKeyPath<AppSettings, Bool>) -> Binding<Bool> {
         Binding(
             get: { settings.builtInPublicSourcesEnabled && settings[keyPath: keyPath] },
@@ -929,6 +935,12 @@ struct SettingsView: View {
             }
             if settings.builtInBahamutEnabled {
                 statuses.append("巴哈姆特\(health[.bahamut] == true ? "可用" : "失败")")
+            }
+            if settings.builtInAcfunEnabled {
+                statuses.append("AcFun\(health[.acfun] == true ? "可用" : "失败")")
+            }
+            if settings.builtInYoukuEnabled {
+                statuses.append("优酷\(health[.youku] == true ? "可用" : "失败")")
             }
         }
         let elapsed = Int(Date().timeIntervalSince(startedAt) * 1_000)
