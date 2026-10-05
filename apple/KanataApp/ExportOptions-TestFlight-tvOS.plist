@@ -20,6 +20,6 @@
 	<key>uploadSymbols</key>
 	<true/>
 	<key>testFlightInternalTestingOnly</key>
-	<true/>
+	<false/>
 </dict>
 </plist>
