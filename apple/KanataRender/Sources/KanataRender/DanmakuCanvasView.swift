@@ -30,6 +30,15 @@ public final class DanmakuCanvasView: UIView {
         didSet { applyConfigChange(previous: oldValue) }
     }
 
+    /// 被全屏页面遮挡时停止绘制；恢复时按最新播放时间重建，避免补绘过期弹幕。
+    public var isRenderingSuspended = false {
+        didSet {
+            guard isRenderingSuspended != oldValue else { return }
+            if !isRenderingSuspended { reset() }
+            updateDisplayLinkState()
+        }
+    }
+
     private var allItems: [DanmakuItem] = []
     /// 经过模式、来源与屏蔽规则过滤后的弹幕
     private var visibleItems: [DanmakuItem] = []
@@ -234,7 +243,8 @@ public final class DanmakuCanvasView: UIView {
 
     /// 根据播放状态与开关决定是否运行渲染循环，避免无谓耗电
     private func updateDisplayLinkState() {
-        let shouldRun = isPlaying && config.enabled && !visibleItems.isEmpty && window != nil
+        let shouldRun = isPlaying && config.enabled && !isRenderingSuspended
+            && !visibleItems.isEmpty && window != nil
         if shouldRun, displayLink == nil {
             let proxy = DisplayLinkProxy(target: self)
             let link = CADisplayLink(target: proxy, selector: #selector(DisplayLinkProxy.handle))

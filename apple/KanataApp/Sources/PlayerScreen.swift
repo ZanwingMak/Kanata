@@ -1135,7 +1135,10 @@ struct PlayerScreen: View {
                     size: proxy.size,
                     safeAreaInsets: proxy.safeAreaInsets
                 )
-                DanmakuOverlay(config: settings.danmakuConfig) { view in
+                DanmakuOverlay(
+                    config: settings.danmakuConfig,
+                    isRenderingSuspended: isCandidatePageCoveringPlayback
+                ) { view in
                     canvasBridge.attach(view)
                 }
                 .frame(width: viewport.width, height: viewport.height)
@@ -2078,8 +2081,18 @@ struct PlayerScreen: View {
     /// 匹配页完全关闭后恢复入口焦点，避免第一次方向键只用于找回焦点。
     private func restoreCandidateFocus() {
         #if os(tvOS)
+        currentTime = viewModel.currentPlaybackTime
         setControlsVisible(true)
         tvFocusedControl = .manualMatch
+        #endif
+    }
+
+    /// 电视匹配页覆盖整个画面时，暂停不可见的界面刷新，视频仍继续播放。
+    private var isCandidatePageCoveringPlayback: Bool {
+        #if os(tvOS)
+        viewModel.isShowingCandidates
+        #else
+        false
         #endif
     }
 
@@ -2911,7 +2924,7 @@ struct PlayerScreen: View {
                 guard abs(time - target) <= 0.75 else { return }
                 pendingSeekTarget = nil
             }
-            if !isSeeking { currentTime = time }
+            if !isSeeking, !isCandidatePageCoveringPlayback { currentTime = time }
             bridge.sync(time: time, rate: rate)
         }
         viewModel.onPlaybackStateChanged = { playing in
@@ -3849,7 +3862,27 @@ struct CandidatePicker: View {
     @State private var operationError: String?
     @State private var selectedSource: DanmakuSourceId?
     @State private var pendingSeasonMismatch: ProviderCandidate?
+    @State private var candidateRows: [CandidateRow] = []
+    @State private var sourceCounts: [DanmakuSourceId: Int] = [:]
     @Environment(\.dismiss) private var dismiss
+
+    /// 缓存候选的解析结果，焦点移动与滚动只读取展示数据。
+    private struct CandidateRow: Identifiable {
+        let candidate: ProviderCandidate
+        let season: DanmakuSeasonAlignment
+        let episode: DanmakuEpisodeAlignment
+        let episodeTitle: String?
+        let hasTimelineMismatch: Bool
+
+        /// 沿用来源的稳定标识，避免缓存刷新重建列表焦点。
+        var id: String { candidate.id }
+
+        /// 标记需要人工确认的季度冲突。
+        var hasSeasonMismatch: Bool {
+            if case .mismatched = season { return true }
+            return false
+        }
+    }
     #if os(tvOS)
     @FocusState private var focusedControl: TVCandidateFocus?
 
@@ -3874,13 +3907,20 @@ struct CandidatePicker: View {
         }
         .onAppear {
             keyword = initialKeyword ?? viewModel.parsed?.title ?? ""
+            refreshCandidateRows()
             #if os(tvOS)
             focusInitialTVControl()
             #endif
         }
         .onChange(of: viewModel.candidates.map(\.id)) { _, _ in
+            refreshCandidateRows()
             selectedSource = nil
         }
+        .onChange(of: viewModel.isSearchingCandidates) { _, searching in
+            if !searching { refreshCandidateRows() }
+        }
+        .onChange(of: viewModel.parsed) { _, _ in refreshCandidateRows() }
+        .onChange(of: viewModel.duration) { _, _ in refreshCandidateRows() }
         .alert("弹幕季度不同", isPresented: Binding(
             get: { pendingSeasonMismatch != nil },
             set: { if !$0 { pendingSeasonMismatch = nil } }
@@ -3979,9 +4019,9 @@ struct CandidatePicker: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                ForEach(displayedCandidates) { candidate in
-                    Button { selectCandidate(candidate) } label: {
-                        candidateDetails(candidate)
+                ForEach(displayedCandidates) { row in
+                    Button { selectCandidate(row.candidate) } label: {
+                        candidateDetails(row)
                     }
                 }
             }
@@ -4127,7 +4167,7 @@ struct CandidatePicker: View {
         .focusSection()
     }
 
-    /// 构建 Apple TV 右侧候选列表与空状态。
+    /// 构建 Apple TV 候选列表；滚动内容限定在结果区域，焦点框由内边距容纳。
     private var tvCandidateColumn: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .firstTextBaseline) {
@@ -4161,21 +4201,21 @@ struct CandidatePicker: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(displayedCandidates) { candidate in
-                            Button { selectCandidate(candidate) } label: {
+                        ForEach(displayedCandidates) { row in
+                            Button { selectCandidate(row.candidate) } label: {
                                 HStack(spacing: 20) {
-                                    Image(systemName: candidateHasSeasonMismatch(candidate)
+                                    Image(systemName: row.hasSeasonMismatch
                                           ? "exclamationmark.triangle.fill"
-                                          : viewModel.episodeAlignment(for: candidate).symbol)
+                                          : row.episode.symbol)
                                         .font(.title2)
-                                        .foregroundStyle(candidateAlignmentColor(candidate))
+                                        .foregroundStyle(candidateAlignmentColor(row))
                                         .frame(width: 42)
-                                    candidateDetails(candidate)
+                                    candidateDetails(row)
                                     Spacer(minLength: 16)
                                     VStack(alignment: .trailing, spacing: 6) {
-                                        Text("\(Int(candidate.confidence * 100))%")
+                                        Text("\(Int(row.candidate.confidence * 100))%")
                                             .font(.title3.monospacedDigit().bold())
-                                        Text(candidateHasSeasonMismatch(candidate) ? "需核对季度" : "匹配度")
+                                        Text(row.hasSeasonMismatch ? "需核对季度" : "匹配度")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
@@ -4192,13 +4232,12 @@ struct CandidatePicker: View {
                                 )
                             }
                             .kanataTVFocus(cornerRadius: 22)
-                            .focused($focusedControl, equals: .candidate(candidate.id))
+                            .focused($focusedControl, equals: .candidate(row.id))
                         }
                     }
-                    .padding(6)
+                    .padding(12)
                 }
                 .scrollIndicators(.hidden)
-                .scrollClipDisabled()
             }
         }
         .padding(24)
@@ -4222,20 +4261,39 @@ struct CandidatePicker: View {
     }
 
     /// 当前来源筛选后的候选；切换筛选不会重新请求网络。
-    private var displayedCandidates: [ProviderCandidate] {
-        guard let selectedSource else { return viewModel.candidates }
-        return viewModel.candidates.filter { $0.source == selectedSource }
+    private var displayedCandidates: [CandidateRow] {
+        guard let selectedSource else { return candidateRows }
+        return candidateRows.filter { $0.candidate.source == selectedSource }
+    }
+
+    /// 仅在搜索结果或视频信息变化时解析季集号，同名候选共享季度解析结果。
+    private func refreshCandidateRows() {
+        var seasons: [String: DanmakuSeasonAlignment] = [:]
+        var counts: [DanmakuSourceId: Int] = [:]
+        candidateRows = viewModel.candidates.map { candidate in
+            let season = seasons[candidate.title] ?? viewModel.seasonAlignment(for: candidate)
+            seasons[candidate.title] = season
+            counts[candidate.source, default: 0] += 1
+            return CandidateRow(
+                candidate: candidate,
+                season: season,
+                episode: viewModel.episodeAlignment(for: candidate),
+                episodeTitle: candidate.episodeTitle.map(normalizedEpisodeTitle),
+                hasTimelineMismatch: viewModel.hasTimelineMismatch(for: candidate)
+            )
+        }
+        sourceCounts = counts
     }
 
     /// 按实际搜索结果列出来源入口及数量，便于逐平台查找正确季度。
     private var sourceSelector: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 10) {
-                sourceButton(nil, title: "全部 · \(viewModel.candidates.count)")
+                sourceButton(nil, title: "全部 · \(candidateRows.count)")
                 ForEach(DanmakuSourceId.allCases.filter { source in
-                    viewModel.candidates.contains { $0.source == source }
+                    sourceCounts[source] != nil
                 }, id: \.self) { source in
-                    let count = viewModel.candidates.filter { $0.source == source }.count
+                    let count = sourceCounts[source] ?? 0
                     sourceButton(source, title: "\(source.displayName) · \(count)")
                 }
             }
@@ -4312,16 +4370,17 @@ struct CandidatePicker: View {
     /// 生成 iOS 与 tvOS 共用的候选标题、来源和集数信息。
     /// - Parameter candidate: 要展示的候选弹幕分集。
     /// - Returns: 不包含操作按钮的候选说明视图。
-    private func candidateDetails(_ candidate: ProviderCandidate) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func candidateDetails(_ row: CandidateRow) -> some View {
+        let candidate = row.candidate
+        return VStack(alignment: .leading, spacing: 6) {
             Text(candidate.title)
                 .font(.headline)
                 .foregroundStyle(.primary)
                 .lineLimit(2)
             HStack(spacing: 8) {
                 Text(candidate.sourceInstanceName ?? candidate.source.displayName)
-                if let episodeTitle = candidate.episodeTitle, !episodeTitle.isEmpty {
-                    Text(normalizedEpisodeTitle(episodeTitle))
+                if let episodeTitle = row.episodeTitle, !episodeTitle.isEmpty {
+                    Text(episodeTitle)
                 }
                 #if !os(tvOS)
                 Text("匹配度 \(Int(candidate.confidence * 100))%")
@@ -4329,12 +4388,12 @@ struct CandidatePicker: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-            if candidateHasSeasonMismatch(candidate) {
-                Label(viewModel.seasonAlignment(for: candidate).title, systemImage: "exclamationmark.triangle.fill")
+            if row.hasSeasonMismatch {
+                Label(row.season.title, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(KanataTheme.warning)
-            } else if case .matched = viewModel.seasonAlignment(for: candidate) {
-                Label(viewModel.seasonAlignment(for: candidate).title, systemImage: "checkmark.circle.fill")
+            } else if case .matched = row.season {
+                Label(row.season.title, systemImage: "checkmark.circle.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(KanataTheme.success)
             } else if candidate.source == .bilibili {
@@ -4343,12 +4402,12 @@ struct CandidatePicker: View {
                     .foregroundStyle(.secondary)
             }
             Label(
-                viewModel.episodeAlignment(for: candidate).title,
-                systemImage: viewModel.episodeAlignment(for: candidate).symbol
+                row.episode.title,
+                systemImage: row.episode.symbol
             )
             .font(.caption.weight(.semibold))
-            .foregroundStyle(candidateAlignmentColor(candidate))
-            if viewModel.hasTimelineMismatch(for: candidate) {
+            .foregroundStyle(candidateAlignmentColor(row))
+            if row.hasTimelineMismatch {
                 Label("片长差异较大，请确认是否同一版本", systemImage: "clock.badge.exclamationmark")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(KanataTheme.warning)
@@ -4385,9 +4444,9 @@ struct CandidatePicker: View {
     /// 返回候选分集对应状态的提示色。
     /// - Parameter candidate: 当前候选。
     /// - Returns: 一致为绿色，不一致为橙色，其余为次级文字色。
-    private func candidateAlignmentColor(_ candidate: ProviderCandidate) -> Color {
-        if candidateHasSeasonMismatch(candidate) { return KanataTheme.warning }
-        return switch viewModel.episodeAlignment(for: candidate) {
+    private func candidateAlignmentColor(_ row: CandidateRow) -> Color {
+        if row.hasSeasonMismatch { return KanataTheme.warning }
+        return switch row.episode {
         case .matched: KanataTheme.success
         case .mismatched: KanataTheme.warning
         case .unavailable, .unverified: .secondary

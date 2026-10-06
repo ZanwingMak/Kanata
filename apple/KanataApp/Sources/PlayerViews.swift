@@ -252,17 +252,22 @@ struct AirPlayRouteButton: UIViewRepresentable {
 /// 避免每 0.1 秒触发一次视图 diff。
 struct DanmakuOverlay: UIViewRepresentable {
     let config: DanmakuRenderConfig
+    var isRenderingSuspended = false
     /// 画布创建后回传，供上层直接驱动
     let onCreate: (DanmakuCanvasView) -> Void
 
+    /// 创建画布并应用当前可见状态，后台播放不启动被遮挡的绘制。
     func makeUIView(context: Context) -> DanmakuCanvasView {
         let view = DanmakuCanvasView()
+        view.isRenderingSuspended = isRenderingSuspended
         view.config = config
         onCreate(view)
         return view
     }
 
+    /// 更新配置和遮挡状态，不修改用户保存的弹幕开关。
     func updateUIView(_ uiView: DanmakuCanvasView, context: Context) {
+        uiView.isRenderingSuspended = isRenderingSuspended
         if uiView.config != config {
             uiView.config = config
         }

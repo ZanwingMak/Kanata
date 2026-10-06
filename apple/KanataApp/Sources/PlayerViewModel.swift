@@ -1089,7 +1089,7 @@ final class PlayerViewModel {
     }
 
     /// 当前播放内核报告的实际时间。
-    private var currentPlaybackTime: Double {
+    var currentPlaybackTime: Double {
         if let universalPlayerLayer { return universalPlayerLayer.player.currentPlaybackTime }
         return player?.currentTime().seconds ?? 0
     }
