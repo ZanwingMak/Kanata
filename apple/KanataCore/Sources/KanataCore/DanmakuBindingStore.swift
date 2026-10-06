@@ -1,5 +1,27 @@
 import Foundation
 
+/// 用户成功使用并确认的作品搜索词与平台来源；分集仍按当前视频重新查找。
+public struct ConfirmedDanmakuMatch: Codable, Sendable {
+    public let searchTitle: String
+    public let candidate: ProviderCandidate
+
+    /// 创建作品级确认记录，不把已选择的集号作为后续分集的搜索条件。
+    public init(searchTitle: String, candidate: ProviderCandidate) {
+        self.searchTitle = searchTitle
+        self.candidate = candidate
+    }
+
+    /// 仅接受同一平台实例与作品，允许标题中的集号变化，但不跨季或年份复用。
+    public func matches(_ result: ProviderCandidate) -> Bool {
+        guard result.source == candidate.source,
+              result.sourceInstanceId == candidate.sourceInstanceId else { return false }
+        let expected = TitleParser.parse(candidate.title)
+        let actual = TitleParser.parse(result.title)
+        return !expected.title.isEmpty && actual.title == expected.title
+            && actual.season == expected.season && actual.year == expected.year
+    }
+}
+
 /// 用户已确认或成功使用的弹幕匹配绑定，只保存在当前设备。
 public enum DanmakuBindingStore {
     private static let storageKey = "kanata.danmaku.bindings.v1"
@@ -12,6 +34,23 @@ public enum DanmakuBindingStore {
     /// 保存作品级搜索名称，供后续分集使用自己的季集号重新匹配。
     public static func saveSearchTitle(_ title: String, for mediaKey: String) {
         UserDefaults.standard.set(title, forKey: "kanata.danmaku.searchTitle.v1.\(mediaKey)")
+    }
+
+    /// 读取同一合集季度或电影的手动确认记录，旧的未确认搜索词不自动升级为绑定。
+    public static func confirmedMatch(for mediaKey: String) -> ConfirmedDanmakuMatch? {
+        guard let data = UserDefaults.standard.data(forKey: "kanata.danmaku.confirmedMatch.v1.\(mediaKey)") else { return nil }
+        return try? JSONDecoder().decode(ConfirmedDanmakuMatch.self, from: data)
+    }
+
+    /// 成功加载用户选择的来源后保存确认记录，搜索失败或只输入关键词不会覆盖它。
+    public static func saveConfirmedMatch(_ match: ConfirmedDanmakuMatch, for mediaKey: String) {
+        guard let data = try? JSONEncoder().encode(match) else { return }
+        UserDefaults.standard.set(data, forKey: "kanata.danmaku.confirmedMatch.v1.\(mediaKey)")
+    }
+
+    /// 解除手动作品偏好，让后续播放恢复默认自动匹配。
+    public static func removeConfirmedMatch(for mediaKey: String) {
+        UserDefaults.standard.removeObject(forKey: "kanata.danmaku.confirmedMatch.v1.\(mediaKey)")
     }
 
     /// 根据视频指纹读取已保存的候选；没有绑定或数据损坏时返回 nil。

@@ -1282,8 +1282,7 @@ struct PlayerScreen: View {
         .kanataModal(isPresented: $viewModel.isShowingCandidates, onDismiss: restoreCandidateFocus) {
             CandidatePicker(
                 viewModel: viewModel,
-                initialKeyword: savedDanmakuSearchTitle,
-                onSearchKeyword: rememberDanmakuSearchTitle
+                initialKeyword: savedDanmakuSearchTitle
             )
         }
         .kanataFileImporter(
@@ -3050,6 +3049,7 @@ struct PlayerScreen: View {
             mediaFileName: activeItem.displayName,
             forceUniversalPlayer: forcesUniversalPlayer,
             progressKey: activeItem.mediaKey,
+            danmakuMatchKey: danmakuMatchKey,
             nowPlaying: PlaybackNowPlayingMetadata(
                 title: activeItem.libraryTitle,
                 collectionTitle: activeItem.collectionTitle,
@@ -3142,20 +3142,16 @@ struct PlayerScreen: View {
         activeItem.collectionID.map { "collection:\($0)" } ?? "item:\(activeItem.id)"
     }
 
-    /// 读取用户修正过的弹幕作品名，重新打开播放器时仍可复用。
-    private var savedDanmakuSearchTitle: String? {
-        DanmakuBindingStore.searchTitle(for: danmakuSearchTitleKey)
+    /// 同一合集的不同季度分别确认，独立电影保留自己的偏好。
+    private var danmakuMatchKey: String {
+        let season = activeItem.season ?? ((activeItem.episode ?? activeItem.collectionIndex) == nil ? 0 : 1)
+        return "\(danmakuSearchTitleKey)|season:\(season)"
     }
 
-    /// 记住手动提交的作品名；具体播放页链接只作用于当前集，不传给下一集。
-    private func rememberDanmakuSearchTitle(_ keyword: String) {
-        let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty, !query.contains("://"),
-              query.range(of: #"(?i)^(?:BV[0-9A-Za-z]+|(?:ep|ss|ac)\d+|XN[0-9A-Za-z]+={0,2})$"#,
-                          options: .regularExpression) == nil else { return }
-        let title = TitleParser.parse(query).title
-        guard !title.isEmpty else { return }
-        DanmakuBindingStore.saveSearchTitle(title, for: danmakuSearchTitleKey)
+    /// 优先展示成功确认的搜索词，旧搜索词仅用于输入框，不影响自动匹配。
+    private var savedDanmakuSearchTitle: String? {
+        DanmakuBindingStore.confirmedMatch(for: danmakuMatchKey)?.searchTitle
+            ?? DanmakuBindingStore.searchTitle(for: danmakuSearchTitleKey)
     }
 
     /// 用媒体库的作品名、季号和集号生成匹配词，避免季目录或冗长文件名降低命中率。
@@ -3166,9 +3162,9 @@ struct PlayerScreen: View {
             of: #"(?i)^(?:season|series|s)\s*0*\d{1,3}$|^第?\s*0*\d{1,3}\s*[季期部]$"#,
             options: .regularExpression
         ) != nil
-        let title = savedDanmakuSearchTitle ?? (!collectionTitle.isEmpty && !isSeasonFolder
+        let title = !collectionTitle.isEmpty && !isSeasonFolder
             ? collectionTitle
-            : (parsedTitle.isEmpty ? activeItem.displayName : parsedTitle))
+            : (parsedTitle.isEmpty ? activeItem.displayName : parsedTitle)
         let episode = activeItem.episode ?? activeItem.collectionIndex
         guard let episode else { return title }
         return "\(title) S\(activeItem.season ?? 1)E\(episode)"
@@ -3857,7 +3853,6 @@ private struct PlaylistPicker: View {
 struct CandidatePicker: View {
     let viewModel: PlayerViewModel
     let initialKeyword: String?
-    let onSearchKeyword: (String) -> Void
     @State private var keyword = ""
     @State private var operationError: String?
     @State private var selectedSource: DanmakuSourceId?
@@ -4329,7 +4324,6 @@ struct CandidatePicker: View {
 
     /// 发起一次手动弹幕搜索。
     private func searchCandidates() {
-        onSearchKeyword(keyword)
         Task { await viewModel.search(keyword: keyword) }
     }
 
@@ -4346,7 +4340,7 @@ struct CandidatePicker: View {
     /// 加载已由用户确认的弹幕候选。
     private func loadCandidate(_ candidate: ProviderCandidate) {
         Task {
-            if await viewModel.loadDanmaku(for: candidate) { dismiss() }
+            if await viewModel.confirmCandidate(candidate) { dismiss() }
         }
     }
 

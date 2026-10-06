@@ -24,22 +24,24 @@ actor BuiltInPublicDanmakuClient {
 
     /// 搜索已启用的平台弹幕来源，并返回按置信度排序的候选。
     /// - Parameter request: 标题、可选集号和本地视频时长。
+    /// - Parameter source: 已确认的平台；nil 时搜索全部已启用来源。
     /// - Returns: 各平台合并后的候选列表。
-    func search(_ request: ResolveRequest) async -> [ProviderCandidate] {
+    func search(_ request: ResolveRequest, source: DanmakuSourceId? = nil) async -> [ProviderCandidate] {
         var candidates: [ProviderCandidate] = []
-        if enabledSources.contains(.iqiyi), let iqiyi = try? await searchIqiyi(request) {
+        let sources = source.map { enabledSources.intersection([$0]) } ?? enabledSources
+        if sources.contains(.iqiyi), let iqiyi = try? await searchIqiyi(request) {
             candidates.append(contentsOf: iqiyi)
         }
-        if enabledSources.contains(.qq), let qq = try? await searchQQ(request) {
+        if sources.contains(.qq), let qq = try? await searchQQ(request) {
             candidates.append(contentsOf: qq)
         }
-        if enabledSources.contains(.bahamut), let bahamut = try? await searchBahamut(request) {
+        if sources.contains(.bahamut), let bahamut = try? await searchBahamut(request) {
             candidates.append(contentsOf: bahamut)
         }
-        if enabledSources.contains(.acfun), let acfun = try? await searchAcfun(request) {
+        if sources.contains(.acfun), let acfun = try? await searchAcfun(request) {
             candidates.append(contentsOf: acfun)
         }
-        if enabledSources.contains(.youku), let youku = try? await searchYouku(request) {
+        if sources.contains(.youku), let youku = try? await searchYouku(request) {
             candidates.append(contentsOf: youku)
         }
         return candidates.sorted { left, right in
