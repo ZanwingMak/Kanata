@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f2">
+  <meta name="description" content="Kanata 隐私政策：了解媒体库、服务器凭证、弹幕、iCloud 同步及数据管理方式。">
+  <link rel="canonical" href="https://zanwingmak.github.io/Kanata/privacy.html">
+  <link rel="icon" type="image/png" href="./assets/app-icon.png">
+  <link rel="stylesheet" href="./styles.css">
+  <title>隐私政策 · Kanata</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="site-header"><nav class="navigation wrap" aria-label="主导航"><a class="brand" href="./"><img src="./assets/app-icon.png" width="38" height="38" alt=""><span>Kanata<span class="brand-note">你的私人影院</span></span></a><a class="nav-download" href="./">返回官网 <span aria-hidden="true">↗</span></a></nav></header>
+  <main class="legal-page wrap" id="main">
+    <p class="eyebrow">PRIVACY POLICY</p><h1>隐私政策</h1>
+    <p class="legal-meta">生效及更新日期：2026 年 10 月 11 日 · 适用于 Kanata 应用与官网</p>
+    <p>Kanata 由个人开发者 ZanwingMak 维护。我们重视你的隐私：应用以本机处理为主，不要求注册 Kanata 账户，不内置广告或行为分析 SDK，也不使用数据追踪来投放广告。本政策说明数据如何保存在你的设备、何时发送到你选择的服务，以及你可以怎样管理这些数据。</p>
+    <section><h2>1. 本机处理与存储</h2><ul>
+      <li><strong>媒体库与观看记录：</strong>应用在本机保存媒体名称、地址、目录索引、季集信息、播放进度、收藏、合集编排、弹幕匹配和显示偏好，用于整理与继续观看。</li>
+      <li><strong>媒体与字幕文件：</strong>仅在你选择或授权后读取本地文件、文件夹、媒体服务器内容与字幕。Kanata 不把你的视频上传给开发者。</li>
+      <li><strong>凭证：</strong>Apple 应用在本机 Keychain 保存服务器密码、令牌、平台会话、API Key 等敏感配置。不会把这些凭证写入 iCloud 同步快照。凭证仍会在连接你指定的服务器、平台或网关时按功能需要发送，详见第 2 节。</li>
+      <li><strong>缓存：</strong>在线及导入弹幕、下载的字幕、字体等保存在本机，以支持渲染、减少重复请求及离线观看。在线弹幕缓存受设置中的容量上限约束。</li>
+    </ul></section>
+    <section><h2>2. 你选择的网络服务</h2><p>连接或使用在线功能时，请求会发送到相应服务。服务通常能够看到网络 IP 地址、请求时间以及该功能需要的请求内容。</p><ul>
+      <li><strong>NAS 与媒体服务器：</strong>WebDAV、Jellyfin、Emby、Plex、群晖及你提供的直链服务会接收必要的地址、认证信息和媒体读取请求；部分媒体服务器还会接收播放状态与转码请求。</li>
+      <li><strong>弹幕来源：</strong>作品关键词、标题、季集信息、视频标识以及匹配所需的文件指纹可能被发送到你启用的弹幕平台或网关。文件指纹用于识别媒体，不代表上传完整视频文件。</li>
+      <li><strong>自托管或第三方网关：</strong>你配置并使用的网关会接收匹配与下载请求。配置了 B 站会话时，应用可能把必要会话字段转送给该网关用于请求弹幕。请仅连接自己信任的服务；第三方网关的数据保留与安全措施由其运营者负责。</li>
+      <li><strong>在线字幕：</strong>使用在线字幕时，启用的字幕服务会接收作品搜索、语言、下载请求，以及你填写的 API Key 等必要认证信息。</li>
+      <li><strong>手机辅助配置：</strong>Apple TV 在你启用此功能时提供临时局域网配置页面。手机将表单发送至该 Apple TV，可能包含服务器地址和凭证；请在可信局域网使用。配置页面不是开发者运营的云端服务。</li>
+    </ul><p>以上服务由你选择或启用，使用也受相应服务的隐私政策与条款约束。Kanata 不将这些信息用于广告画像或出售数据。你可关闭相关来源、退出平台登录、移除媒体源或停止使用网关，停止后续相应请求。HTTP 连接不提供 HTTPS 的传输保护，建议在服务支持时使用 HTTPS。</p></section>
+    <section><h2>3. 可选的 iCloud 同步</h2><p>跨设备同步初始为关闭；你开启后，应用使用 Apple iCloud Key-Value Storage 同步媒体库索引、非敏感媒体源配置、观看进度、收藏、合集编排、弹幕绑定及显示偏好。同步内容可能包含媒体名称和已脱敏的服务器地址，因此也可能反映观看偏好。</p><p>密码、令牌、平台 Cookie、本地文件书签、视频文件和弹幕缓存不包含在此同步快照中。开发者不能通过 Kanata 服务器读取你的 iCloud 快照；Apple 按其隐私政策提供 iCloud 服务。关闭同步会停止应用后续同步，但不等同于删除已存储的云端数据。</p></section>
+    <section><h2>4. Apple 服务、自愿支持与反馈</h2><p>App Store、TestFlight、iCloud 和可用的应用内购买由 Apple 提供。Apple 可能按你与 Apple 的设置和协议处理购买、分发及诊断数据，开发者可能收到 Apple 提供的汇总报告、测试反馈或崩溃报告。自愿支持项目通过 StoreKit 处理，Kanata 不接收你的银行卡或支付密码。</p><p>你主动通过 TestFlight 或 GitHub 提交反馈时，我们会处理你提供的内容，用于沟通、排查和修复问题。GitHub Issues 是公开渠道，请勿上传密码、令牌、私人视频、完整服务器地址或其他敏感个人信息。需要处理隐私问题时，可先提交不含敏感信息的请求，由开发者协助确认后续处理方式。</p></section>
+    <section><h2>5. 官网与浏览器组件</h2><p>官网托管于 GitHub Pages，不放置行为分析、广告追踪脚本或用于追踪的 Cookie。GitHub 为提供托管和安全服务可能处理访问日志，具体见 <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub 隐私声明</a>。点击 App Store、TestFlight、GitHub 等链接后，进入相应第三方服务。</p><p>仓库中的浏览器播放器在你的浏览器中处理选取的文件，并按你设置的媒体地址和网关发起请求。浏览器缓存和权限可通过相应浏览器的站点数据设置管理。</p></section>
+    <section id="choices"><h2>6. 保留期限与数据管理</h2><p>本机媒体索引和偏好会保留至你移除或清理，缓存按容量策略清理或由你主动删除。你可以在设置中清除在线弹幕缓存和导入弹幕，退出 B 站登录；可以删除媒体源、清空填写的 API 凭据及移除合集。移除媒体库条目只移除 Kanata 索引，不会删除服务器原文件。</p><p>卸载应用通常会移除应用沙盒数据，但 Keychain 与 iCloud 数据可能保留。卸载前建议先清除不再使用的凭据和应用数据，并关闭同步。已存云端数据和第三方服务记录可通过相应服务的数据管理入口或联系该服务处理；删除本机条目不保证删除所有第三方副本。</p><p>反馈内容保留于对应反馈渠道，在处理问题及合理的项目维护需要期间使用。你可通过同一渠道提出访问、更正或删除请求；处理范围受该渠道能力、必要记录保留要求与适用法律约束。我们会在适用法律规定的期限内回应，不要求你公开敏感信息。</p></section>
+    <section><h2>7. 权限与未成年人</h2><p>应用仅在功能需要时使用系统文件选择器、局域网访问及用户提供的服务配置，不要求读取通讯录、定位或广告标识符。你可以在设备系统设置中调整相关权限；拒绝某项权限可能影响对应功能。Kanata 不是专门面向儿童的服务，不主动要求提供未成年人的个人信息。未成年人应在监护人指导下选择适龄内容并使用外部服务。</p></section>
+    <section><h2>8. 安全与政策更新</h2><p>应用使用本机 Keychain、系统权限及适用的 HTTPS 连接保护数据，但任何设备、网络或第三方服务均不能保证绝对安全。请保护设备与账户，及时更新应用，并仅连接可信服务器。政策发生实质变化时，我们会更新本页日期及相关应用说明；如依法需要进一步告知或取得同意，会按要求处理。</p></section>
+    <section><h2>9. 联系开发者</h2><p>运营与维护：个人开发者 ZanwingMak（Kanata 项目）。反馈渠道：<a href="https://github.com/ZanwingMak/Kanata/issues">Kanata GitHub Issues</a>。源代码仓库：<a href="https://github.com/ZanwingMak/Kanata">github.com/ZanwingMak/Kanata</a>。</p><p>相关服务：<a href="https://www.apple.com/legal/privacy/">Apple 隐私政策</a> · <a href="./terms.html">Kanata 服务条款</a></p></section>
+  </main>
+  <footer class="site-footer wrap"><a class="brand" href="./">Kanata</a><p>自己的片源。自己的节奏。自己的影院。</p><div><a href="./privacy.html" aria-current="page">隐私政策</a><a href="./terms.html">服务条款</a><a href="https://github.com/ZanwingMak/Kanata/issues">反馈 ↗</a></div></footer>
+</body>
+</html>
