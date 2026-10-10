@@ -174,11 +174,12 @@ final class AppSettings {
         let buvid3: String
     }
 
+    /// 从本机偏好和钥匙串恢复配置；完整功能仅恢复显式解锁状态，不因旧外观配置自动开启。
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let hasExistingInstallation = defaults.object(forKey: Keys.visualStyleVersion) != nil
         let fullFeatureAccessEnabled = defaults.object(forKey: Keys.fullFeatureAccessEnabled) as? Bool
-            ?? hasExistingInstallation
+            ?? false
         self.isFullFeatureAccessEnabled = fullFeatureAccessEnabled
         self.shouldShowFreeAppNotice = !hasExistingInstallation
             && !defaults.bool(forKey: Keys.freeAppNoticeShown)

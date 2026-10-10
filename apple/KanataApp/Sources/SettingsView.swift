@@ -1,8 +1,6 @@
 import KanataCore
 import SwiftUI
-#if os(iOS)
 import UIKit
-#endif
 
 /// 设置页：网关配置与源状态（FR-SET-001 / FR-SET-002）
 struct SettingsView: View {
@@ -10,6 +8,8 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(CloudSyncStore.self) private var cloudSync
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var selectedResource: KanataAppResource?
     @State private var testResult: String?
     @State private var isTesting = false
     @State private var sources: [SourceStatus] = []
@@ -476,6 +476,29 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("官网与法律信息") {
+                    ForEach(KanataAppResource.allCases) { resource in
+                        Button {
+                            #if os(tvOS)
+                            selectedResource = resource
+                            #else
+                            openURL(resource.url)
+                            #endif
+                        } label: {
+                            KanataRowLabel(
+                                title: resource.title,
+                                detail: resource.detail,
+                                symbol: resource.symbol
+                            )
+                        }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                    }
+                    #if os(tvOS)
+                    Text("选择入口后可用手机扫描二维码打开对应页面。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    #endif
+                }
+
                 Section {
                     Text("Kanata 不提供任何影视内容，也不提供弹弹play开放平台凭据。用户配置弹弹play渠道后，数据来源会标注为“弹弹play开放弹幕网络”；其他弹幕版权归对应平台与发送者所有，仅供个人观看时参考。")
                         .font(.caption)
@@ -535,6 +558,9 @@ struct SettingsView: View {
                 }
             } message: {
                 Text(clearConfirmationMessage)
+            }
+            .kanataModal(item: $selectedResource) { resource in
+                KanataResourceQRCodeView(resource: resource)
             }
             .alert("功能已解锁", isPresented: $isShowingFeatureAccessNotice) {
                 Button("好", role: .cancel) {}
@@ -750,7 +776,7 @@ struct SettingsView: View {
 
     /// 返回当前 App 的市场版本与构建号。
     private var appVersionLabel: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
         return "\(version) (\(build))"
     }
@@ -1084,6 +1110,113 @@ struct SettingsView: View {
             "凭证会从本机 Keychain 删除，之后将以匿名状态访问 B 站。"
         case nil:
             ""
+        }
+    }
+}
+
+/// 官方资源入口统一维护，避免两端的官网、政策和下载地址不一致。
+private enum KanataAppResource: String, CaseIterable, Identifiable {
+    case website, appStore, privacy, terms, testFlight
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .website: "Kanata 官网"
+        case .appStore: "App Store 商店页面"
+        case .privacy: "隐私政策"
+        case .terms: "服务条款"
+        case .testFlight: "TestFlight 公开测试"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .website: "应用介绍、使用帮助与最新信息"
+        case .appStore: "查看商店介绍、下载与更新"
+        case .privacy: "了解数据存储、同步和隐私选择"
+        case .terms: "了解使用规则与第三方服务说明"
+        case .testFlight: "加入公测，体验新版本并反馈问题"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .website: "globe"
+        case .appStore: "bag"
+        case .privacy: "hand.raised"
+        case .terms: "doc.text"
+        case .testFlight: "airplane"
+        }
+    }
+
+    var url: URL {
+        let address = switch self {
+        case .website: "https://zanwingmak.github.io/Kanata/"
+        case .appStore: "https://apps.apple.com/app/id6806893112"
+        case .privacy: "https://zanwingmak.github.io/Kanata/privacy.html"
+        case .terms: "https://zanwingmak.github.io/Kanata/terms.html"
+        case .testFlight: "https://testflight.apple.com/join/YbbZrdgv"
+        }
+        return URL(string: address)!
+    }
+}
+
+/// Apple TV 没有网页浏览器，通过二维码和可读地址打开官方资源。
+private struct KanataResourceQRCodeView: View {
+    let resource: KanataAppResource
+    @Environment(\.dismiss) private var dismiss
+    @State private var qrCode: UIImage?
+
+    var body: some View {
+        NavigationStack {
+            HStack(spacing: 64) {
+                VStack(alignment: .leading, spacing: 24) {
+                    Label(resource.title, systemImage: resource.symbol)
+                        .font(.title2.bold())
+                    Text(resource.detail).foregroundStyle(.secondary)
+                    Text("用手机相机扫描二维码，即可打开对应页面。")
+                        .font(.callout)
+                    Text(resource.url.absoluteString)
+                        .font(.callout.monospaced())
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if resource == .appStore {
+                        Text("若当前地区尚未开放商店页面，可先使用 TestFlight 公测入口。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: 540, alignment: .leading)
+                if let qrCode {
+                    Image(uiImage: qrCode)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 340, height: 340)
+                        .padding(24)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 18))
+                        .accessibilityLabel("\(resource.title)二维码")
+                } else {
+                    Text("可在手机浏览器输入左侧地址打开页面。")
+                        .frame(width: 340, height: 340)
+                }
+            }
+            .padding(48)
+            .kanataGlassSurface(cornerRadius: 28)
+            .padding(48)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background { KanataAmbientBackground() }
+            .navigationTitle(resource.title)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                        .buttonStyle(KanataSecondaryButtonStyle())
+                }
+            }
+            .task { qrCode = KanataQRCodeRenderer.image(from: resource.url.absoluteString) }
+            #if os(tvOS)
+            .onExitCommand { dismiss() }
+            #endif
         }
     }
 }

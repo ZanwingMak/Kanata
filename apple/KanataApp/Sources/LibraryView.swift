@@ -1445,7 +1445,7 @@ struct LibraryView: View {
         progressRevision += 1
     }
 
-    /// 扫描 App 的 Documents 目录，收录通过文件共享或 AirDrop 放进来的视频（FR-IMP-002）
+    /// 扫描 Documents 视频并按解析后的文件地址去重，避免重启或升级后重复收录（FR-IMP-002）。
     private func scanDocuments() async {
         guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
               let files = try? FileManager.default.contentsOfDirectory(
@@ -1457,7 +1457,11 @@ struct LibraryView: View {
         let danmakuFiles = files.filter(isDanmakuFile)
         var changed = false
         for file in files where isVideoFile(file) {
-            if !items.contains(where: { $0.id == file.lastPathComponent }),
+            let alreadyIndexed = items.contains {
+                $0.id == file.lastPathComponent
+                    || $0.resolveURL()?.standardizedFileURL == file.standardizedFileURL
+            }
+            if !alreadyIndexed,
                let item = LibraryItem(url: file) {
                 items.append(item)
                 changed = true
@@ -2802,17 +2806,22 @@ enum LibraryStore {
     private static let parserVersionKey = "library.title-parser-version"
     private static let parserVersion = 2
 
-    /// 读取媒体库，并在命名规则升级后一次性刷新旧条目的可推断元数据。
+    /// 读取媒体库，保留重复 ID 的首个原始条目，并按需刷新旧命名元数据；不删除媒体文件。
     /// - Returns: 当前媒体库条目。
     static func load() -> [LibraryItem] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let items = try? JSONDecoder().decode([LibraryItem].self, from: data) else {
             return []
         }
-        guard UserDefaults.standard.integer(forKey: parserVersionKey) < parserVersion else {
-            return items
+        var seenIDs = Set<String>()
+        let uniqueItems = items.filter { seenIDs.insert($0.id).inserted }
+        if uniqueItems.count != items.count {
+            save(uniqueItems, schedulesCloudPush: false)
         }
-        let refreshed = items.map { $0.refreshingParsedMetadata() }
+        guard UserDefaults.standard.integer(forKey: parserVersionKey) < parserVersion else {
+            return uniqueItems
+        }
+        let refreshed = uniqueItems.map { $0.refreshingParsedMetadata() }
         save(refreshed, schedulesCloudPush: false)
         UserDefaults.standard.set(parserVersion, forKey: parserVersionKey)
         return refreshed

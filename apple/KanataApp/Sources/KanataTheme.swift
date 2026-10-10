@@ -405,7 +405,14 @@ struct KanataSettingsForm<Content: View>: View {
             Form { content }.padding(.horizontal, 24)
         }
         #else
-        Form { content }
+        ScrollViewReader { proxy in
+            Form { content }
+                .task(id: initialScrollTarget) {
+                    guard let initialScrollTarget else { return }
+                    await Task.yield()
+                    proxy.scrollTo(initialScrollTarget, anchor: .top)
+                }
+        }
         #endif
     }
 }

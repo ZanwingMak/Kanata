@@ -2108,7 +2108,7 @@ struct PlayerScreen: View {
                 Spacer()
                 Text("正在播放").font(.subheadline.weight(.medium)).foregroundStyle(.white.opacity(0.65))
                 Spacer()
-                Button { isShowingPlaybackPanel = true } label: {
+                Button(action: presentPlaybackOptions) {
                     Image(systemName: "ellipsis").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("播放设置")
@@ -2155,7 +2155,7 @@ struct PlayerScreen: View {
                         Spacer(minLength: 0)
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 136), spacing: 12)], spacing: 12) {
-                        portraitAction("字幕与音轨", symbol: "captions.bubble") { isShowingPlaybackPanel = true }
+                        portraitAction("字幕与音轨", symbol: "captions.bubble", action: presentSubtitleOptions)
                         portraitAction("横屏全屏", symbol: "arrow.up.left.and.arrow.down.right", action: toggleLandscapeFullscreen)
                         portraitAction(settings.danmakuConfig.enabled ? "弹幕已开启" : "弹幕已关闭", symbol: "text.bubble") {
                             settings.danmakuConfig.enabled.toggle()
@@ -2244,9 +2244,7 @@ struct PlayerScreen: View {
                     .accessibilityLabel("选择弹幕来源")
                 }
                 #endif
-                Button {
-                    isShowingPlaybackPanel = true
-                } label: {
+                Button(action: presentPlaybackOptions) {
                     controlSymbol("ellipsis", prominent: false)
                 }
                 .buttonStyle(PlayerControlButtonStyle())
@@ -2654,24 +2652,31 @@ struct PlayerScreen: View {
         viewModel.isShowingCandidates = true
     }
 
-    /// 打开完整播放设置面板。
+    #endif
+
+    /// 打开完整播放设置面板，重置字幕定位；各平台复用入口，无参数或返回值。
     private func presentPlaybackOptions() {
         controlsTask?.cancel()
+        #if os(tvOS)
         isShowingTVQuickSettings = false
+        tvFocusedControl = nil
+        #endif
         playbackPanelStartsAtSubtitles = false
         isShowingPlaybackPanel = true
-        tvFocusedControl = nil
     }
 
     /// 直接聚焦播放设置中的字幕中心，避免字幕按钮落在播放分区。
     private func presentSubtitleOptions() {
         controlsTask?.cancel()
+        #if os(tvOS)
         isShowingTVQuickSettings = false
+        tvFocusedControl = nil
+        #endif
         playbackPanelStartsAtSubtitles = true
         isShowingPlaybackPanel = true
-        tvFocusedControl = nil
     }
 
+    #if os(tvOS)
     /// 收起右侧完整播放设置并恢复“更多”入口焦点。
     private func dismissTVPlaybackOptions() {
         isShowingPlaybackPanel = false
